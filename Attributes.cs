@@ -156,7 +156,7 @@ namespace Medicine
         /// </remarks>
         [MeansImplicitUse]
         [UsedImplicitly(WithMembers)]
-        [AttributeUsage(Class)]
+        [AttributeUsage(Class | Interface)]
         public sealed class Single : Attribute
         {
             // Supported types:
@@ -180,7 +180,7 @@ namespace Medicine
         /// </remarks>
         [MeansImplicitUse]
         [UsedImplicitly(WithMembers)]
-        [AttributeUsage(Class)]
+        [AttributeUsage(Class | Interface)]
         public sealed class All : Attribute
         {
             // Supported types:
