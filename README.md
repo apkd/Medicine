@@ -55,7 +55,7 @@ class Player : MonoBehaviour
     void OnEnable()
     {
         Debug.Log($"There's the level manager: {levelManager}");
-        Debug.Log($"I'm sensing some enemies lurking nearby: {enemies.Length}")
+        Debug.Log($"I'm sensing some enemies lurking nearby: {enemies.Length}");
 
         foreach (var enemy in enemies)
             Debug.Log($"Here's one: {enemy.name}");
