@@ -7,11 +7,13 @@
   "dependencies": {
     "nuget.mono-cecil": "0.1.6-preview"
   },
-  "description": "",
+  "type": "tool",
   "keywords": [
     "medicine",
     "di",
     "dependency injection",
     "inject"
-  ]
+  ],
+  "hideInEditor": false,
+  "description": "Medicine is a code-driven, performance-oriented way to automatically hook up references between your components. Additionally, it comes with a toolbox of optimized versions of many component-related operations."
 }
