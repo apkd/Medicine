@@ -8,6 +8,8 @@ Sick and tired of assigning references between components by hand (and losing th
 > **Warning!** This library is experimental. Please [let me know](https://github.com/apkd/medicine/issues) about any issues you encounter.
 
 ## How to install
+Compatibility: ***Unity 2019.3 or newer***
+
 Open "Add package from git URL" in the Unity Package Manager and paste the repository URL:
 ##### `https://github.com/apkd/Medicine.git`
 
