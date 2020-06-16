@@ -416,7 +416,7 @@ Equivalent to regular `[Inject]`, but returns the current value every time the p
 ## FAQ
 
 ##### How does this work?
-The library uses an `ILPostProcessor` (based on [Mono.Cecil](https://github.com/Unity-Technologies/cecil)) to modify compiled assemblies. This allows it to emit additional method calls and error checks based on the attributes you placed in your code. Here's a [before]() and [after]() comparison of how the post-processing works.
+The library uses an `ILPostProcessor` (based on [Mono.Cecil](https://github.com/Unity-Technologies/cecil)) to modify compiled assemblies. This allows it to emit additional method calls and error checks based on the attributes you placed in your code. Here's a [before and after](https://gist.github.com/apkd/406df729fa2d8ba78a50a01d4d4b4468) comparison of how the post-processing works.
 This approach is similar to how UNET used to work and how the `Entities.ForEach`/`Job.WithCode` ECS syntax is currently implemented.
 
 ##### Known issues
