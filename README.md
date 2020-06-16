@@ -226,7 +226,7 @@ class LazyTricks : MonoBehaviour
     Transform[] parentTransforms { get; }
 
     void WhereAmI() // always up to date
-        => Debug.Log(string.Join(" -> ", parentTransforms.Select(x => x.Name))));
+        => Debug.Log(string.Join(" -> ", parentTransforms.Select(x => x.name)));
 }
 ```
 ```csharp
