@@ -37,7 +37,7 @@ namespace Medicine
         public static T[] FindObjectsOfType<T>() where T : Object
         {
             var array = Object.FindObjectsOfType(typeof(T));
-            UnsafeInternal.SetManagedObjectType<T[]>(array);
+            Unsafe.SetManagedObjectType<T[]>(array);
             return array as T[];
         }
 #endif
