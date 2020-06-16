@@ -3,7 +3,7 @@
 
 Sick and tired of assigning references between components by hand (and losing them when something goes wrong with Unity serialization)? Having a migraine from all the `GetComponent` calls sprinkled all over your codebase?
 
-***Medicine*** is a collection of attributes that give you a code-driven, performance-oriented way to automatically hook up references between your components. Additionally, it comes with a toolbox of optimized versions of many component-related operations.
+***Medicine*** is a collection of attributes that give you a code-driven, performance-oriented way to automatically hook up references between your components. Additionally, it comes with a toolbox of optimized versions of many standard component-related operations.
 
 > **Warning!** This library is experimental. Please [let me know](https://github.com/apkd/medicine/issues) about any issues you encounter.
 
@@ -412,6 +412,47 @@ This creates a static collection of active instances of this type. The objects w
 
 ### [Inject.Lazy], [Inject.FromChildren.Lazy], [Inject.FromParents.Lazy]
 Equivalent to regular `[Inject]`, but returns the current value every time the property is accessed (no caching, no null/empty checks).
+
+### Medicine.NonAlloc
+**Collection of useful functions for high-performance Unity programming.**
+
+* `T[] FindObjectsOfType<T>(bool includeInactive = false)`
+
+    Faster version of `Object.FindObjectsOfType<T>` (skips unnecessary array copying).
+
+* `T[] FindObjectsOfTypeAll<T>()`
+
+    Faster version of `Resources.FindObjectsOfTypeAll<T>` (skips unnecessary array copying).
+
+* `T[] LoadAll<T>(string path)`
+
+    Faster version of `Resources.LoadAll<T>` (skips unnecessary array copying).
+
+* `T[] GameObject.GetComponentsNonAlloc<T>()`
+
+    Extension method. Non-allocating version of `GameObject.GetComponents<T>`. This re-uses the same static memory buffer to store the component array, so make sure you do not store the array reference anywhere.
+
+* `T[] GameObject.GetComponentsInChildrenNonAlloc<T>(bool includeInactive = false)`
+
+    Extension method. Non-allocating version of `GameObject.GetComponentsInChildren<T>`. This re-uses the same static memory buffer to store the component array, so make sure you do not store the array reference anywhere.
+
+* `T[] GameObject.GetComponentsInParentNonAlloc<T>(bool includeInactive = false)`
+
+    Extension method. Non-allocating version of `GameObject.GetComponentsInParent<T>`. This re-uses the same static memory buffer to store the component array, so make sure you do not store the array reference anywhere.
+
+* `T[] GameObject.GetComponentsInParentNonAlloc<T>(bool includeInactive = false)`
+
+    Extension method. Non-allocating version of `GameObject.GetComponentsInParent<T>`. This re-uses the same static memory buffer to store the component array, so make sure you do not store the array reference anywhere.
+
+* `T[] GetArray<T>(int length, bool clear = true) where T : class`
+
+    Returns a temporary array of given length. This re-uses the same static memory buffer, so make sure you do not store the array reference anywhere.
+
+* `List<T> GetList<T>(bool clear = true) where T : class`
+
+    Returns a temporary generic list of given length. This re-uses the same static memory buffer, so make sure you do not store the list reference anywhere.
+
+> **WARNING: Improper handling of the temporary array *will* cause your app to crash.** Make sure you know what you're doing if you're planning to use these APIs. (Never store the temporary array reference outside of the local scope, do not use multiple temporary arrays at the same time)
 
 ## FAQ
 
