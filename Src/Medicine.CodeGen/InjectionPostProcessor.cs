@@ -293,10 +293,15 @@ namespace Medicine
                             //todo: EnsureBaseOnEnableOnDisableAreCalled(type);
                         }
 
+                        if (type.IsInterface)
+                            continue;
+
                         if (registerAll)
                         {
+                            // register type as itself
                             EmitCollectionTypeRegistration(registeredAs: type, implementedBy: type);
 
+                            // register type as all interfaces it implements
                             foreach (var interfaceImplementation in type.Interfaces)
                                 if (interfaceImplementation.InterfaceType.ResolveFast() is var interfaceType)
                                     if (interfaceType.HasAttribute<Register.All>())
@@ -305,8 +310,10 @@ namespace Medicine
 
                         if (registerSingle)
                         {
+                            // register type as itself
                             EmitSingletonTypeRegistration(registeredAs: type, implementedBy: type);
 
+                            // register type as all interfaces it implements
                             foreach (var interfaceImplementation in type.Interfaces)
                                 if (interfaceImplementation.InterfaceType.ResolveFast() is var interfaceType)
                                     if (interfaceType.HasAttribute<Register.Single>())
