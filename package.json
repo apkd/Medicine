@@ -1,0 +1,17 @@
+{
+  "name": "pl.apkd.medicine",
+  "displayName": "Medicine",
+  "version": "1.0.0-preview",
+  "unity": "2020.1",
+  "unityRelease": "0b11",
+  "dependencies": {
+    "nuget.mono-cecil": "0.1.6-preview"
+  },
+  "description": "",
+  "keywords": [
+    "medicine",
+    "di",
+    "dependency injection",
+    "inject"
+  ]
+}

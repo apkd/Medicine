@@ -1,0 +1,21 @@
+{
+    "name": "Medicine.Tests",
+    "references": [
+        "Medicine"
+    ],
+    "includePlatforms": [
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "autoReferenced": false,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

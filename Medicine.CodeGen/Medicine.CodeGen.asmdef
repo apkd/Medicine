@@ -1,0 +1,23 @@
+{
+    "name": "Unity.Medicine.CodeGen",
+    "references": [
+        "GUID:9d802ac6321ed6f499c8de1b6ee4ec88"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Mono.Cecil.dll",
+        "Mono.Cecil.Rocks.dll",
+        "Mono.Cecil.Pdb.dll",
+        "Unity.IL2CPP",
+        "Unity.IL2CPP.Common"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
