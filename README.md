@@ -1,5 +1,5 @@
 ﻿# Me*di*cine
-### Code-driven dependency management toolkit for [Unity](https://unity.com/).
+### Code-driven component injection toolkit for [Unity](https://unity.com/).
 
 Sick and tired of assigning references between components by hand (and losing them when something goes wrong with Unity serialization)? Having a migraine from all the `GetComponent` calls sprinkled all over your codebase?
 
