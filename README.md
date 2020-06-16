@@ -3,7 +3,7 @@
 
 Sick and tired of assigning references between components by hand (and losing them when something goes wrong with Unity serialization)? Having a migraine from all the `GetComponent` calls sprinkled all over your codebase?
 
-***Medicine*** is a code-driven, performance-oriented way to automatically hook up references between your components. Additionally, it comes with a toolbox of optimized versions of many component-related operations.
+***Medicine*** is a collection of attributes that give you a code-driven, performance-oriented way to automatically hook up references between your components. Additionally, it comes with a toolbox of optimized versions of many component-related operations.
 
 > **Warning!** This library is experimental. Please [let me know](https://github.com/apkd/medicine/issues) about any issues you encounter.
 
