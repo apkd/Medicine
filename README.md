@@ -183,7 +183,7 @@ class UsabilityTricks : MonoBehaviour
     [Inject.FromChildren]
     Transform[] childTransforms { get; }
 
-    // by default disabled components are omitted
+    // components on inactive child GameObjects are omitted by default
     // (see: https://docs.unity3d.com/ScriptReference/Component.GetComponentsInChildren.html)
     [Inject.FromChildren(IncludeInactive = true)]
     Collider[] colliders { get; }
