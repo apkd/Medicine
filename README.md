@@ -413,6 +413,8 @@ This creates a static collection of active instances of this type. The objects w
 ### [Inject.Lazy], [Inject.FromChildren.Lazy], [Inject.FromParents.Lazy]
 Equivalent to regular `[Inject]`, but returns the current value every time the property is accessed (no caching, no null/empty checks).
 
+> **WARNING: The Inject.Lazy APIs use reuse the same static memory buffer to avoid allocating arrays. Improper handling of the result array *will* cause your app to crash.** Make sure you know what you're doing if you're planning to use these APIs. (Never store the temporary array reference outside of the local scope, do not use multiple temporary arrays at the same time)
+
 ### Medicine.NonAlloc
 **Collection of useful functions for high-performance Unity programming.**
 
