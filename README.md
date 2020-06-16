@@ -1,5 +1,6 @@
 ﻿# Me*di*cine
-#### Code-driven dependency management toolkit for [Unity](https://unity.com/)
+### Code-driven dependency management toolkit for [Unity](https://unity.com/).
+
 Sick and tired of assigning references between components by hand (and losing them when something goes wrong with Unity serialization)? Having a migraine from all the `GetComponent` calls sprinkled all over your codebase?
 
 ***Medicine*** is a code-driven, performance-oriented way to automatically hook up references between your components. Additionally, it comes with a toolbox of optimized versions of many component-related operations.
