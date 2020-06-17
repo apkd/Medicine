@@ -1,4 +1,4 @@
-﻿# Me*di*cine
+# Me*di*cine
 ### Code-driven component injection toolkit for [Unity](https://unity.com/).
 
 Sick and tired of assigning references between components by hand (and losing them when something goes wrong with Unity serialization)? Having a migraine from all the `GetComponent` calls sprinkled all over your codebase?
@@ -75,13 +75,13 @@ class Player : MonoBehaviour
 
 // indicates that we want to to be able to inject all active instances of this script using [Inject.All].
 // this array is always up-to-date
-// (even if you create/destroy Enemy instances at runtime!)
+// (even if you create/destroy registered object instances at runtime!)
 [Register.All]
 class Enemy : MonoBehaviour { /* implementation goes here */ }
 
 // indicates that there will only ever be one instance of this script active in the game at any given time.
 // properties injected with [Inject.Single] are always up-to-date
-// (even if you replace your GameManager instance at runtime!)
+// (even if you replace your singleton instance at runtime!)
 [Register.Single]
 class LevelManager : MonoBehaviour { /* implementation goes here */ }
 
