@@ -320,6 +320,8 @@ Collider[] allColliders { get; }
 In order for the object to register itself as a singleton, the type needs to be marked with `[Register.Single]`.
 Can be used on static properties.
 
+> Protip: you can inject the main camera, too! Simply tag your camera property with `[Inject.Single]` and it will automatically return a cached reference to `Camera.Main`.
+
 Examples:
 ```csharp
 [Register.Single] // ScriptableObject-based singleton.
@@ -349,6 +351,10 @@ class Gun : MonoBehaviour
     // our BulletSpawner instance is automatically available here
     [Inject.Single]
     BulletSpawner bulletSpawner { get; }
+
+    // resolves Camera.main and returns a cached reference until the camera is destroyed
+    [Inject.Single]
+    Camera camera { get; }
 
     void Fire()
         => bulletSpawner.SpawnBullet(transform.position, transform.rotation, transform.forward);
