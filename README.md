@@ -322,31 +322,6 @@ Can be used on static properties.
 
 Examples:
 ```csharp
-class BulletUpdater : MonoBehaviour
-{
-    // this property lets you access all active bullets in the game
-    [Inject.All]
-    public Bullet[] allBullets { get; }
-
-    void Update()
-    {
-        foreach (var bullet in allBullets)
-            /* do something with bullet */
-    }
-}
-
-[Register.All] // allows this class to be injected using [Inject.All]
-class Bullet : MonoBehaviour { }
-
-```
-
-### [Inject.All]
-**Never lose track of your component's instances again! Makes the property return the set of currently active objects of this type.**
-
-In order for the object to register itself in the active objects collection, the type needs to be marked with `[Register.All]`.
-Can be used on static properties.
-
-```csharp
 [Register.Single] // ScriptableObject-based singleton.
                   // you need to put it in the "preloaded assets" in Project Settings 
 class BulletConfig : ScriptableObject
@@ -378,6 +353,32 @@ class Gun : MonoBehaviour
     void Fire()
         => bulletSpawner.SpawnBullet(transform.position, transform.rotation, transform.forward);
 }
+```
+
+### [Inject.All]
+**Never lose track of your component's instances again! Makes the property return the set of currently active objects of this type.**
+
+In order for the object to register itself in the active objects collection, the type needs to be marked with `[Register.All]`.
+Can be used on static properties.
+
+Examples:
+```csharp
+class BulletUpdater : MonoBehaviour
+{
+    // this property lets you access all active bullets in the game
+    [Inject.All]
+    public Bullet[] allBullets { get; }
+
+    void Update()
+    {
+        foreach (var bullet in allBullets)
+            /* do something with bullet */
+    }
+}
+
+[Register.All] // allows this class to be injected using [Inject.All]
+class Bullet : MonoBehaviour { }
+
 ```
 
 ### [Register.Single]
