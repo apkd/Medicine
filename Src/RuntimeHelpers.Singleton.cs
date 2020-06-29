@@ -73,7 +73,7 @@ namespace Medicine
             [MethodImpl(AggressiveInlining)]
             public static TSingleton GetInstance()
             {
-                if (!ApplicationIsPlaying)
+                if (!ApplicationIsPlaying && !(instance is ScriptableObject))
                     return ErrorEditMode();
 
                 // ReSharper disable once Unity.NoNullCoalescing
