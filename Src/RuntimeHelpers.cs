@@ -101,6 +101,14 @@ namespace Medicine
                 => context.GetComponentsInParentNonAlloc<T>(includeInactive: true);
         }
 
+#if UNITY_EDITOR
+        // forces preloaded assets initialization in editor
+        // inexplicably, Unity doesn't do this by default
+        [UnityEditor.InitializeOnLoadMethod]
+        public static void EditorInitializeOnLoad()
+            => UnityEditor.PlayerSettings.GetPreloadedAssets();
+#endif
+
         /// <summary>
         /// Re-initializes the properties injected using the [Inject] attribute family.
         /// This is useful when you've made changes to the GameObject's hierarchy or removed/added
