@@ -449,7 +449,7 @@ namespace Medicine
                 if (GetBaseMethod() is MethodDefinition baseMethod)
                 {
                     il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Call, baseMethod);
+                    il.Emit(OpCodes.Call, baseMethod.Import());
                 }
 
                 il.Emit(OpCodes.Ret);
