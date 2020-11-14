@@ -1,4 +1,6 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.Serialization;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 using UnityEngine;
 using Obj = UnityEngine.Object;
@@ -15,6 +17,8 @@ namespace Medicine
         public static class Singleton<TSingleton> where TSingleton : Obj
         {
             static TSingleton instance;
+
+            static TSingleton uninitializedInstance;
 
             /// <summary>
             /// Register the object as the active <see cref="TSingleton"/> instance.
@@ -73,17 +77,49 @@ namespace Medicine
             [MethodImpl(AggressiveInlining)]
             public static TSingleton GetInstance()
             {
-                if (!ApplicationIsPlaying && !(instance is ScriptableObject))
-                    return ErrorEditMode();
+#if UNITY_EDITOR
+                if (!ApplicationIsPlaying)
+                {
+                    if (instance)
+                        return instance;
 
-                // ReSharper disable once Unity.NoNullCoalescing
-                // we can safely use reference comparison assuming objects always unregister themselves in OnDestroy
-                return instance ?? ErrorNoSingletonInstance();
+                    return instance = TryFindObjectByType() ?? TryFindScriptableObject() ?? ErrorNoSingletonInstance();
+                }
+                else
+#endif
+                {
+                    // ReSharper disable once Unity.NoNullCoalescing
+                    // we can safely use reference comparison assuming objects always unregister themselves in OnDestroy
+                    return instance ?? TryFindScriptableObject() ?? ErrorNoSingletonInstance();
+                }
             }
 
-            static TSingleton ErrorEditMode()
+            static TSingleton TryFindObjectByType()
             {
-                Debug.LogError($"Cannot acquire singleton instance in edit mode: <i>{typeof(TSingleton).Name}</i>");
+                var objectsOfType = NonAlloc.FindObjectsOfType<TSingleton>();
+
+                return objectsOfType.Length > 0
+                    ? objectsOfType[0]
+                    : null;
+            }
+
+            static TSingleton TryFindScriptableObject()
+            {
+                // create static noninitialized instance for fast inheritance checks
+                if (ReferenceEquals(uninitializedInstance, null))
+                    uninitializedInstance = FormatterServices.GetUninitializedObject(typeof(TSingleton)) as TSingleton;
+
+                // give up unless derived from ScriptableObject
+                if (!(uninitializedInstance is ScriptableObject))
+                    return null;
+
+                // try find ScriptableObject instance in preloaded assets
+                var preloadedAssets = UnityEditor.PlayerSettings.GetPreloadedAssets();
+
+                foreach (var asset in preloadedAssets)
+                    if (asset is TSingleton singleton)
+                        return singleton;
+
                 return null;
             }
 
