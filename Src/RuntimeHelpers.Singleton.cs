@@ -113,12 +113,14 @@ namespace Medicine
                 if (!(uninitializedInstance is ScriptableObject))
                     return null;
 
+#if UNITY_EDITOR
                 // try find ScriptableObject instance in preloaded assets
                 var preloadedAssets = UnityEditor.PlayerSettings.GetPreloadedAssets();
 
                 foreach (var asset in preloadedAssets)
                     if (asset is TSingleton singleton)
                         return singleton;
+#endif
 
                 return null;
             }
