@@ -129,7 +129,7 @@ namespace Medicine
                     return;
 
                 void* ptr = UnsafeUtility.PinGCObjectAndGetAddress(InternalList, out ulong gcHandle);
-                var array = MedicineUnsafeUtility.AsRef<ListHeader>(ptr).Array;
+                var array = UnsafeUtility.AsRef<ListHeader>(ptr).Array;
                 UnsafeUtility.ReleaseGCObject(gcHandle);
                 InternalBackingArray = array;
                 actualCapacity = capacity;
@@ -184,8 +184,8 @@ namespace Medicine
                 currentType = type;
                 void* arrayPtr = UnsafeUtility.PinGCObjectAndGetAddress(InternalBackingArray, out ulong arrayGcHandle);
                 void* listPtr = UnsafeUtility.PinGCObjectAndGetAddress(InternalList, out ulong listGcHandle);
-                MedicineUnsafeUtility.AsRef<ObjectHeader>(arrayPtr) = TypeHeaders<T[]>.Header;
-                MedicineUnsafeUtility.AsRef<ObjectHeader>(listPtr) = TypeHeaders<List<T>>.Header;
+                UnsafeUtility.AsRef<ObjectHeader>(arrayPtr) = TypeHeaders<T[]>.Header;
+                UnsafeUtility.AsRef<ObjectHeader>(listPtr) = TypeHeaders<List<T>>.Header;
                 UnsafeUtility.ReleaseGCObject(arrayGcHandle);
                 UnsafeUtility.ReleaseGCObject(listGcHandle);
             }

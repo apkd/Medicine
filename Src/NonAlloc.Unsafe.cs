@@ -16,7 +16,7 @@ namespace Medicine
             public static unsafe T[] GetInternalArray<T>(List<T> list)
             {
                 void* ptr = UnsafeUtility.PinGCObjectAndGetAddress(list, out ulong gcHandle);
-                var array = MedicineUnsafeUtility.AsRef<ListHeader>(ptr).Array;
+                var array = UnsafeUtility.AsRef<ListHeader>(ptr).Array;
                 UnsafeUtility.ReleaseGCObject(gcHandle);
                 return array as T[];
             }
@@ -28,7 +28,7 @@ namespace Medicine
                     return;
 
                 void* ptr = UnsafeUtility.PinGCObjectAndGetAddress(array, out ulong gcHandle);
-                MedicineUnsafeUtility.AsRef<ArrayHeader>(ptr).ManagedArrayLength = length;
+                UnsafeUtility.AsRef<ArrayHeader>(ptr).ManagedArrayLength = length;
                 UnsafeUtility.ReleaseGCObject(gcHandle);
             }
 
@@ -36,7 +36,7 @@ namespace Medicine
             public static unsafe void SetListBackingArray(object InternalList, Array array)
             {
                 void* ptr = UnsafeUtility.PinGCObjectAndGetAddress(InternalList, out ulong gcHandle);
-                MedicineUnsafeUtility.AsRef<ListHeader>(ptr).Array = array;
+                UnsafeUtility.AsRef<ListHeader>(ptr).Array = array;
                 UnsafeUtility.ReleaseGCObject(gcHandle);
             }
 
@@ -44,7 +44,7 @@ namespace Medicine
             public static unsafe void SetManagedObjectType<T>(object source)
             {
                 void* ptr = UnsafeUtility.PinGCObjectAndGetAddress(source, out ulong gcHandle);
-                MedicineUnsafeUtility.AsRef<ObjectHeader>(ptr) = TypeHeaders<T>.Header;
+                UnsafeUtility.AsRef<ObjectHeader>(ptr) = TypeHeaders<T>.Header;
                 UnsafeUtility.ReleaseGCObject(gcHandle);
             }
         }
