@@ -12,9 +12,7 @@ static class SingletonObjectHeaderGUI
 
     static readonly GUIContent label = new GUIContent(
         text: "Set as current active singleton instance",
-        tooltip: "This adds the ScriptableObject to Preloaded Assets (in Player Settings), which " +
-                 "makes it the object instance that will be resolved by [Inject.Single]. You can " +
-                 "do this manually (or from script) by swapping the instance in Preloaded Assets."
+        tooltip: "This adds the ScriptableObject to Preloaded Assets (in Player Settings), which makes it resolvable using [Inject.Single]."
     );
 
     static SingletonObjectHeaderGUI()
@@ -62,8 +60,6 @@ static class SingletonObjectHeaderGUI
             height: 14,
             options: Array.Empty<GUILayoutOption>()
         );
-        controlRect.x += 8;
-        controlRect.y -= 4;
 
         var oldColor = GUI.color;
         var color = oldColor;

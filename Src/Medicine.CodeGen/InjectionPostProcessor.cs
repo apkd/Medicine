@@ -17,11 +17,11 @@ using TypeAttributes = Mono.Cecil.TypeAttributes;
 namespace Medicine
 {
     /// <summary> Exceptions that indicate compiler warnings (recoverable errors). </summary>
-    sealed class CompilationWarningException : Exception
+    sealed class MedicineWarning : Exception
     {
         public MethodDefinition Site { get; }
 
-        public CompilationWarningException(string message, PropertyDefinition property) : base(message)
+        public MedicineWarning(string message, PropertyDefinition property) : base(message)
             => Site = property.GetMethod
                       ?? property.SetMethod
                       ?? property.DeclaringType.Properties.FirstOrDefault(x => x.GetMethod != null)?.GetMethod
@@ -30,11 +30,11 @@ namespace Medicine
     }
 
     /// <summary> Exceptions that indicate compiler errors (unrecoverable errors, eg. ones that occur mid-weaving). </summary>
-    sealed class CompilationErrorException : Exception
+    sealed class MedicineError : Exception
     {
         public MethodDefinition Site { get; }
 
-        public CompilationErrorException(string message, TypeDefinition type) : base(message)
+        public MedicineError(string message, TypeDefinition type) : base(message)
             => Site = type.Properties.FirstOrDefault(x => x.GetMethod != null)?.GetMethod
                       ?? type.Properties.FirstOrDefault(x => x.SetMethod != null)?.SetMethod
                       ?? type.Methods.FirstOrDefault(x => x.DebugInformation != null);
@@ -132,13 +132,11 @@ namespace Medicine
                     try
                     {
                         // try to resolve PropertyType to abort early if something's wrong
-                        propertyType = property.PropertyType.ResolveFast();
-                        if (propertyType == null)
-                            throw new InvalidOperationException();
+                        propertyType = property.PropertyType.ResolveFast() ?? throw new NullReferenceException();
                     }
                     catch
                     {
-                        throw new CompilationWarningException($"Unknown property type: {property.PropertyType.FullName}", property);
+                        throw new MedicineWarning($"Unknown property type: {property.PropertyType.FullName}", property);
                     }
 
                     var isInterface = propertyType.IsInterface;
@@ -151,13 +149,13 @@ namespace Medicine
                     if (attribute.Is<Inject.Single>())
                     {
                         if (!isInterface && !isCamera && !isMonoBehaviour && !isScriptableObject)
-                            throw new CompilationWarningException($"Type of property with [Inject.Single] needs to be a MonoBehaviour, a ScriptableObject, UnityEngine.Camera or an interface.", property);
+                            throw new MedicineWarning($"Type of property with [Inject.Single] needs to be a MonoBehaviour, a ScriptableObject, UnityEngine.Camera or an interface.", property);
 
                         if (isArray)
-                            throw new CompilationWarningException($"Type of property with [Inject.Single] must not be an array.", property);
+                            throw new MedicineWarning($"Type of property with [Inject.Single] must not be an array.", property);
 
                         if (property.SetMethod != null)
-                            throw new CompilationWarningException($"Property with [Inject.Single] must not have a setter.", property);
+                            throw new MedicineWarning($"Property with [Inject.Single] must not have a setter.", property);
 
                         if (isCamera)
                         {
@@ -167,7 +165,7 @@ namespace Medicine
                         else
                         {
                             if (!propertyType.HasAttribute<Register.Single>())
-                                throw new CompilationWarningException($"Type <i><b>{propertyType.FullName}</b></i> needs to be decorated with the [Register.Single] attribute in order to support singleton injection.", property);
+                                throw new MedicineWarning($"Type <i><b>{propertyType.FullName}</b></i> needs to be decorated with the [Register.Single] attribute in order to support singleton injection.", property);
 
                             // resolve object registered using [Register.Single]
                             ReplacePropertyGetterWithHelperMethod(type, property, MethodInfos.RuntimeHelpers.Singleton.GetInstance);
@@ -179,17 +177,17 @@ namespace Medicine
                     if (attribute.Is<Inject.All>())
                     {
                         if (!isInterface && !isMonoBehaviour && !isScriptableObject)
-                            throw new CompilationWarningException($"Type of property with [Inject.Single] needs to be an array of MonoBehaviours, ScriptableObjects, or interfaces.", property);
+                            throw new MedicineWarning($"Type of property with [Inject.Single] needs to be an array of MonoBehaviours, ScriptableObjects, or interfaces.", property);
 
                         if (!isArray)
-                            throw new CompilationWarningException($"Type of property with {attribute.GetName()} needs to be an array.", property);
+                            throw new MedicineWarning($"Type of property with {attribute.GetName()} needs to be an array.", property);
 
                         // todo: do we need this check?
                         // if (propertyType.UnwrapArrayElementType().ResolveFast() == null)
                         //     throw new CompilationWarningException($"Unknown {attribute.GetName()} array element type: {propertyType.FullName}", property);
 
                         if (!propertyType.HasAttribute<Register.All>())
-                            throw new CompilationWarningException($"Type <i><b>{propertyType.FullName}</b></i> needs to be decorated with the [Register.All] attribute in order to support collection injection.", property);
+                            throw new MedicineWarning($"Type <i><b>{propertyType.FullName}</b></i> needs to be decorated with the [Register.All] attribute in order to support collection injection.", property);
 
                         // resolve objects registered using [Register.All]
                         ReplacePropertyGetterWithHelperMethod(type, property, MethodInfos.RuntimeHelpers.Collection.GetInstance);
@@ -197,10 +195,10 @@ namespace Medicine
                     }
 
                     if (!isInterface && !isComponent)
-                        throw new CompilationWarningException($"Type of property with {attribute.GetName()} needs to be a component or an interface.", property);
+                        throw new MedicineWarning($"Type of property with {attribute.GetName()} needs to be a component or an interface.", property);
 
                     if (type.Attributes.HasFlagNonAlloc(TypeAttributes.Abstract | TypeAttributes.Sealed))
-                        throw new CompilationWarningException($"Cannot use {attribute.GetName()} in a static class.", property);
+                        throw new MedicineWarning($"Cannot use {attribute.GetName()} in a static class.", property);
 
                     // get this here to make sure we generate exceptions early
                     var initializationMethodInfo = GetInitializationMethodInfo(property, attribute);
@@ -230,7 +228,7 @@ namespace Medicine
                         );
                     }
                 }
-                catch (CompilationWarningException ex)
+                catch (MedicineWarning ex)
                 {
                     context.DiagnosticMessages.Add(ex.Site.GetDiagnosticMessage(ex.Message));
                 }
@@ -241,7 +239,7 @@ namespace Medicine
                 }
             }
 
-            void EmitSingletonTypeRegistration(TypeDefinition registeredAs, TypeDefinition implementedBy)
+            void EmitSingletonTypeRegistration(TypeReference registeredAs, TypeDefinition implementedBy)
             {
                 InsertRegisteredInstanceInitializationCall(
                     method: GetOrEmitMethodWithBaseCall(implementedBy, "OnEnable"),
@@ -255,7 +253,7 @@ namespace Medicine
                 );
             }
 
-            void EmitCollectionTypeRegistration(TypeDefinition registeredAs, TypeDefinition implementedBy)
+            void EmitCollectionTypeRegistration(TypeReference registeredAs, TypeDefinition implementedBy)
             {
                 InsertRegisteredInstanceInitializationCall(
                     method: GetOrEmitMethodWithBaseCall(implementedBy, "OnEnable"),
@@ -280,7 +278,7 @@ namespace Medicine
                         bool registerSingle = type.HasAttribute<Register.Single>();
 
                         if (registerAll && registerSingle)
-                            throw new CompilationErrorException(
+                            throw new MedicineError(
                                 $"Type {type.FullName} shouldn't have both [Register.Single] and [Register.All] attributes.", type);
 
                         if (registerAll || registerSingle)
@@ -288,7 +286,7 @@ namespace Medicine
                             if (!type.IsInterface)
                                 if (!type.DerivesFrom<MonoBehaviour>())
                                     if (!type.DerivesFrom<ScriptableObject>())
-                                        throw new CompilationErrorException($"Registered type needs to be a MonoBehaviour, a ScriptableObject or an interface.", type);
+                                        throw new MedicineError($"Registered type needs to be a MonoBehaviour, a ScriptableObject or an interface.", type);
 
                             //todo: EnsureBaseOnEnableOnDisableAreCalled(type);
                         }
@@ -305,7 +303,7 @@ namespace Medicine
                             foreach (var interfaceImplementation in type.Interfaces)
                                 if (interfaceImplementation.InterfaceType.ResolveFast() is var interfaceType)
                                     if (interfaceType.HasAttribute<Register.All>())
-                                        EmitCollectionTypeRegistration(registeredAs: interfaceType, implementedBy: type);
+                                        EmitCollectionTypeRegistration(registeredAs: interfaceImplementation.InterfaceType, implementedBy: type);
                         }
 
                         if (registerSingle)
@@ -317,7 +315,7 @@ namespace Medicine
                             foreach (var interfaceImplementation in type.Interfaces)
                                 if (interfaceImplementation.InterfaceType.ResolveFast() is var interfaceType)
                                     if (interfaceType.HasAttribute<Register.Single>())
-                                        EmitSingletonTypeRegistration(registeredAs: interfaceType, implementedBy: type);
+                                        EmitSingletonTypeRegistration(registeredAs: interfaceImplementation.InterfaceType, implementedBy: type);
 
                             // add [DefaultExecutionOrder(order: -1)] attribute to the registered singleton type
                             // this ensures that when the scene is loaded and scripts are initialized, the singleton registers itself before it is used by other scripts
@@ -332,14 +330,14 @@ namespace Medicine
                     }
                     catch (Exception ex)
                     {
-                        throw new CompilationErrorException(ex.ToString(), type);
+                        throw new MedicineError(ex.ToString(), type);
                     }
                 }
-                catch (CompilationWarningException ex)
+                catch (MedicineWarning ex)
                 {
                     context.DiagnosticMessages.Add(ex.Site.GetDiagnosticMessage(ex.Message));
                 }
-                catch (CompilationErrorException ex)
+                catch (MedicineError ex)
                 {
                     context.DiagnosticMessages.Add(ex.Site.GetDiagnosticMessage(ex.Message, DiagnosticType.Error));
                     return;
@@ -508,7 +506,7 @@ namespace Medicine
                         : MethodInfos.RuntimeHelpers.InjectFromParents;
             }
 
-            throw new CompilationWarningException($"Unknown injection attribute: {attrType.FullName.Replace('/', '.')}", property);
+            throw new MedicineWarning($"Unknown injection attribute: {attrType.FullName.Replace('/', '.')}", property);
         }
 
         /// <summary> Emits instructions that initialize the property value. </summary>
@@ -587,7 +585,7 @@ namespace Medicine
         }
 
         [SuppressMessage("ReSharper", "RedundantAssignment")]
-        static void InsertRegisteredInstanceInitializationCall(MethodDefinition method, TypeDefinition type, MethodInfo helperMethod)
+        static void InsertRegisteredInstanceInitializationCall(MethodDefinition method, TypeReference type, MethodInfo helperMethod)
         {
             var il = method.Body.Instructions;
 

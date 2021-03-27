@@ -46,7 +46,6 @@ namespace Medicine
                 instances[count++] = instance;
             }
 
-
             /// <summary>
             /// Remove an instance of <see cref="TRegistered"/> from the registered instances.
             /// </summary>

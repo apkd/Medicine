@@ -136,7 +136,7 @@ namespace Medicine
 
                 var declaringType = type.DeclaringType;
                 var otherDeclaringType = other.DeclaringType;
-                
+
                 if ((declaringType == null) != (otherDeclaringType == null))
                     return false;
 
@@ -170,10 +170,10 @@ namespace Medicine
         }
 
         public static TypeReference UnwrapArrayElementType(this TypeReference type)
-            => type.IsArray ? type.GetElementType() : type;
+            => type is ArrayType arrayType ? arrayType.ElementType : type;
 
         public static TypeReference UnwrapGenericInstanceType(this TypeReference type)
-            => type.IsGenericInstance ? type.GetElementType() : type;
+            => type is GenericInstanceType genericInstanceType ? genericInstanceType.ElementType : type;
 
         public static MethodReference MakeHostInstanceGeneric(this MethodReference self, params TypeReference[] args)
         {
