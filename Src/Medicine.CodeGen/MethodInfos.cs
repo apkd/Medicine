@@ -29,7 +29,7 @@ namespace Medicine
             = typeof(Object).GetMethod("op_Implicit", Public | Static);
 
         internal static readonly MethodInfo IMedicineInjectionInject
-            = typeof(IMedicineInjection).GetMethod(nameof(IMedicineInjection.Inject));
+            = typeof(IMedicineComponent).GetMethod(nameof(IMedicineComponent.Inject));
 
         internal static class RuntimeHelpers
         {

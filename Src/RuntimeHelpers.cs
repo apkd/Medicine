@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using JetBrains.Annotations;
 using UnityEngine;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 using Obj = UnityEngine.Object;
@@ -114,9 +115,9 @@ namespace Medicine
         /// This is useful when you've made changes to the GameObject's hierarchy or removed/added
         /// components, but should be used sparingly for performance reasons.
         /// </summary>
-        [SuppressMessage("ReSharper", "SuspiciousTypeConversion.Global")]
+        [UsedImplicitly, SuppressMessage("ReSharper", "SuspiciousTypeConversion.Global")]
         public static void Reinject(this MonoBehaviour monoBehaviour)
-            => (monoBehaviour as IMedicineInjection)?.Inject();
+            => (monoBehaviour as IMedicineComponent)?.Inject();
 
 #if MEDICINE_DEBUG
         internal const bool MedicineDebug = true;
@@ -126,11 +127,9 @@ namespace Medicine
 
 #if UNITY_EDITOR
         internal static bool ApplicationIsPlaying
-        {
-            [MethodImpl(AggressiveInlining)]
-            get => Application.isPlaying;
-        }
+            => Application.isPlaying;
 #else
+        // constant outside the editor
         internal const bool ApplicationIsPlaying = true;
 #endif
     }

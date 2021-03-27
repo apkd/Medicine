@@ -8,10 +8,10 @@ using static JetBrains.Annotations.ImplicitUseTargetFlags;
 namespace Medicine
 {
     /// <summary>
-    /// Interface used to virtually access the generated [Inject] attribute initialization methods on any MonoBehaviour.
+    /// Post-processed components are made to implement this interface.
     /// See: <see cref="RuntimeHelpers.Reinject"/>.
     /// </summary>
-    public interface IMedicineInjection
+    public interface IMedicineComponent
     {
         /// <summary> Calls the generated initialization method for given component type. </summary>
         void Inject();

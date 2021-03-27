@@ -28,8 +28,25 @@ namespace Medicine
                 if (!ApplicationIsPlaying)
                     return ErrorEditMode();
 
+                if (count == 0)
+                    return Array.Empty<TRegistered>();
+
+#if MEDICINE_FUNSAFE_COLLECTIONS
+                var instancesForEnumeration = instances;
                 NonAlloc.Unsafe.OverwriteArrayLength(instances, count);
-                return instances;
+#else
+                // copy instances to temporary buffer
+                // this avoids issues with instances being disabled during enumeration
+                var instancesForEnumeration = NonAlloc.GetArray<TRegistered>(length: count, clear: false);
+
+                Array.Copy(
+                    sourceArray: instances,
+                    destinationArray: instancesForEnumeration,
+                    length: count
+                );
+#endif
+
+                return instancesForEnumeration;
             }
 
             /// <summary>
@@ -39,11 +56,15 @@ namespace Medicine
             public static void RegisterInstance(TRegistered instance)
             {
                 if (count == capacity)
-                    Array.Resize(ref instances, capacity *= 2);
-                else
-                    NonAlloc.Unsafe.OverwriteArrayLength(instances, capacity);
+                    Resize();
 
                 instances[count++] = instance;
+
+                static void Resize()
+                {
+                    capacity *= 2;
+                    Array.Resize(ref instances, capacity);
+                }
             }
 
             /// <summary>
