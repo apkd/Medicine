@@ -8,7 +8,7 @@ using static JetBrains.Annotations.ImplicitUseTargetFlags;
 namespace Medicine
 {
     /// <summary>
-    /// Post-processed components are made to implement this interface.
+    /// Post-processed components are made to implement this interface. You can use it to access additional helper methods.
     /// See: <see cref="RuntimeHelpers.Reinject"/>.
     /// </summary>
     public interface IMedicineComponent

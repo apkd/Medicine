@@ -5,7 +5,6 @@ using System.Linq;
 using System.Reflection;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
-using Mono.Cecil.Rocks;
 using Mono.Collections.Generic;
 using Unity.CompilationPipeline.Common.Diagnostics;
 using UnityEngine;
@@ -204,7 +203,7 @@ namespace Medicine
                     var initializationMethodInfo = GetInitializationMethodInfo(property, attribute);
 
                     // lazy injection
-                    if (attribute.AttributeType.Name.Equals(nameof(Inject.Lazy), Ordinal))
+                    if (attribute.AttributeType.Name == nameof(Inject.Lazy))
                     {
                         ReplacePropertyGetterWithHelperMethod(
                             type, property,
@@ -363,7 +362,7 @@ namespace Medicine
             {
                 for (int i = 0, n = candidateMethods.Count; i < n; i++)
                     if (candidateMethods[i] is var candidate)
-                        if (candidate.Name.Equals(methodName, Ordinal))
+                        if (candidate.Name == methodName)
                             return candidate;
 
                 return null;
@@ -428,8 +427,8 @@ namespace Medicine
                 for (int i = 0, n = candidateMethods.Count; i < n; i++)
                     if (candidateMethods[i] is var candidate)
                         if (candidate.Parameters.Count == 0)
-                            if (candidate.Name.Equals(methodName, Ordinal))
-                                if (candidate.ReturnType.FullName.Equals("System.Void", Ordinal))
+                            if (candidate.Name == methodName)
+                                if (candidate.ReturnType.FullName == "System.Void")
                                     return candidate;
 
                 return null;

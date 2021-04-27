@@ -1,7 +1,5 @@
 ﻿using System.Collections.Generic;
-using System.Linq;
 using Mono.Cecil;
-using Mono.Cecil.Rocks;
 using Unity.CompilationPipeline.Common.Diagnostics;
 
 namespace Medicine

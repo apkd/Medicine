@@ -131,17 +131,20 @@ namespace Medicine
 
             while (true)
             {
-                if (!type.Name.Equals(other.Name, Ordinal))
+                if (type.Name != other.Name)
                     return false;
 
                 var declaringType = type.DeclaringType;
                 var otherDeclaringType = other.DeclaringType;
 
-                if ((declaringType == null) != (otherDeclaringType == null))
+                bool selfHasNoDeclaringType = declaringType == null;
+                bool otherHasNoDeclaringType = otherDeclaringType == null;
+
+                if (selfHasNoDeclaringType != otherHasNoDeclaringType)
                     return false;
 
-                if (declaringType == null)
-                    return (type.Namespace ?? "").Equals(other.Namespace ?? "", Ordinal);
+                if (selfHasNoDeclaringType)
+                    return (type.Namespace ?? "") == (other.Namespace ?? "");
 
                 type = declaringType;
                 other = otherDeclaringType;
@@ -155,7 +158,7 @@ namespace Medicine
         {
             for (int i = 0, n = attribute.Properties.Count; i < n; ++i)
                 if (attribute.Properties[i] is var property)
-                    if (property.Name.Equals(key, Ordinal))
+                    if (property.Name == key)
                         if (property.Argument.Value.Equals(value))
                             return true;
 

@@ -20,11 +20,11 @@ namespace Medicine
             => correctCorlib = module
                 .AssemblyReferences
                 .FirstOrDefault(
-                    assembly => assembly.Name.Equals("mscorlib", Ordinal) || assembly.Name.Equals("netstandard", Ordinal) || assembly.Name.Equals(SystemPrivateCoreLib, Ordinal)
+                    assembly => assembly.Name == "mscorlib" || assembly.Name == "netstandard" || assembly.Name == SystemPrivateCoreLib)
                 );
 
         public override AssemblyNameReference ImportReference(AssemblyName reference)
-            => correctCorlib == null || !reference.Name.Equals(SystemPrivateCoreLib, Ordinal)
+            => correctCorlib == null || reference.Name != SystemPrivateCoreLib
                 ? base.ImportReference(reference)
                 : correctCorlib;
     }
@@ -60,7 +60,7 @@ namespace Medicine
 
         public AssemblyDefinition Resolve(AssemblyNameReference name, ReaderParameters parameters)
         {
-            if (string.Equals(name.Name, compiledAssemblyName, Ordinal))
+            if (name.Name == compiledAssemblyName)
                 return selfAssembly;
 
             string filename = FindFile(name).Replace('\\', '/');
@@ -125,9 +125,9 @@ namespace Medicine
             {
                 string referenceFileName = referenceFileNames[i];
 
-                if (referenceFileName.Equals(nameStringDll, Ordinal))
+                if (referenceFileName == nameStringDll)
                     return references[i];
-                if (referenceFileName.Equals(nameStringExe, Ordinal))
+                if (referenceFileName == nameStringExe)
                     return references[i];
             }
 

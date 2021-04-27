@@ -30,16 +30,16 @@ namespace Medicine
             return false;
 #endif
 
-            if (string.Equals(compiledAssemblyName, "Unity.Medicine.CodeGen", Ordinal))
+            if (compiledAssemblyName == "Unity.Medicine.CodeGen")
                 return false;
 
-            if (string.Equals(compiledAssemblyName, "Medicine", Ordinal))
+            if (compiledAssemblyName == "Medicine")
                 return false;
 
-            if (string.Equals(compiledAssemblyName, "Assembly-CSharp", Ordinal))
+            if (compiledAssemblyName == "Assembly-CSharp")
                 return true;
 
-            if (string.Equals(compiledAssemblyName, "Assembly-CSharp-firstpass", Ordinal))
+            if (compiledAssemblyName == "Assembly-CSharp-firstpass")
                 return true;
 
             foreach (string reference in compiledAssembly.References)
