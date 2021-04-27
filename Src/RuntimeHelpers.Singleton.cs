@@ -23,6 +23,10 @@ namespace Medicine
             /// <summary>
             /// Register the object as the active <see cref="TSingleton"/> instance.
             /// </summary>
+            /// <remarks>
+            /// This is a helper method. Useful for some edge cases, but you don't usually need to use it directly.
+            /// See <see cref="Register.Single"/> and <see cref="Inject.Single"/> to learn more.
+            /// </remarks>
             [MethodImpl(AggressiveInlining)]
             public static void RegisterInstance(TSingleton obj)
             {
@@ -54,6 +58,10 @@ namespace Medicine
             /// <summary>
             /// Unregister the object from being the active <see cref="TSingleton"/> instance.
             /// </summary>
+            /// <remarks>
+            /// This is a helper method. Useful for some edge cases, but you don't usually need to use it directly.
+            /// See <see cref="Register.Single"/> and <see cref="Inject.Single"/> to learn more.
+            /// </remarks>
             [MethodImpl(AggressiveInlining)]
             public static void UnregisterInstance(TSingleton obj)
             {
@@ -73,7 +81,12 @@ namespace Medicine
 
             /// <summary>
             /// Get the active registered <see cref="TSingleton"/> instance.
+            /// Logs an error and returns null when there is no registered instance.
             /// </summary>
+            /// <remarks>
+            /// This is a helper method. Useful for some edge cases, but you don't usually need to use it directly.
+            /// See <see cref="Register.Single"/> and <see cref="Inject.Single"/> to learn more.
+            /// </remarks>
             [MethodImpl(AggressiveInlining)]
             public static TSingleton GetInstance()
             {
@@ -105,6 +118,7 @@ namespace Medicine
 
             static TSingleton TryFindScriptableObject()
             {
+#if UNITY_EDITOR
                 // create static noninitialized instance for fast inheritance checks
                 if (ReferenceEquals(uninitializedInstance, null))
                     uninitializedInstance = FormatterServices.GetUninitializedObject(typeof(TSingleton)) as TSingleton;
@@ -113,7 +127,6 @@ namespace Medicine
                 if (!(uninitializedInstance is ScriptableObject))
                     return null;
 
-#if UNITY_EDITOR
                 // try find ScriptableObject instance in preloaded assets
                 var preloadedAssets = UnityEditor.PlayerSettings.GetPreloadedAssets();
 

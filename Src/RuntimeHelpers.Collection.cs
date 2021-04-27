@@ -22,6 +22,10 @@ namespace Medicine
             /// <summary>
             /// Get an array of active registered instances of type <see cref="TRegistered"/>.
             /// </summary>
+            /// <remarks>
+            /// This is a helper method. Useful for some edge cases, but you don't usually need to use it directly.
+            /// See <see cref="Register.All"/> and <see cref="Inject.All"/> to learn more.
+            /// </remarks>
             [MethodImpl(AggressiveInlining)]
             public static TRegistered[] GetInstances()
             {
@@ -52,6 +56,10 @@ namespace Medicine
             /// <summary>
             /// Add an instance of <see cref="TRegistered"/> to the registered instances.
             /// </summary>
+            /// <remarks>
+            /// This is a helper method. Useful for some edge cases, but you don't usually need to use it directly.
+            /// See <see cref="Register.All"/> and <see cref="Inject.All"/> to learn more.
+            /// </remarks>
             [MethodImpl(AggressiveInlining)]
             public static void RegisterInstance(TRegistered instance)
             {
@@ -70,6 +78,10 @@ namespace Medicine
             /// <summary>
             /// Remove an instance of <see cref="TRegistered"/> from the registered instances.
             /// </summary>
+            /// <remarks>
+            /// This is a helper method. Useful for some edge cases, but you don't usually need to use it directly.
+            /// See <see cref="Register.All"/> and <see cref="Inject.All"/> to learn more.
+            /// </remarks>
             [MethodImpl(AggressiveInlining)]
             public static void UnregisterInstance(TRegistered instance)
             {
