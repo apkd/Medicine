@@ -20,7 +20,7 @@ namespace Medicine
             => correctCorlib = module
                 .AssemblyReferences
                 .FirstOrDefault(
-                    assembly => assembly.Name == "mscorlib" || assembly.Name == "netstandard" || assembly.Name == SystemPrivateCoreLib)
+                    assembly => assembly.Name == "mscorlib" || assembly.Name == "netstandard" || assembly.Name == SystemPrivateCoreLib
                 );
 
         public override AssemblyNameReference ImportReference(AssemblyName reference)
