@@ -107,6 +107,34 @@ namespace Medicine
                 }
             }
 
+            /// <summary>
+            /// Get the active registered <see cref="TSingleton"/> instance.
+            /// Returns null when there is no registered instance.
+            /// </summary>
+            /// <remarks>
+            /// This is a helper method. Useful for some edge cases, but you don't usually need to use it directly.
+            /// See <see cref="Register.Single"/> and <see cref="Inject.Single"/> to learn more.
+            /// </remarks>
+            [MethodImpl(AggressiveInlining)]
+            public static TSingleton TryGetInstance()
+            {
+#if UNITY_EDITOR
+                if (!ApplicationIsPlaying)
+                {
+                    if (instance)
+                        return instance;
+
+                    return instance = TryFindObjectByType() ?? TryFindScriptableObject();
+                }
+                else
+#endif
+                {
+                    // ReSharper disable once Unity.NoNullCoalescing
+                    // we can safely use reference comparison assuming objects always unregister themselves in OnDestroy
+                    return instance ?? TryFindScriptableObject();
+                }
+            }
+
             static TSingleton TryFindObjectByType()
             {
                 var objectsOfType = NonAlloc.FindObjectsOfType<TSingleton>();
