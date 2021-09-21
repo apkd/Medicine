@@ -121,6 +121,23 @@ namespace Medicine
             return false;
         }
 
+        public static int CalculateDepthOfInheritanceTree(this TypeReference type)
+        {
+            int i = 0;
+
+            try
+            {
+                while ((type = type.ResolveFast().BaseType) != null)
+                    i += 1;
+            }
+            catch
+            {
+                /* silently ignore exceptions; we're probably unable to resolve the base type's assembly. */
+            }
+
+            return i;
+        }
+
         public static bool DerivesFrom<T>(this TypeReference type)
             => type.BaseTypesInclude(x => x.Is<T>());
 

@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using Mono.Cecil;
 using Unity.CompilationPipeline.Common.Diagnostics;
 
@@ -13,7 +14,11 @@ namespace Medicine
         public PostProcessorContext(ModuleDefinition module)
         {
             Module = module;
-            Types = GetAllTypeDefinitions(module).ToArray();
+
+            // types are sorted based on the depth of inheritance tree
+            // this ensures that base types have their Awake()/OnEnable() methods emitted by the time we process the derived types
+            Types = GetAllTypeDefinitions(module).OrderBy(x => x.CalculateDepthOfInheritanceTree()).ToArray();
+
             DiagnosticMessages = new List<DiagnosticMessage>();
         }
 
