@@ -98,9 +98,6 @@ namespace Medicine
 
                     if (backingField == null || !backingField.IsCompilerGenerated() || backingField.FieldType.FullName != property.PropertyType.FullName || backingField.IsPublic)
                     {
-                        Debug.Log(backingField.FieldType);
-                        Debug.Log(property.PropertyType);
-                        Debug.Log(backingField.IsPublic);
                         context.DiagnosticMessages.Add(
                             property.GetMethod.GetDiagnosticMessage(
                                 $"Property <b>{property.PropertyType.Name} <i>{property.Name}</i></b> needs to be an auto-implemented property to use injection. For example:\n" +
