@@ -14,7 +14,7 @@ namespace Medicine
         {
             Module = module;
             Types = GetAllTypeDefinitions(module).ToArray();
-            DiagnosticMessages = new List<DiagnosticMessage>(capacity: 8);
+            DiagnosticMessages = new List<DiagnosticMessage>();
         }
 
         static List<TypeDefinition> GetAllTypeDefinitions(ModuleDefinition moduleDefinition)
