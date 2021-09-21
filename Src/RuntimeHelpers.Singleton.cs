@@ -20,6 +20,15 @@ namespace Medicine
 
             static TSingleton uninitializedInstance;
 
+            [MethodImpl(AggressiveInlining)]
+            public static void ReplaceCurrentInstance(TSingleton obj)
+            {
+                if (MedicineDebug)
+                    Debug.Log($"Replacing singleton instance: <i>{obj.name}</i> as <i>{typeof(TSingleton).Name}</i>", obj);
+
+                instance = obj;
+            }
+
             /// <summary>
             /// Register the object as the active <see cref="TSingleton"/> instance.
             /// </summary>
