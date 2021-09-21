@@ -63,6 +63,12 @@ namespace Medicine
             [MethodImpl(AggressiveInlining)]
             public static void RegisterInstance(TRegistered instance)
             {
+                if (MedicineDebug && (instance == null || instance is UnityEngine.Object obj && !obj))
+                {
+                    Debug.LogError($"Tried to register null {typeof(TRegistered).Name} instance.");
+                    return;
+                }
+
                 if (count == capacity)
                     Resize();
 
@@ -85,6 +91,12 @@ namespace Medicine
             [MethodImpl(AggressiveInlining)]
             public static void UnregisterInstance(TRegistered instance)
             {
+                if (MedicineDebug && (instance == null || instance is UnityEngine.Object obj && !obj))
+                {
+                    Debug.LogError($"Tried to unregister null {typeof(TRegistered).Name} instance.");
+                    return;
+                }
+
                 // search from end - assume the oldest instances are the most likely to be long-lived
                 for (int i = count - 1; i >= 0; --i)
                 {

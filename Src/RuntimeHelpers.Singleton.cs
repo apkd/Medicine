@@ -50,6 +50,11 @@ namespace Medicine
                     if (System.Array.IndexOf(UnityEditor.PlayerSettings.GetPreloadedAssets(), obj) < 0)
                         return;
 #endif
+                if (!obj)
+                {
+                    Debug.LogError($"Failed to register singleton instance <i>{typeof(TSingleton).Name}</i>: {(ReferenceEquals(obj, null) ? "Null" : "Destroyed")} object reference");
+                    return;
+                }
 
                 if (!instance)
                 {
