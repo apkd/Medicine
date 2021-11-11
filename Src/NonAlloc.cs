@@ -22,20 +22,24 @@ namespace Medicine
         /// This is an optimized version of the Object.FindObjectsOfType<T> method that reduces unnecessary array copying.
         /// It can be used as a direct replacement.
         /// </remarks>
-#if UNITY_2020_1_OR_NEWER // includeInactive argument only supported in Unity 2020.1+
         [UsedImplicitly]
         [MethodImpl(AggressiveInlining)]
+#if UNITY_2020_1_OR_NEWER // includeInactive argument only supported in Unity 2020.1+
         public static T[] FindObjectsOfType<T>(bool includeInactive = false) where T : Object
         {
+#if MEDICINE_DEBUG
+            return Object.FindObjectsOfType<T>(includeInactive);
+#endif
             var array = Object.FindObjectsOfType(typeof(T), includeInactive);
             Unsafe.SetManagedObjectType<T[]>(array);
             return array as T[];
         }
 #else
-        [UsedImplicitly]
-        [MethodImpl(AggressiveInlining)]
         public static T[] FindObjectsOfType<T>() where T : Object
         {
+#if MEDICINE_DEBUG
+            return Object.FindObjectsOfType<T>();
+#endif
             var array = Object.FindObjectsOfType(typeof(T));
             Unsafe.SetManagedObjectType<T[]>(array);
             return array as T[];
@@ -56,6 +60,9 @@ namespace Medicine
         [MethodImpl(AggressiveInlining)]
         public static T[] FindObjectsOfTypeAll<T>() where T : Object
         {
+#if MEDICINE_DEBUG
+            return Resources.FindObjectsOfTypeAll<T>();
+#endif
             var array = Resources.FindObjectsOfTypeAll(typeof(T));
             Unsafe.SetManagedObjectType<T[]>(array);
             return array as T[];
@@ -76,6 +83,9 @@ namespace Medicine
         [MethodImpl(AggressiveInlining)]
         public static T[] LoadAll<T>(string path) where T : Object
         {
+#if MEDICINE_DEBUG
+            return Resources.LoadAll<T>(path);
+#endif
             var array = Resources.LoadAll(path, typeof(T));
             Unsafe.SetManagedObjectType<T[]>(array);
             return array as T[];
@@ -91,6 +101,9 @@ namespace Medicine
         [MethodImpl(AggressiveInlining)]
         public static T[] GetComponentsNonAlloc<T>(this GameObject gameObject) where T : class
         {
+#if MEDICINE_DEBUG
+            return gameObject.GetComponents<T>();
+#endif
             var recyclableList = GetRecyclableList();
             var list = recyclableList.AsList<T>(clear: false);
             gameObject.GetComponents(list);
@@ -107,6 +120,9 @@ namespace Medicine
         [MethodImpl(AggressiveInlining)]
         public static T[] GetComponentsInChildrenNonAlloc<T>(this GameObject gameObject, bool includeInactive = false) where T : class
         {
+#if MEDICINE_DEBUG
+            return gameObject.GetComponentsInChildren<T>(includeInactive);
+#endif
             var recyclableList = GetRecyclableList();
             var list = recyclableList.AsList<T>(clear: false);
             gameObject.GetComponentsInChildren(includeInactive, list);
@@ -123,6 +139,9 @@ namespace Medicine
         [MethodImpl(AggressiveInlining)]
         public static T[] GetComponentsInParentNonAlloc<T>(this GameObject gameObject, bool includeInactive = false) where T : class
         {
+#if MEDICINE_DEBUG
+            return gameObject.GetComponentsInParent<T>(includeInactive);
+#endif
             var recyclableList = GetRecyclableList();
             var list = recyclableList.AsList<T>(clear: false);
             gameObject.GetComponentsInParent(includeInactive, list);

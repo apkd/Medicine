@@ -26,25 +26,22 @@ static class SingletonObjectHeaderGUI
 
     static void DrawSingletonGUI(Editor editor)
     {
-        if (!(editor.target is ScriptableObject))
+        var target = editor.target;
+
+        if (!(target is ScriptableObject))
             return;
 
-        if (editor.targets.Length > 1)
+        var editorTargets = editor.targets;
+        if (editorTargets.Length > 1)
             return;
 
-        var targetObject = editor.target;
+        var targetObject = target;
         var type = targetObject.GetType();
 
-        bool HasInjectSingleAttr()
-        {
-            foreach (var candidate in typesWithInjectSingleAttribute)
-                if (type == candidate)
-                    return true;
+        bool hasInjectSingleAttr
+            = Array.IndexOf(typesWithInjectSingleAttribute, type) >= 0;
 
-            return false;
-        }
-
-        if (!HasInjectSingleAttr())
+        if (!hasInjectSingleAttr)
             return;
 
         var preloadedAssets = PlayerSettings.GetPreloadedAssets();

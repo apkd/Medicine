@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 using static System.Runtime.CompilerServices.MethodImplOptions;
@@ -15,9 +16,31 @@ namespace Medicine
         {
             const int InitialCapacity = 32;
 
-            static TRegistered[] instances = new TRegistered[InitialCapacity];
+            static TRegistered[] instances = CreateInstanceArray();
             static int capacity = InitialCapacity;
             static int count = 0;
+            
+#if UNITY_EDITOR
+            static bool checkedAttribute;
+#endif
+
+            // this method lets us avoid a static ctor to ensure beforefieldinit:
+            // https://docs.microsoft.com/en-us/dotnet/fundamentals/code-analysis/quality-rules/ca1810
+            static TRegistered[] CreateInstanceArray()
+            {
+#if UNITY_EDITOR
+                reinitializeAction += () =>
+                {
+                    // if (MedicineDebug)
+                    Debug.Log($"Clearing collection: <i>{typeof(TRegistered).Name}</i>");
+                    instances = new TRegistered[capacity = InitialCapacity];
+                    count = 0;
+                };
+
+                debugAction += () => Debug.Log($"Collection<{typeof(TRegistered).Name}> = {count}/{capacity}");
+#endif
+                return new TRegistered[InitialCapacity];
+            }
 
             /// <summary>
             /// Get an array of active registered instances of type <see cref="TRegistered"/>.
@@ -31,13 +54,31 @@ namespace Medicine
             {
                 if (!ApplicationIsPlaying)
                     return ErrorEditMode();
+                
+#if UNITY_EDITOR
+                if (!checkedAttribute && typeof(TRegistered).CustomAttributes.All(x => x.AttributeType != typeof(Register.All)))
+                    Debug.LogError($"Tried to obtain all instances of {typeof(TRegistered).Name}, but it isn't marked with [Medicine.Register.All].");
+
+                checkedAttribute = true;
+#endif
 
                 if (count == 0)
                     return Array.Empty<TRegistered>();
+                
+#if MEDICINE_DEBUG
+                var instancesForEnumeration = new TRegistered[count];
 
-#if MEDICINE_FUNSAFE_COLLECTIONS
-                var instancesForEnumeration = instances;
+                Array.Copy(
+                    sourceArray: instances,
+                    destinationArray: instancesForEnumeration,
+                    length: count
+                );
+
+                return instancesForEnumeration;
+#elif MEDICINE_FUNSAFE_COLLECTIONS
+                // copyless implementation - trim the array and return it directly without copying
                 NonAlloc.Unsafe.OverwriteArrayLength(instances, count);
+                return instances;
 #else
                 // copy instances to temporary buffer
                 // this avoids issues with instances being disabled during enumeration
@@ -48,9 +89,9 @@ namespace Medicine
                     destinationArray: instancesForEnumeration,
                     length: count
                 );
-#endif
 
                 return instancesForEnumeration;
+#endif
             }
 
             /// <summary>
@@ -68,9 +109,18 @@ namespace Medicine
                     Debug.LogError($"Tried to register null {typeof(TRegistered).Name} instance.");
                     return;
                 }
+                
+                if (MedicineDebug)
+                    Debug.Log($"Registering {instance} as {typeof(TRegistered).Name}");
 
                 if (count == capacity)
                     Resize();
+
+#if MEDICINE_FUNSAFE_COLLECTIONS && !MEDICINE_DEBUG
+                // copyless implementation - array was (possibly) trimmed during enumeration.
+                // ensure array length is reset to capacity before registering new instances
+                NonAlloc.Unsafe.OverwriteArrayLength(instances, capacity);
+#endif
 
                 instances[count++] = instance;
 

@@ -5,9 +5,7 @@
     "excludePlatforms": [],
     "allowUnsafeCode": true,
     "overrideReferences": true,
-    "precompiledReferences": [
-        "MedicineUnsafeUtility.dll"
-    ],
+    "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
     "versionDefines": [],

@@ -127,11 +127,34 @@ namespace Medicine
         }
 
 #if UNITY_EDITOR
-        // forces preloaded assets initialization in editor (eg. to make singletons register themselves)
-        // inexplicably, Unity doesn't do this by default
+        [UsedImplicitly]
+        static Action reinitializeAction;
+        
+        [UsedImplicitly]
+        static Action debugAction;
+
+        /// <summary>
+        /// forces preloaded assets initialization in editor (eg. to make singletons register themselves)
+        /// inexplicably, Unity doesn't do this by default
+        /// </summary>
         [UnityEditor.InitializeOnLoadMethod]
         static void EditorInitializeOnLoad()
             => UnityEditor.PlayerSettings.GetPreloadedAssets();
+
+        // static RuntimeHelpers()
+        //     => UnityEditor.EditorApplication.playModeStateChanged += (x) =>
+        //     {
+        //         if (x is UnityEditor.PlayModeStateChange.ExitingEditMode)
+        //             reinitializeAction?.Invoke();
+        //     };
+
+        [UnityEditor.MenuItem("Tools/Medicine/List registered objects")]
+        static void MenuCommandDebug()
+            => debugAction?.Invoke();
+
+        [UnityEditor.MenuItem("Tools/Medicine/Clear registered objects")]
+        static void MenuCommandReinitialize()
+            => reinitializeAction?.Invoke();
 #endif
 
         /// <summary>

@@ -16,9 +16,28 @@ namespace Medicine
         /// </summary>
         public static class Singleton<TSingleton> where TSingleton : Obj
         {
-            static TSingleton instance;
+            static TSingleton instance = SetupReinitialization();
 
             static TSingleton uninitializedInstance;
+            
+#if UNITY_EDITOR
+            static bool checkedAttribute;
+#endif
+
+            static TSingleton SetupReinitialization()
+            {
+#if UNITY_EDITOR
+                reinitializeAction += () =>
+                {
+                    // if (MedicineDebug)
+                    Debug.Log($"Clearing singleton: <i>{typeof(TSingleton).Name}</i>");
+                    instance = null;
+                };
+
+                debugAction += () => Debug.Log($"Singleton<{typeof(TSingleton).Name}> = {(instance ? instance.ToString() : "null")}", instance);
+#endif
+                return null;
+            }
 
             [MethodImpl(AggressiveInlining)]
             public static void ReplaceCurrentInstance(TSingleton obj)
@@ -105,6 +124,11 @@ namespace Medicine
             public static TSingleton GetInstance()
             {
 #if UNITY_EDITOR
+                if (!checkedAttribute && typeof(TSingleton).CustomAttributes.All(x => x.AttributeType != typeof(Register.Single)))
+                    Debug.LogError($"Tried to obtain singleton instance of {typeof(TSingleton).Name}, but it isn't marked with [Medicine.Register.Single].");
+
+                checkedAttribute = true;
+
                 if (!ApplicationIsPlaying)
                 {
                     if (instance)
@@ -112,13 +136,10 @@ namespace Medicine
 
                     return instance = TryFindObjectByType() ?? TryFindScriptableObject() ?? ErrorNoSingletonInstance();
                 }
-                else
 #endif
-                {
-                    // ReSharper disable once Unity.NoNullCoalescing
-                    // we can safely use reference comparison assuming objects always unregister themselves in OnDestroy
-                    return instance ?? TryFindScriptableObject() ?? ErrorNoSingletonInstance();
-                }
+                // ReSharper disable once Unity.NoNullCoalescing
+                // we can safely use reference comparison assuming objects always unregister themselves in OnDestroy
+                return instance ?? (instance = TryFindScriptableObject() ?? ErrorNoSingletonInstance());
             }
 
             /// <summary>
@@ -140,13 +161,10 @@ namespace Medicine
 
                     return instance = TryFindObjectByType() ?? TryFindScriptableObject();
                 }
-                else
 #endif
-                {
-                    // ReSharper disable once Unity.NoNullCoalescing
-                    // we can safely use reference comparison assuming objects always unregister themselves in OnDestroy
-                    return instance ?? TryFindScriptableObject();
-                }
+                // ReSharper disable once Unity.NoNullCoalescing
+                // we can safely use reference comparison assuming objects always unregister themselves in OnDestroy
+                return instance ?? (instance = TryFindScriptableObject());
             }
 
             static TSingleton TryFindObjectByType()

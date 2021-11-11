@@ -18,17 +18,29 @@ namespace Medicine
         // we're switching between multiple lists for each GetRecyclableList to avoid issues with nested GetComponentsNonAlloc usage.
         // this is still a non-deal solution because it will cause crashes when we're using 4+ temporary RecyclableLists at the
         // same time, but it should cover vast majority of use cases
-        static readonly RecyclableList[] recyclableLists;
+        static readonly RecyclableList[] recyclableLists = InitializeRecyclableLists();
+
+        // this method lets us avoid a static ctor to ensure beforefieldinit:
+        // https://docs.microsoft.com/en-us/dotnet/fundamentals/code-analysis/quality-rules/ca1810
+        static RecyclableList[] InitializeRecyclableLists()
+        {
+            var lists = new RecyclableList[RecyclableListCount];
+            for (int i = 0; i < lists.Length; ++i)
+                lists[i] = new RecyclableList(initialCapacity: 1024);
+            return lists;
+        }
 
         // index of the last returned list
-        static int currentRecyclableList = 0;
+        static int currentRecyclableList;
 
-        static NonAlloc()
+#if UNITY_EDITOR
+        [UnityEditor.InitializeOnEnterPlayMode]
+        static void ClearRecyclableListsOnEnterPlayMode()
         {
-            recyclableLists = new RecyclableList[RecyclableListCount];
             for (int i = 0; i < recyclableLists.Length; ++i)
                 recyclableLists[i] = new RecyclableList(initialCapacity: 1024);
         }
+#endif
 
         /// <summary>
         /// A wrapper type that stores a <see cref="List"/> together with its backing array, and implements utilities that allow you to
@@ -78,6 +90,9 @@ namespace Medicine
             [MethodImpl(AggressiveInlining)]
             public List<T> AsList<T>(bool clear = true) where T : class
             {
+#if MEDICINE_DEBUG
+                return new List<T>();
+#endif
                 EnsureListSyncedWithArray();
                 ExpandArrayToActualLength();
 
@@ -99,6 +114,9 @@ namespace Medicine
             [MethodImpl(AggressiveInlining)]
             public T[] AsArray<T>(int length, bool clear = true) where T : class
             {
+#if MEDICINE_DEBUG
+                return new T[length];
+#endif
                 void ThrowArgumentOutOfRange()
                     => throw new ArgumentOutOfRangeException(nameof(length));
 
@@ -106,7 +124,10 @@ namespace Medicine
                     ThrowArgumentOutOfRange();
 
                 if (clear)
+                {
+                    ExpandArrayToActualLength();
                     InternalList.Clear();
+                }
 
                 SetType<T>();
                 SetCapacity(length);
