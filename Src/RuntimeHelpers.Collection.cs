@@ -3,8 +3,9 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 using static System.Runtime.CompilerServices.MethodImplOptions;
-
+#pragma warning disable CS0162 // ReSharper disable HeuristicUnreachableCode
 // ReSharper disable StaticMemberInGenericType
+
 namespace Medicine
 {
     public static partial class RuntimeHelpers

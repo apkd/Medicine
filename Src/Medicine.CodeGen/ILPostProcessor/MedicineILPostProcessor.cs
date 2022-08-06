@@ -8,7 +8,6 @@ using Mono.Cecil.Cil;
 using Unity.CompilationPipeline.Common.Diagnostics;
 using Unity.CompilationPipeline.Common.ILPostProcessing;
 using static System.StringComparison;
-using Debug = UnityEngine.Debug;
 
 namespace Medicine
 {
@@ -17,10 +16,6 @@ namespace Medicine
     {
         public override ILPostProcessor GetInstance()
             => this;
-
-        [Conditional("MEDICINE_IL_DEBUG")]
-        static void Log(object message)
-            => Debug.Log(message);
 
         public override bool WillProcess(ICompiledAssembly compiledAssembly)
         {
@@ -89,9 +84,10 @@ namespace Medicine
             }
             catch (Exception ex)
             {
+                Console.WriteLine(ex.ToString());
                 var error = new DiagnosticMessage
                 {
-                    MessageData = $"Unexpected exception while post-processing assembly {compiledAssembly.Name}:\n{ex}",
+                    MessageData = $"Unexpected exception while post-processing assembly {compiledAssembly.Name}: {ex.Message}",
                     DiagnosticType = DiagnosticType.Error,
                 };
                 return new ILPostProcessResult(compiledAssembly.InMemoryAssembly, new List<DiagnosticMessage> { error });
@@ -117,7 +113,7 @@ namespace Medicine
             }
             catch (Exception ex)
             {
-                Debug.LogException(ex);
+                Console.WriteLine(ex.ToString());
                 return null;
             }
         }

@@ -104,8 +104,8 @@ namespace Medicine
                     {
                         context.DiagnosticMessages.Add(
                             property.GetMethod.GetDiagnosticMessage(
-                                $"Property <b>{property.PropertyType.Name} <i>{property.Name}</i></b> needs to be an auto-implemented property to use injection. For example:\n" +
-                                $"<i>{attribute.GetName()}\n{property.PropertyType.Name} {property.Name} {{ get; }}</i>\n"));
+                                $"Property <b>{property.PropertyType.Name} <i>{property.Name}</i></b> needs to be an auto-implemented property to use injection. For example: " +
+                                $"<i>{attribute.GetName()} {property.PropertyType.Name} {property.Name} {{ get; }}</i>"));
 
                         continue;
                     }
@@ -136,7 +136,10 @@ namespace Medicine
                     }
                     catch
                     {
-                        throw new MedicineWarning($"Unknown property type: {property.PropertyType.FullName}", property);
+                        if (property.PropertyType is GenericParameter)
+                            throw new MedicineWarning($"Injecting generic properties is not supported ({property.PropertyType?.FullName})", property);
+
+                        throw new MedicineWarning($"Unknown property type: {property.PropertyType?.FullName}", property);
                     }
 
                     var isInterface = propertyType.IsInterface;
