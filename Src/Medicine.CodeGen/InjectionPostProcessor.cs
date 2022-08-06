@@ -51,7 +51,7 @@ namespace Medicine
 
         public void ProcessAssembly()
         {
-            var properties = new List<(TypeDefinition, FieldDefinition, PropertyDefinition, CustomAttribute)>(capacity: 256);
+            var properties = new List<(TypeDefinition, FieldReference, PropertyDefinition, CustomAttribute)>(capacity: 256);
 
             foreach (var type in context.Types)
             {
@@ -75,7 +75,7 @@ namespace Medicine
                     if (attribute == null)
                         continue;
 
-                    FieldDefinition GetPropertyBackingField()
+                    FieldReference GetPropertyBackingField()
                     {
                         // for an auto-implemented property getter, ldfld/ldsfld will be the first/second instruction
                         int m = Math.Min(property.GetMethod.Body.Instructions.Count, 2);
@@ -84,7 +84,7 @@ namespace Medicine
                         for (int j = 0; j < m; j++)
                             if (property.GetMethod.Body.Instructions[j] is var instr)
                                 if (instr.OpCode == OpCodes.Ldfld || instr.OpCode == OpCodes.Ldsfld)
-                                    return instr.Operand as FieldDefinition;
+                                    return instr.Operand as FieldReference;
 
                         return null;
                     }
@@ -98,8 +98,9 @@ namespace Medicine
                     }
 
                     var backingField = GetPropertyBackingField();
+                    var backingFieldDef = backingField.ResolveFast();
 
-                    if (backingField == null || !backingField.IsCompilerGenerated() || backingField.FieldType.FullName != property.PropertyType.FullName || backingField.IsPublic)
+                    if (backingField == null || !backingFieldDef.IsCompilerGenerated() || backingField.FieldType.FullName != property.PropertyType.FullName || backingFieldDef.IsPublic)
                     {
                         context.DiagnosticMessages.Add(
                             property.GetMethod.GetDiagnosticMessage(
@@ -109,7 +110,7 @@ namespace Medicine
                         continue;
                     }
 
-                    if (backingField.HasAttribute<SerializeField>())
+                    if (backingFieldDef.HasAttribute<SerializeField>())
                     {
                         context.DiagnosticMessages.Add(
                             property.GetMethod.GetDiagnosticMessage(
@@ -412,7 +413,7 @@ namespace Medicine
                     var il = callSite.Body.Instructions;
                     int index = 0;
                     il.Insert(index++, Create(OpCodes.Ldarg_0));
-                    il.Insert(index++, Create(OpCodes.Call, injectionMethod));
+                    il.Insert(index++, Create(OpCodes.Call, injectionMethod.MakeBaseTypeHostInstanceGeneric()));
                 }
 
                 // implement IMedicineInjection interface
@@ -458,12 +459,23 @@ namespace Medicine
                     var attributes = baseMethod.Attributes;
                     if ((attributes & MethodAttributes.Private) != 0)
                     {
+                        // if the base method is private, make it protected so that we can call it
+                        // (this won't work across assembly boundary...)
                         attributes ^= MethodAttributes.Private;
                         attributes |= MethodAttributes.Family;
                         baseMethod.Attributes = attributes;
                     }
+
+                    // if the declaring type of the base method we're calling is a generic instance type, we need to explicitly
+                    // create a new method reference with the generic arguments included to avoid the runtime error:
+                    // BadImageFormatException: Method with open type while not compiling gshared
+                    var baseMethodCallableReference
+                        = declaringType.BaseType is GenericInstanceType genericInstanceType
+                            ? baseMethod.MakeHostInstanceGeneric(genericInstanceType.GenericArguments.ToArray())
+                            : baseMethod;
+
                     il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Call, baseMethod.Import());
+                    il.Emit(OpCodes.Call, baseMethodCallableReference.Import());
                 }
 
                 il.Emit(OpCodes.Ret);
@@ -526,7 +538,7 @@ namespace Medicine
         }
 
         /// <summary> Emits instructions that initialize the property value. </summary>
-        static void InsertInitializationCall(MethodDefinition method, FieldDefinition field, PropertyDefinition property, TypeDefinition propertyType, CustomAttribute attribute, MethodInfo initializationMethodInfo)
+        static void InsertInitializationCall(MethodDefinition method, FieldReference field, PropertyDefinition property, TypeDefinition propertyType, CustomAttribute attribute, MethodInfo initializationMethodInfo)
         {
             var il = method.Body.GetILProcessor();
             bool isOptional = attribute.HasProperty(nameof(Inject.Optional), value: true);

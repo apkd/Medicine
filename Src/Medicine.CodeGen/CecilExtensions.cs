@@ -195,6 +195,11 @@ namespace Medicine
         public static TypeReference UnwrapGenericInstanceType(this TypeReference type)
             => type is GenericInstanceType genericInstanceType ? genericInstanceType.ElementType : type;
 
+        public static MethodReference MakeBaseTypeHostInstanceGeneric(this MethodReference self)
+            => self.DeclaringType.HasGenericParameters 
+                ? self.MakeHostInstanceGeneric(self.DeclaringType.GenericParameters.Cast<TypeReference>().ToArray())
+                : self;
+
         public static MethodReference MakeHostInstanceGeneric(this MethodReference self, params TypeReference[] args)
         {
             var reference = new MethodReference(self.Name, self.ReturnType, self.DeclaringType.UnwrapGenericInstanceType().MakeGenericInstanceType(args))
