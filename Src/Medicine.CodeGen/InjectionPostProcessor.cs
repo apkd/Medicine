@@ -194,7 +194,7 @@ namespace Medicine
                         continue;
                     }
 
-                    if (!isInterface && !isComponent)
+                    if (!isInterface && !isComponent && !isCamera)
                         throw new MedicineError($"Type of property with {attribute.GetName()} needs to be a component or an interface.", property);
 
                     if (type.Attributes.HasFlagNonAlloc(TypeAttributes.Abstract | TypeAttributes.Sealed))
