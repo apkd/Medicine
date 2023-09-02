@@ -181,7 +181,7 @@ namespace Medicine
                     if (attribute.Is<Inject.All>())
                     {
                         if (!isInterface && !isMonoBehaviour && !isScriptableObject)
-                            throw new MedicineError($"Type of property with [Inject.Single] needs to be an array of MonoBehaviours, ScriptableObjects, or interfaces.", property);
+                            throw new MedicineError($"Type of property with {attribute.GetName()} needs to be an array of MonoBehaviours, ScriptableObjects, or interfaces.", property);
 
                         if (!isArray)
                             throw new MedicineError($"Type of property with {attribute.GetName()} needs to be an array.", property);
