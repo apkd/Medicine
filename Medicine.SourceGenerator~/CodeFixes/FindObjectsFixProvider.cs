@@ -1,12 +1,11 @@
 using System.Collections.Immutable;
 using System.Composition;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Editing;
 
 [ExportCodeFixProvider(LanguageNames.CSharp), Shared]
 sealed class FindObjectsFixProvider : CodeFixProvider
@@ -110,7 +109,7 @@ sealed class FindObjectsFixProvider : CodeFixProvider
                     context.RegisterCodeFix(
                         CodeAction.Create(
                             title: $"Use non-allocating enumerator 'Find.ComponentsInScene<{typeSymbol!.Name}>(gameObject.scene)'",
-                            createChangedDocument: ct => ReplaceWith_Find_ComponentsInScene(context.Document, invocation, IsIncludeInactive(), typeSyntax, model, ct),
+                            createChangedDocument: ct => ReplaceWith_Find_ComponentsInScene(context.Document, invocation, IsIncludeInactive(), typeSyntax, ct),
                             equivalenceKey: nameof(FindObjectsAnalyzer)
                         ),
                         diagnostic
@@ -128,6 +127,7 @@ sealed class FindObjectsFixProvider : CodeFixProvider
         CancellationToken token
     )
     {
+        var editor = await DocumentEditor.CreateAsync(document, token).ConfigureAwait(false);
         var newExpression =
             SyntaxFactory.MemberAccessExpression(
                     SyntaxKind.SimpleMemberAccessExpression,
@@ -136,18 +136,21 @@ sealed class FindObjectsFixProvider : CodeFixProvider
                 )
                 .WithTriviaFrom(oldInvoke);
 
-        var root = await document.GetSyntaxRootAsync(token).ConfigureAwait(false);
-        return document.WithSyntaxRoot(root!.ReplaceNode(oldInvoke, newExpression));
+        editor.ReplaceNode(oldInvoke, newExpression);
+        editor.EnsureNamespaceIsImported("Medicine");
+        return editor.GetChangedDocument();
     }
 
     static async Task<Document> ReplaceWith_Find_ObjectsByType(
-        Document doc,
+        Document document,
         InvocationExpressionSyntax oldCall,
         TypeSyntax tArg,
         SemanticModel semanticModel,
         CancellationToken ct
     )
     {
+        var editor = await DocumentEditor.CreateAsync(document, ct).ConfigureAwait(false);
+        
         static bool IsBool(ITypeSymbol? t) => t?.SpecialType == SpecialType.System_Boolean;
         static bool IsSort(ITypeSymbol? t) => t?.Name is "FindObjectsSortMode";
         static bool IsInactiveEnum(ITypeSymbol? t) => t?.Name is "FindObjectsInactive";
@@ -248,8 +251,9 @@ sealed class FindObjectsFixProvider : CodeFixProvider
             )
             .WithTriviaFrom(oldCall);
 
-        var root = await doc.GetSyntaxRootAsync(ct).ConfigureAwait(false);
-        return doc.WithSyntaxRoot(root!.ReplaceNode(oldCall, newCall));
+        editor.ReplaceNode(oldCall, newCall);
+        editor.EnsureNamespaceIsImported("Medicine");
+        return editor.GetChangedDocument();
     }
 
     static async Task<Document> ReplaceWith_Find_ComponentsInScene(
@@ -257,10 +261,10 @@ sealed class FindObjectsFixProvider : CodeFixProvider
         InvocationExpressionSyntax oldInvocation,
         bool isIncludeInactive,
         TypeSyntax typeArgument,
-        SemanticModel semanticModel,
         CancellationToken cancellationToken
     )
     {
+        var editor = await DocumentEditor.CreateAsync(document, cancellationToken).ConfigureAwait(false);
         var sceneAccess = SyntaxFactory.MemberAccessExpression(
             SyntaxKind.SimpleMemberAccessExpression,
             SyntaxFactory.IdentifierName("gameObject"),
@@ -294,9 +298,8 @@ sealed class FindObjectsFixProvider : CodeFixProvider
         var newInvocation = SyntaxFactory.InvocationExpression(newMemberAccess, argumentList)
             .WithTriviaFrom(oldInvocation);
 
-        var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
-        var newRoot = root!.ReplaceNode(oldInvocation, newInvocation);
-
-        return document.WithSyntaxRoot(newRoot);
+        editor.ReplaceNode(oldInvocation, newInvocation);
+        editor.EnsureNamespaceIsImported("Medicine");
+        return editor.GetChangedDocument();
     }
 }

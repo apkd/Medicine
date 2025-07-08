@@ -38,9 +38,7 @@ public static class Utility
         if (usings.Any(x => x.Name.ToString() == namespaceName))
             return;
 
-        var usingDirective = SyntaxFactory
-            .UsingDirective(SyntaxFactory.IdentifierName(namespaceName));
-
+        var usingDirective = SyntaxFactory.UsingDirective(SyntaxFactory.IdentifierName(namespaceName));
         editor.InsertAfter(usings.Last(), usingDirective);
     }
 
