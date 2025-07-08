@@ -1,4 +1,4 @@
-#if OLDER_THAN_2022_3_45f1
+#if UNITY_OLDER_THAN_2022_3_45f1
 using System;
 using static System.AttributeTargets;
 
