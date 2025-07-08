@@ -1,0 +1,45 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <LangVersion>preview</LangVersion>
+        <Configuration>Release</Configuration>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <OutputPath>..\Medicine.SourceGenerator</OutputPath>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <Deterministic>true</Deterministic>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <RootNamespace>Analyzers</RootNamespace>
+        <AssemblyName>Medicine.SourceGenerator</AssemblyName>
+        <GenerateDependencyFile>false</GenerateDependencyFile>
+    </PropertyGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+        <DebugType>full</DebugType>
+    </PropertyGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+        <DebugType>none</DebugType>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Bcl.Memory" Version="9.0.6" />
+        <PackageReference Include="Microsoft.CodeAnalysis" Version="4.3.0"/>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Compile Remove="Medicine.SourceGenerator.Test\**" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <EmbeddedResource Remove="Medicine.SourceGenerator.Test\**" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Remove="Medicine.SourceGenerator.Test\**" />
+    </ItemGroup>
+
+</Project>

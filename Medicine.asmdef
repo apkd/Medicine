@@ -1,0 +1,27 @@
+{
+  "name": "Medicine",
+  "rootNamespace": "",
+  "references": [
+    "GUID:e0cd26848372d4e5c891c569017e11f1"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": true,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [
+    {
+      "name": "com.cysharp.zlinq",
+      "expression": "",
+      "define": "MODULE_ZLINQ"
+    },
+    {
+      "name": "Unity",
+      "expression": "[0.0.0,2022.3.45f1)",
+      "define": "UNITY_OLDER_THAN_2022_3_45f1"
+    }
+  ],
+  "noEngineReferences": false
+}

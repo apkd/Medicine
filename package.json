@@ -1,11 +1,11 @@
 {
   "name": "pl.apkd.medicine",
   "displayName": "Medicine",
-  "version": "1.0.0-preview",
+  "version": "3.0.0",
   "unity": "2020.1",
   "unityRelease": "0b11",
   "dependencies": {
-    "nuget.mono-cecil": "0.1.6-preview"
+    "com.unity.collections": "0.17.0"
   },
   "type": "tool",
   "keywords": [
@@ -13,7 +13,5 @@
     "di",
     "dependency injection",
     "inject"
-  ],
-  "hideInEditor": false,
-  "description": "Medicine is a code-driven, performance-oriented way to automatically hook up references between your components. Additionally, it comes with a toolbox of optimized versions of many component-related operations."
+  ]
 }
