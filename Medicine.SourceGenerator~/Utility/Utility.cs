@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Editing;
 
 public static class Utility
 {
@@ -23,6 +24,25 @@ public static class Utility
 
     public static Diagnostic DebugDiagnostic(Location location, string msg)
         => Diagnostic.Create(DebugDiagnosticDescriptor, location, msg);
+
+    public static void EnsureNamespaceIsImported(this DocumentEditor editor, string namespaceName)
+    {
+        if (!editor.OriginalDocument.TryGetSyntaxRoot(out var root))
+            return;
+
+        if (root is not CompilationUnitSyntax compilationUnit)
+            return;
+
+        var usings = compilationUnit.Usings;
+
+        if (usings.Any(x => x.Name.ToString() == namespaceName))
+            return;
+
+        var usingDirective = SyntaxFactory
+            .UsingDirective(SyntaxFactory.IdentifierName(namespaceName));
+
+        editor.InsertAfter(usings.Last(), usingDirective);
+    }
 
     public static EquatableArray<string> DeconstructTypeDeclaration(MemberDeclarationSyntax memberDeclarationSyntax, string? extraInterfaces = null)
     {

@@ -126,7 +126,7 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
             if (existingInjectAttribute is null)
             {
                 generator.AddAttributes(method, generator.Attribute("Inject"));
-                EnsureNamespaceIsImported("Medicine");
+                editor.EnsureNamespaceIsImported("Medicine");
             }
 
             if (method.Body is null)
@@ -173,25 +173,6 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
             }
 
             return method.WithBody(method.Body.AddStatements((StatementSyntax)propertyAssignmentStatement));
-        }
-
-        void EnsureNamespaceIsImported(string namespaceName)
-        {
-            if (!document.TryGetSyntaxRoot(out var root))
-                return;
-
-            if (root is not CompilationUnitSyntax compilationUnit)
-                return;
-
-            var usings = compilationUnit.Usings;
-
-            if (usings.Any(x => x.Name.ToString() == namespaceName))
-                return;
-
-            var usingDirective = SyntaxFactory
-                .UsingDirective(SyntaxFactory.IdentifierName(namespaceName));
-
-            editor.InsertAfter(usings.Last(), usingDirective);
         }
 
         return editor.GetChangedDocument();
