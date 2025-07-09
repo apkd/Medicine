@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
+using JetBrains.Annotations;
 using Medicine.Internal;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine.Pool;
@@ -11,6 +12,11 @@ using static System.Runtime.CompilerServices.MethodImplOptions;
 
 namespace Medicine
 {
+    /// <summary>
+    /// Handle representing a pooled <see cref="List{T}"/> borrowed from the shared Unity object pool.
+    /// Remember to call <see cref="Dispose"/> <b>exactly once</b> to return the list to the pool.
+    /// </summary>
+    /// <typeparam name="T">Type of the list element.</typeparam>
     public struct PooledList<T> : IDisposable
         where T : class
     {
@@ -19,16 +25,24 @@ namespace Medicine
 
         internal PooledList(List<T> list, PooledObject<List<T>> disposable)
         {
-            this.List = list;
+            List = list;
             this.disposable = disposable;
         }
 
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the object was already returned to the pool.
+        /// </exception>
         public void Dispose()
             => PooledList.Dispose(List, ref disposable);
     }
 
     public static class PooledList
     {
+        /// <summary>
+        /// Obtains a pooled <see cref="List{T}"/> instance from the shared Unity object pool.
+        /// The returned wrapper object needs to be disposed of so that the list is returned to the pool.
+        /// </summary>
+        [MustDisposeResource]
         public static PooledList<T> Get<T>(out List<T> list)
             where T : class
         {
@@ -51,6 +65,8 @@ namespace Medicine
             return new(list, disposable);
         }
 
+        /// <inheritdoc cref="Get{T}(out System.Collections.Generic.List{T})"/>
+        [MustDisposeResource]
         [MethodImpl(AggressiveInlining)]
         public static PooledList<T> Get<T>() where T : class
             => Get<T>(out _);
