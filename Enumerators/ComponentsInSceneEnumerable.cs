@@ -38,6 +38,7 @@ namespace Medicine.Internal
 #endif
     }
 
+    [DisallowReadonly]
     [EditorBrowsable(Never)]
     [StructLayout(LayoutKind.Auto)]
     public struct ComponentsInSceneEnumerator<T> : IDisposable, IValueEnumerator<T>

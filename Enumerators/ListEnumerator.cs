@@ -18,6 +18,7 @@ namespace Medicine.Internal
     /// This version of <see cref="List{T}.Enumerator"/> skips list version checks in release builds.
     /// </summary>
     [EditorBrowsable(Never)]
+    [DisallowReadonly]
     public struct ListEnumerator<T> : IValueEnumerator<T>
     {
         readonly T[]? array;

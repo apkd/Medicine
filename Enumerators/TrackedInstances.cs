@@ -112,6 +112,7 @@ namespace Medicine.Internal
 #endif
         }
 
+        [DisallowReadonly]
         [StructLayout(LayoutKind.Auto)]
         public struct Enumerator : IValueEnumerator<T>
         {

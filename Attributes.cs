@@ -106,6 +106,13 @@ namespace Medicine
         ) { }
     }
 
+    /// <summary>
+    /// Can be used to ensure that a mutable struct is not stored in a `readonly` field.
+    /// This would prevent the struct's value from being updated.
+    /// </summary>
+    [AttributeUsage(Struct)]
+    public sealed class DisallowReadonlyAttribute : Attribute { }
+
 #if MEDICINE_V3_MIGRATION
     [MeansImplicitUse, UsedImplicitly(WithMembers)]
     public static class Inject

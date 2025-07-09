@@ -18,6 +18,7 @@ namespace Medicine
             => new(init);
     }
 
+    [DisallowReadonly]
     public struct LazyRef<T> where T : class
     {
         object obj;
@@ -55,6 +56,7 @@ namespace Medicine
         }
     }
 
+    [DisallowReadonly]
     public struct LazyVal<T> where T : struct
     {
         T obj;
