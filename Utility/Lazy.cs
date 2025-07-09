@@ -9,13 +9,17 @@ namespace Medicine
     using MedicineUnsafeShim = Unsafe;
 #endif
 
+    /// <summary>
+    /// Utilities for creating <see cref="LazyRef{T}"/> and <see cref="LazyVal{T}"/>,
+    /// efficient wrappers for lazily initialized objects.
+    /// </summary>
     public static class Lazy
     {
         public static LazyRef<T> From<T>(Func<T> init) where T : class
-            => new(init);
+            => new(lazy: init);
 
         public static LazyVal<T> From<T>(in Func<T> init) where T : struct
-            => new(init);
+            => new(lazy: init);
     }
 
     [DisallowReadonly]
@@ -23,8 +27,8 @@ namespace Medicine
     {
         object obj;
 
-        public LazyRef(Func<T> init)
-            => obj = init;
+        public LazyRef(Func<T> lazy)
+            => obj = lazy;
 
         [MethodImpl(AggressiveInlining)]
         public static implicit operator T(LazyRef<T> lazyRef)
@@ -62,10 +66,10 @@ namespace Medicine
         T obj;
         Func<T> init;
 
-        public LazyVal(Func<T> init)
+        public LazyVal(Func<T> lazy)
         {
             MedicineUnsafeShim.SkipInit(out obj);
-            this.init = init;
+            this.init = lazy;
         }
 
         [MethodImpl(AggressiveInlining)]

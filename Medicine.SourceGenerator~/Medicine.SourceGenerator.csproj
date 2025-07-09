@@ -15,6 +15,7 @@
         <RootNamespace>Analyzers</RootNamespace>
         <AssemblyName>Medicine.SourceGenerator</AssemblyName>
         <GenerateDependencyFile>false</GenerateDependencyFile>
+        <WarningsAsErrors>true</WarningsAsErrors>
     </PropertyGroup>
 
     <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">

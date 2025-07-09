@@ -65,6 +65,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         string InitExpression,
         string? TypeFQN,
         string TypeDisplayName,
+        string? CleanupExpression,
         CacheIgnore<Location> Location,
         ExpressionFlags Flags
     );
@@ -148,25 +149,12 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                     {
                         var typeSymbol = context.SemanticModel.GetTypeInfo(assignment.Right, ct).Type;
                         var typeSymbolForDisplayName = typeSymbol;
-
                         var flags = default(ExpressionFlags);
+                        var expression = assignment.Right.ToString().Replace("\r", "").Replace("\n", "").AsSpan().Trim();
 
                         if (assignment.Right is ImplicitObjectCreationExpressionSyntax { ArgumentList.Arguments: [{ Expression: { } expr }, ..] })
                         {
-                            ITypeSymbol? exprType = expr switch
-                            {
-                                LambdaExpressionSyntax { Body: { } body }
-                                    => context.SemanticModel.GetTypeInfo(body, ct).Type,
-                                MemberAccessExpressionSyntax or GenericNameSyntax or NameSyntax
-                                    => context.SemanticModel.GetSymbolInfo(expr, ct)
-                                        .CandidateSymbols
-                                        .OfType<IMethodSymbol>()
-                                        .FirstOrDefault(x => x.Parameters is not { Length: > 0 })
-                                        .ReturnType,
-                                _ => null,
-                            };
-
-                            if (exprType != null)
+                            if (GetDelegateReturnType(expr) is { } exprType)
                             {
                                 string lazyExpr = exprType.IsValueType ? "Medicine.LazyVal`1" : "Medicine.LazyRef`1";
                                 typeSymbol = context.SemanticModel.Compilation.GetTypeByMetadataName(lazyExpr)?.Construct(exprType);
@@ -174,13 +162,39 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                                 flags.Set(IsLazy, true);
                             }
                         }
-
-                        if (typeSymbol is { IsStatic: true })
+                        else if (assignment.Right is LambdaExpressionSyntax or MemberAccessExpressionSyntax or GenericNameSyntax or NameSyntax)
                         {
-                            typeSymbol = null;
+                            if (GetDelegateReturnType(assignment.Right) is { } exprType)
+                            {
+                                typeSymbol = context.SemanticModel.Compilation.GetTypeByMetadataName("System.Func`1")?.Construct(exprType);
+                                typeSymbolForDisplayName = exprType;
+                                flags.Set(IsTransient, true);
+                            }
                         }
 
-                        var expression = assignment.Right.ToString().AsSpan().Trim();
+                        if (typeSymbol is { IsStatic: true })
+                            typeSymbol = null;
+
+                        ITypeSymbol? GetDelegateReturnType(ExpressionSyntax delegateExpression)
+                            => delegateExpression switch
+                            {
+                                LambdaExpressionSyntax { Body: InvocationExpressionSyntax body }
+                                    => context.SemanticModel.GetTypeInfo(body, ct).Type,
+                                LambdaExpressionSyntax { Body: BlockSyntax body }
+                                    => body.DescendantNodes()
+                                        .OfType<ReturnStatementSyntax>()
+                                        .Select(x => x.Expression)
+                                        .Where(x => x is not null)
+                                        .Select(x => context.SemanticModel.GetTypeInfo(x!, ct).Type)
+                                        .FirstOrDefault(x => x is not null),
+                                MemberAccessExpressionSyntax or GenericNameSyntax or NameSyntax
+                                    => context.SemanticModel.GetSymbolInfo(delegateExpression, ct)
+                                        .CandidateSymbols
+                                        .OfType<IMethodSymbol>()
+                                        .FirstOrDefault(x => x.Parameters is not { Length: > 0 })
+                                        ?.ReturnType,
+                                _ => null,
+                            };
 
                         bool MatchOption(ref ReadOnlySpan<char> expression, ExpressionFlags flag, ReadOnlySpan<char> pattern)
                         {
@@ -194,50 +208,99 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                             return false;
                         }
 
+                        bool MatchOptionWithExpression(ref ReadOnlySpan<char> expression, out string argument, ReadOnlySpan<char> pattern)
+                        {
+                            argument = "";
+
+                            if (expression is not [.., ')'])
+                                return false;
+
+                            int openBracketIndex = -1;
+                            int bracketBalance = 0;
+                            for (int i = expression.Length - 2; i >= 0; i--)
+                            {
+                                char c = expression[i];
+                                if (c == ')')
+                                {
+                                    bracketBalance++;
+                                }
+                                else if (c == '(')
+                                {
+                                    if (bracketBalance == 0)
+                                    {
+                                        openBracketIndex = i;
+                                        break;
+                                    }
+
+                                    bracketBalance--;
+                                }
+                            }
+
+                            if (openBracketIndex == -1)
+                                return false;
+
+                            var patternStartIndex = openBracketIndex - pattern.Length;
+
+                            if (patternStartIndex <= 0 || expression[patternStartIndex - 1] != '.')
+                                return false;
+
+                            var patternInExpression = expression.Slice(patternStartIndex, pattern.Length);
+
+                            if (!patternInExpression.SequenceEqual(pattern))
+                                return false;
+
+                            var argumentStartIndex = openBracketIndex + 1;
+                            var argumentLength = expression.Length - 1 - argumentStartIndex;
+                            var argumentSpan = expression.Slice(argumentStartIndex, argumentLength);
+                            argument = argumentSpan.Trim().ToString();
+
+                            expression = expression[..(patternStartIndex - 1)];
+
+                            return true;
+                        }
+
+                        bool IsStaticPropertyAccess(ExpressionSyntax expression, string classAttribute, string propertyName)
+                            => expression is MemberAccessExpressionSyntax
+                               {
+                                   Expression: IdentifierNameSyntax classIdentifier,
+                                   Name.Identifier.ValueText: { Length: > 0 } propertyNameIdentifierText,
+                               }
+                               && propertyNameIdentifierText == propertyName
+                               && context.SemanticModel.GetSymbolInfo(classIdentifier, ct).Symbol is ITypeSymbol classTypeSymbol
+                               && classTypeSymbol.HasAttribute(classAttribute);
+
+                        string? cleanupExpression = null;
+
                         while (true)
                         {
                             if (MatchOption(ref expression, IsOptional, ".Optional()".AsSpan()))
                                 continue;
 
-                            if (MatchOption(ref expression, IsTransient, ".Transient()".AsSpan()))
+                            if (MatchOptionWithExpression(ref expression, out string cleanup, "Cleanup".AsSpan()))
+                            {
+                                cleanupExpression = cleanup;
                                 continue;
-
-                            if (MatchOption(ref expression, IsCleanupDispose, ".CleanupDispose()".AsSpan()))
-                                continue;
-
-                            if (MatchOption(ref expression, IsCleanupDestroy, ".CleanupDestroy()".AsSpan()))
-                                continue;
+                            }
 
                             break;
                         }
 
-                        string trimmedExpression = expression.MakeString();
+                        bool isSingleton = IsStaticPropertyAccess(assignment.Right, SingletonAttributeFQN, "Instance");
+                        bool isTracked = IsStaticPropertyAccess(assignment.Right, TrackAttributeFQN, "Instances");
+                        flags.Set(IsSingleton, isSingleton);
+                        flags.Set(IsTracked, isTracked);
 
-                        bool isSingleton = assignment.Right.DescendantNodesAndSelf()
-                            .Count(n => n is MemberAccessExpressionSyntax
-                                {
-                                    Expression: IdentifierNameSyntax singletonClassIdentifier,
-                                    Name.Identifier.ValueText: "Instance",
-                                } && context.SemanticModel.GetSymbolInfo(singletonClassIdentifier, ct).Symbol is ITypeSymbol symbol
-                                  && symbol.HasAttribute(SingletonAttributeFQN)
-                            ) is 1;
-
-                        bool isTracked = !isSingleton && assignment.Right.DescendantNodesAndSelf()
-                            .Count(n => n is MemberAccessExpressionSyntax
-                                {
-                                    Expression: IdentifierNameSyntax trackedClassIdentifier,
-                                    Name.Identifier.ValueText: "Instances",
-                                } && context.SemanticModel.GetSymbolInfo(trackedClassIdentifier, ct).Symbol is ITypeSymbol symbol
-                                  && symbol.HasAttribute(TrackAttributeFQN)
-                            ) is 1;
+                        if (isSingleton || isTracked)
+                        {
+                            if (assignment.Right is MemberAccessExpressionSyntax memberAccessExpressionSyntax)
+                                if (context.SemanticModel.GetSymbolInfo(memberAccessExpressionSyntax.Expression, ct).Symbol is ITypeSymbol accessedExpressionSymbol)
+                                    typeSymbol = typeSymbolForDisplayName = accessedExpressionSymbol;
+                        }
 
                         if ((isTracked, typeSymbol) is (true, { Name: "TrackedInstances<T>.WithImmediateCopy", ContainingType.TypeArguments: [var trackedInstancesType] }))
                             typeSymbolForDisplayName = trackedInstancesType;
                         else if ((isTracked, typeSymbol) is (true, INamedTypeSymbol { TypeArguments: [var first2] }))
                             typeSymbolForDisplayName = first2;
-
-                        flags.Set(IsSingleton, isSingleton);
-                        flags.Set(IsTracked, isTracked);
 
                         if (isSingleton)
                         {
@@ -287,18 +350,26 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                                    assignment.Right is not BaseObjectCreationExpressionSyntax &&
                                    typeSymbol is not IArrayTypeSymbol &&
                                    !flags.Has(IsOptional) &&
+                                   !flags.Has(IsTransient) &&
                                    !isSingleton &&
                                    !isTracked
                         );
 
+                        flags.Set(
+                            flag: IsOptional,
+                            value: flags.Has(IsOptional) &&
+                                   !flags.Has(IsArray) &&
+                                   !flags.Has(IsTransient)
+                        );
+
                         flags.Set(IsValueType, typeSymbol?.IsValueType is true);
                         flags.Set(IsArray, typeSymbol is IArrayTypeSymbol);
-                        flags.Set(IsOptional, flags.Has(IsOptional) && !flags.Has(IsArray));
                         flags.Set(IsDisposable, typeSymbol.HasInterface("global::System.IDisposable"));
 
                         return new InitExpressionInfo(
-                            PropertyName: assignment.Left.ToString(),
-                            InitExpression: trimmedExpression,
+                            PropertyName: assignment.Left.ToString().Trim(),
+                            InitExpression: expression.MakeString(),
+                            CleanupExpression: cleanupExpression,
                             TypeFQN: typeFQN,
                             TypeDisplayName: typeDisplayName,
                             Location: assignment.GetLocation(),
@@ -363,7 +434,8 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
         foreach (var x in expressions)
         {
-            string nul = x.Flags.Has(IsOptional) ? "?" : "";
+            string nul = x.Flags.Has(IsValueType) ? "" : "?";
+            string opt = x.Flags.Has(IsOptional) ? "?" : "";
             string exc = x.Flags.Has(IsOptional) ? "" : "!";
 
             void OpenListAndAppendOptionalDescription(string nullIf)
@@ -423,7 +495,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                 if (!x.Flags.Has(IsOptional))
                     Line.Append("[global::System.Diagnostics.CodeAnalysis.AllowNull, global::JetBrains.Annotations.CanBeNull]");
 
-                Line.Append($"{access}{@static}{x.TypeFQN}{nul} {x.PropertyName}");
+                Line.Append($"{access}{@static}{x.TypeFQN}{opt} {x.PropertyName}");
                 using (Braces)
                 {
                     // always get a fresh singleton instance
@@ -498,27 +570,20 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                 if (!x.Flags.Has(IsOptional))
                     Line.Append("[global::System.Diagnostics.CodeAnalysis.AllowNull, global::JetBrains.Annotations.CanBeNull]");
 
-                if (x.Flags.Has(IsTransient))
-                {
-                    Line.Append($"{access}{@static}{x.TypeFQN}{nul} {x.PropertyName}");
-                    using (Braces)
-                        Line.Append($"{Alias.Inline} get => {x.InitExpression}");
-                }
-
                 if (x.Flags.Has(IsValueType))
                 {
-                    Line.Append($"{access}{@static}ref {x.TypeFQN}{nul} {x.PropertyName}");
+                    Line.Append($"{access}{@static}ref {x.TypeFQN}{opt} {x.PropertyName}");
                     using (Braces)
                     {
                         Line.Append($"{Alias.Inline} get");
                         using (Braces)
                         {
-                            if (input.IsUnityEditorCompile)
+                            if (input.IsUnityEditorCompile && !x.Flags.Has(IsDisposable))
                             {
-                                Line.Append($"{Alias.NoInline} void {m}Init() => _{m}{x.PropertyName} = {x.InitExpression};");
+                                Line.Append($"{Alias.NoInline} void {m}Expr() => _{m}{x.PropertyName} = {x.InitExpression};");
                                 Line.Append($"if ({m}Utility.EditMode)");
                                 using (Indent)
-                                    Line.Append($"{m}Init();"); // in edit mode, always call initializer
+                                    Line.Append($"{m}Expr();"); // in edit mode, always call initializer
                             }
 
                             Line.Append($"return ref _{m}{x.PropertyName};");
@@ -527,21 +592,21 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                 }
                 else
                 {
-                    Line.Append($"{access}{@static}{x.TypeFQN}{nul} {x.PropertyName}");
+                    Line.Append($"{access}{@static}{x.TypeFQN}{opt} {x.PropertyName}");
                     using (Braces)
                     {
                         Line.Append($"{Alias.Inline} get");
                         using (Braces)
                         {
-                            if (input.IsUnityEditorCompile)
+                            if (input.IsUnityEditorCompile && !x.Flags.Has(IsDisposable))
                             {
-                                Line.Append($"{Alias.NoInline} {x.TypeFQN}{nul} {m}Init() => {x.InitExpression};");
+                                Line.Append($"{Alias.NoInline} {x.TypeFQN}{opt} {m}Expr() => {x.InitExpression};");
                                 Line.Append($"if ({m}Utility.EditMode)");
                                 using (Indent)
-                                    Line.Append($"return {m}Init();"); // in edit mode, always call initializer
+                                    Line.Append($"return {m}Expr();"); // in edit mode, always call initializer
                             }
 
-                            Line.Append($"return _{m}{x.PropertyName};");
+                            Line.Append($"return _{m}{x.PropertyName}!;");
                         }
 
                         Line.Append($"{Alias.Inline} {@private}set");
@@ -554,23 +619,30 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                                     Line.Append($"{m}Debug.LogError($\"Missing component: {x.TypeDisplayName} in {input.ClassName} '{{this.name}}'\", this);");
                             }
 
-                            Line.Append($"_{m}{x.PropertyName} = value!;");
+                            Line.Append($"_{m}{x.PropertyName} = value;");
                         }
                     }
                 }
 
-                if (!x.Flags.Has(IsTransient))
+                // backing field
+                Linebreak();
+                Line.Append(Alias.Hidden);
+                Line.Append($"{@static}{x.TypeFQN}{nul} _{m}{x.PropertyName};");
+
+                if (x.CleanupExpression is not null)
                 {
-                    // backing field
+                    Linebreak();
                     Line.Append(Alias.Hidden);
-                    Line.Append($"{@static}{x.TypeFQN} _{m}{x.PropertyName};");
+                    Line.Append($"static readonly global::System.Action<{x.TypeFQN}> _{m}{x.PropertyName}{m}CLEANUP");
+                    using (Indent)
+                        Line.Append($"= {x.CleanupExpression};");
                 }
             }
 
             Linebreak();
         }
 
-        if (expressions.Any(x => x.Flags.Any(IsCleanupDestroy | IsCleanupDispose)))
+        if (expressions.Any(x => x.Flags.Any(IsCleanupDestroy | IsCleanupDispose) || x.CleanupExpression is not null))
         {
             Linebreak();
             Line.Append($"{access}void Cleanup()");
@@ -587,6 +659,9 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
                     if (x.Flags.Has(IsCleanupDestroy))
                         Line.Append($"Destroy({x.PropertyName});");
+
+                    if (x.CleanupExpression is not null)
+                        Line.Append($"_{m}{x.PropertyName}{m}CLEANUP({x.PropertyName}); // {x.CleanupExpression}");
                 }
             }
         }
