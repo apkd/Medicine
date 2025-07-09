@@ -67,6 +67,6 @@ namespace Medicine.Internal
 
         [MethodImpl(AggressiveInlining)]
         public static bool IsNativeObjectAlive(UnityEngine.Object? obj)
-            => isNativeObjectAliveDelegate(obj);
+            => !ReferenceEquals(obj, null) && isNativeObjectAliveDelegate(obj);
     }
 }
