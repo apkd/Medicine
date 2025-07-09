@@ -19,6 +19,19 @@ public sealed class ComponentEnumerationAnalyzer : DiagnosticAnalyzer
             isEnabledByDefault: true
         );
 
+    static readonly ImmutableHashSet<string> LinqMethodNames
+        = ImmutableHashSet.Create(
+            StringComparer.Ordinal,
+            "Aggregate", "All", "Any", "AsEnumerable", "AsValueEnumerable",
+            "Average", "Cast", "Count", "ElementAt", "ElementAtOrDefault",
+            "First", "FirstOrDefault", "GroupBy", "GroupJoin", "Join",
+            "Last", "LastOrDefault", "Max", "Min", "OfType", "OrderBy",
+            "OrderByDescending", "Reverse", "Select", "SelectMany",
+            "SequenceEqual", "Single", "SingleOrDefault", "Skip", "Sum",
+            "Take", "ThenBy", "ThenByDescending", "ToArray", "ToDictionary",
+            "ToHashSet", "ToList", "ToLookup", "Where", "Zip"
+        );
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; }
         = ImmutableArray.Create(MED010);
 
@@ -34,7 +47,7 @@ public sealed class ComponentEnumerationAnalyzer : DiagnosticAnalyzer
         var invocation = (InvocationExpressionSyntax)context.Node;
         var model = context.SemanticModel;
 
-        if (!IsPotentialTarget(invocation))
+        if (!IsUnityGetComponentsCallEarlyOut(invocation))
             return;
 
         if (!IsUnityGetComponentsCall(model, invocation, context.CancellationToken))
@@ -61,9 +74,6 @@ public sealed class ComponentEnumerationAnalyzer : DiagnosticAnalyzer
         context.ReportDiagnostic(diagnostic);
         return;
 
-        static bool IsPotentialTarget(InvocationExpressionSyntax inv)
-            => GetInvokedName(inv).Contains("GetComponents");
-
         static string GetInvokedName(InvocationExpressionSyntax inv) =>
             inv.Expression switch
             {
@@ -73,6 +83,9 @@ public sealed class ComponentEnumerationAnalyzer : DiagnosticAnalyzer
 
                 _ => string.Empty,
             };
+
+        static bool IsUnityGetComponentsCallEarlyOut(InvocationExpressionSyntax inv)
+            => GetInvokedName(inv).Contains("GetComponents");
 
         static bool IsUnityGetComponentsCall(SemanticModel sm, InvocationExpressionSyntax inv, CancellationToken ct)
         {
@@ -98,8 +111,11 @@ public sealed class ComponentEnumerationAnalyzer : DiagnosticAnalyzer
                     when foreachStmt.Expression == inv
                     => true,
                 // linq chains
-                MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax }
-                    => true,
+                MemberAccessExpressionSyntax
+                {
+                    Parent: InvocationExpressionSyntax,
+                    Name.Identifier.ValueText: var methodName
+                } when LinqMethodNames.Contains(methodName) => true,
                 _ => false,
             };
     }
