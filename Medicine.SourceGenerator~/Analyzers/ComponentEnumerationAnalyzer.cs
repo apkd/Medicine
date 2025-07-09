@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -53,7 +55,7 @@ public sealed class ComponentEnumerationAnalyzer : DiagnosticAnalyzer
         if (!IsUnityGetComponentsCall(model, invocation, context.CancellationToken))
             return;
 
-        if (!IsDirectlyEnumerated(invocation))
+        if (!IsDirectlyEnumerated(invocation, model, context.CancellationToken))
             return;
 
         var methodName = GetInvokedName(invocation);
@@ -103,20 +105,46 @@ public sealed class ComponentEnumerationAnalyzer : DiagnosticAnalyzer
                    containingType.Is("global::UnityEngine.GameObject");
         }
 
-        static bool IsDirectlyEnumerated(InvocationExpressionSyntax inv)
-            => inv.Parent switch
+        static bool IsDirectlyEnumerated(InvocationExpressionSyntax inv, SemanticModel model, CancellationToken ct)
+        {
+            switch (inv.Parent)
             {
-                // foreach
-                ForEachStatementSyntax foreachStmt
-                    when foreachStmt.Expression == inv
-                    => true,
-                // linq chains
-                MemberAccessExpressionSyntax
+                // foreach (var x in GetComponents<T>())
+                case ForEachStatementSyntax foreachStmt when foreachStmt.Expression == inv:
+
+                // GetComponents<T>().Linq...()
+                case MemberAccessExpressionSyntax
                 {
                     Parent: InvocationExpressionSyntax,
                     Name.Identifier.ValueText: var methodName
-                } when LinqMethodNames.Contains(methodName) => true,
-                _ => false,
-            };
+                } when LinqMethodNames.Contains(methodName):
+                    return true;
+
+                // var myVariable = GetComponents<T>();
+                // foreach (var x in myVariable)
+                case EqualsValueClauseSyntax { Parent: VariableDeclaratorSyntax variableDeclarator }:
+                {
+                    if (variableDeclarator.Parent?.Parent is not LocalDeclarationStatementSyntax { Parent: BlockSyntax block })
+                        return false;
+        
+                    if (model.GetDeclaredSymbol(variableDeclarator, ct) is not ILocalSymbol localSymbol)
+                        return false;
+        
+                    var usages = block.DescendantNodes()
+                        .OfType<IdentifierNameSyntax>()
+                        .Where(x => x.Identifier.ValueText == localSymbol.Name && model.GetSymbolInfo(x, ct).Symbol.Is(localSymbol))
+                        .ToArray();
+
+                    if (usages.Length != 1)
+                        return false;
+        
+                    var usage = usages[0];
+                    return usage.Parent is ForEachStatementSyntax foreachStatement && foreachStatement.Expression == usage;
+                }
+        
+                default:
+                    return false;
+            }
+        }
     }
 }
