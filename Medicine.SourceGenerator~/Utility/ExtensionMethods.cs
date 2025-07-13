@@ -1,5 +1,8 @@
+using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -25,44 +28,55 @@ public static class ExtensionMethods
             yield return node = newNode;
     }
 
-    public static EquatableArray<string> DeconstructTypeDeclaration(MemberDeclarationSyntax memberDeclarationSyntax, string? extraInterfaces = null)
+    public static T[] AsArray<T>(this ImmutableArray<T> array)
+        => Unsafe.As<ImmutableArray<T>, ValueTuple<T[]>>(ref array).Item1;
+
+    public static void AppendLongGenericTypeName(this StringBuilder stringBuilder, BaseSourceGenerator sourceGenerator, string? name)
     {
-        IEnumerable<string> Walk(MemberDeclarationSyntax? syntax)
+        if (name is null)
+            return;
+
+        var span = name.AsSpan();
+        int tuple = 0;
+
+        foreach (var ch in span)
         {
-            bool NavigateToParent()
-                => (syntax = syntax?.Parent as MemberDeclarationSyntax)?.Kind()
-                    is SyntaxKind.NamespaceDeclaration
-                    or SyntaxKind.ClassDeclaration
-                    or SyntaxKind.StructDeclaration
-                    or SyntaxKind.RecordDeclaration;
-
-            string colon = extraInterfaces is not null
-                ? " : "
-                : "";
-
-            bool firstDeclaration = true;
-
-            do
+            switch (ch)
             {
-                var interfaces = firstDeclaration
-                    ? extraInterfaces ?? ""
-                    : "";
+                case '<':
+                    sourceGenerator.Append(ch);
+                    sourceGenerator.IncreaseIndent();
+                    sourceGenerator.Line.Append("");
+                    break;
 
-                string? line = syntax switch
-                {
-                    NamespaceDeclarationSyntax x => $"namespace {x.Name}",
-                    TypeDeclarationSyntax x      => $"partial {x.Keyword.ValueText} {x.Identifier}{x.TypeParameterList}{colon}{interfaces} {x.ConstraintClauses}",
-                    _                            => null,
-                };
+                case '>':
+                    sourceGenerator.Append(ch);
+                    sourceGenerator.DecreaseIndent();
+                    break;
 
-                if (line is not null)
-                    yield return line;
+                case ',':
+                    sourceGenerator.Append(ch);
+                    sourceGenerator.Line.Append("");
+                    break;
 
-                firstDeclaration = false;
-            } while (NavigateToParent());
+                case ' ':
+                    if (tuple > 0)
+                        goto default;
+                    continue;
+
+                case '(':
+                    tuple += 1;
+                    goto default;
+
+                case ')':
+                    tuple -= 1;
+                    goto default;
+
+                default:
+                    sourceGenerator.Append(ch);
+                    break;
+            }
         }
-
-        return Walk(memberDeclarationSyntax).Reverse().ToArray();
     }
 
     public static string? GetSafeSymbolName(this ISymbol? symbol, SemanticModel model, int position)

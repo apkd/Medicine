@@ -113,6 +113,9 @@ namespace Medicine
     [AttributeUsage(Struct)]
     public sealed class DisallowReadonlyAttribute : Attribute { }
 
+    [AttributeUsage(Method | Property)]
+    public sealed class WrapValueEnumerableAttribute : Attribute { }
+
 #if MEDICINE_V3_MIGRATION
     [MeansImplicitUse, UsedImplicitly(WithMembers)]
     public static class Inject

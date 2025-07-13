@@ -29,7 +29,6 @@ namespace Medicine.Internal
     [EditorBrowsable(Never)]
     public static class Utility
     {
-
 #if UNITY_EDITOR
         // We can do better than Application.isPlaying!
         // - a simple static field, toggled by playModeStateChanged event, direct access

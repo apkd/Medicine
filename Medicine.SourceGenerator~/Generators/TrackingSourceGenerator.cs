@@ -6,24 +6,6 @@ using static Constants;
 [Generator]
 public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalGenerator
 {
-    record struct GeneratorInput(
-        string SourceGeneratorOutputFilename,
-        string SourceGeneratorError,
-        CacheIgnore<List<string>> SourceGeneratorDiagnostics,
-        EquatableArray<string> ContainingTypeDeclaration,
-        string Attribute,
-        (bool TrackInstanceIDs, bool TrackTransforms, int InitialCapacity, int DesiredJobCount, bool Manual) AttributeArguments,
-        EquatableArray<string> InstanceDataFQNs,
-        bool HasIInstanceIndex,
-        bool IsSealed,
-        string TypeFQN,
-        string TypeDisplayName,
-        EquatableArray<string> InterfacesWithAttribute,
-        bool IsUnityEditorCompile,
-        bool IsDebugCompile,
-        bool HasBaseDeclarationsWithAttribute
-    ) : IGeneratorInput;
-
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
         foreach (var attributeName in new[] { SingletonAttributeName, TrackAttributeName })
@@ -36,10 +18,30 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                         transform: WrapTransform((attributeSyntaxContext, ct)
                             => TransformSyntaxContext(attributeSyntaxContext, ct, attributeName, $"global::Medicine.{attributeName}")
                         )
-                    ),
+                    )
+                    .Where(x => x.Attribute is { Length: > 0 }),
                 WrapGenerateSource<GeneratorInput>(GenerateSource)
             );
         }
+    }
+
+    record struct GeneratorInput() : IGeneratorTransformOutput
+    {
+        public string? SourceGeneratorOutputFilename { get; init; }
+        public string? SourceGeneratorError { get; set; }
+        public EquatableIgnoreList<string>? SourceGeneratorDiagnostics { get; set; } = [];
+        public string? Attribute;
+        public (bool TrackInstanceIDs, bool TrackTransforms, int InitialCapacity, int DesiredJobCount, bool Manual) AttributeArguments;
+        public EquatableArray<string> ContainingTypeDeclaration;
+        public EquatableArray<string> InterfacesWithAttribute;
+        public EquatableArray<string> InstanceDataFQNs;
+        public string? TypeFQN;
+        public string? TypeDisplayName;
+        public bool HasIInstanceIndex;
+        public bool IsSealed;
+        public bool IsUnityEditorCompile;
+        public bool IsDebugCompile;
+        public bool HasBaseDeclarationsWithAttribute;
     }
 
     static GeneratorInput TransformSyntaxContext(
@@ -96,7 +98,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
         return new()
         {
-            SourceGeneratorOutputFilename = GetOutputFilename(typeDeclaration.SyntaxTree.FilePath, context.TargetSymbol.GetFQN()!, attributeName),
+            SourceGeneratorOutputFilename = GetOutputFilename(typeDeclaration.SyntaxTree.FilePath, typeDeclaration.Identifier.ValueText, attributeName),
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration),
             Attribute = attributeName,
             AttributeArguments = attributeArguments,
@@ -126,10 +128,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
     void GenerateSource(SourceProductionContext context, GeneratorInput input)
     {
-        if (input.SourceGeneratorOutputFilename is not { Length: > 0 })
-            return;
-
-        Line.Append("#pragma warning disable CS8321");
+        Line.Append("#pragma warning disable CS8321 // Local function is declared but never used");
+        Line.Append("#pragma warning disable CS0618 // Type or member is obsolete");
         Line.Append(Alias.UsingStorage);
         Line.Append(Alias.UsingInline);
         Linebreak();
@@ -174,6 +174,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             if (!input.AttributeArguments.Manual)
             {
                 Line.Append(Alias.Hidden);
+                Line.Append(Alias.ObsoleteInternal);
                 Line.Append($"{@protected}{@new}void {methodName}()");
                 if (input.HasBaseDeclarationsWithAttribute)
                     Line.Append($"base.{methodName}();");
@@ -250,15 +251,19 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 }
             }
 
-            Line.Append(Alias.Hidden);
-            Line.Append($"int __{m}trackedInstanceIndex = -1;");
+            Line.Append($"public int InstanceIndex => {m}MedicineInternalInstanceIndex;");
+            Linebreak();
+
             Line.Append($"int {IInstanceIndexInterfaceFQN}.InstanceIndex");
             using (Braces)
             {
-                Line.Append(Alias.Inline).Append($" get => __{m}trackedInstanceIndex;");
-                Line.Append(Alias.Inline).Append($" set => __{m}trackedInstanceIndex = value;");
+                Line.Append(Alias.Inline).Append($" get => {m}MedicineInternalInstanceIndex;");
+                Line.Append(Alias.Inline).Append($" set => {m}MedicineInternalInstanceIndex = value;");
             }
-            Line.Append($"public int InstanceIndex => __{m}trackedInstanceIndex;");
+            Linebreak();
+
+            Line.Append(Alias.Hidden);
+            Line.Append($"int {m}MedicineInternalInstanceIndex = -1;");
             Linebreak();
         }
 
@@ -393,7 +398,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             {
                 Linebreak();
                 Line.Append(Alias.Hidden);
-                Line.Append($"global::Medicine.Internal.InvalidateSingletonToken<{input.TypeFQN}> {m}invalidateInstanceStorageToken = new(meaningOfLife: 42);");
+                Line.Append(Alias.ObsoleteInternal);
+                Line.Append($"global::Medicine.Internal.InvalidateSingletonToken<{input.TypeFQN}> {m}MedicineInternalInstanceToken = new(meaningOfLife: 42);");
             }
         }
         else if (input.Attribute is TrackAttributeName)
@@ -401,7 +407,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             if (input.IsUnityEditorCompile)
             {
                 Line.Append($"/// <summary>");
-                Line.Append($"/// Allows enumeration of all enabled instances of <see cref=\"{input.TypeDisplayName.HtmlEncode()}\"/>.");
+                Line.Append($"/// Allows enumeration of all enabled instances of <see cref=\"{input.TypeDisplayName?.HtmlEncode()}\"/>.");
                 Line.Append($"/// </summary>");
                 Line.Append($"/// <remarks>");
                 Line.Append($"/// <list type=\"bullet\">");
@@ -455,7 +461,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             {
                 Linebreak();
                 Line.Append(Alias.Hidden);
-                Line.Append($"global::Medicine.Internal.InvalidateInstanceToken<{input.TypeFQN}> {m}invalidateInstanceStorageToken = new(meaningOfLife: 42);");
+                Line.Append(Alias.ObsoleteInternal);
+                Line.Append($"global::Medicine.Internal.InvalidateInstanceToken<{input.TypeFQN}> {m}MedicineInternalInstanceToken = new(meaningOfLife: 42);");
             }
         }
 

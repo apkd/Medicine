@@ -29,7 +29,7 @@ public sealed class VersionMigrationAnalyzer : DiagnosticAnalyzer
     }
 
     static readonly string[] attributeFQNs =
-    {
+    [
         "global::Medicine.Inject",
         "global::Medicine.InjectAttribute",
         "global::Medicine.Inject.All",
@@ -41,7 +41,7 @@ public sealed class VersionMigrationAnalyzer : DiagnosticAnalyzer
         "global::Medicine.Inject.FromParents.Lazy",
         "global::Medicine.Inject.All.Lazy",
         "global::Medicine.Inject.Single.Lazy",
-    };
+    ];
 
     static void AnalyzeProperty(SyntaxNodeAnalysisContext context)
     {

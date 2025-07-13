@@ -11,8 +11,8 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
 {
     public static readonly DiagnosticDescriptor MED007 = new(
         id: nameof(MED007),
-        title: "Cache component reference in Awake",
-        messageFormat: "Call to '{0}' can be cached with [Inject]",
+        title: "Cache component reference",
+        messageFormat: "Call to '{0}' can be cached",
         category: "Performance",
         defaultSeverity: DiagnosticSeverity.Info,
         isEnabledByDefault: true
@@ -20,15 +20,24 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
 
     public static readonly DiagnosticDescriptor MED008 = new(
         id: nameof(MED008),
-        title: "Replace with a cached component reference",
-        messageFormat: "Use the cached property instead of a '{0}' call",
+        title: "Replace with an existing cached component reference",
+        messageFormat: "Use the existing cached property instead of a '{0}' call",
+        category: "Performance",
+        defaultSeverity: DiagnosticSeverity.Info,
+        isEnabledByDefault: true
+    );
+
+    public static readonly DiagnosticDescriptor MED009 = new(
+        id: nameof(MED009),
+        title: "Add an Awake() method and cache component reference",
+        messageFormat: "Call to '{0}' can be cached",
         category: "Performance",
         defaultSeverity: DiagnosticSeverity.Info,
         isEnabledByDefault: true
     );
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; }
-        = ImmutableArray.Create(MED007, MED008);
+        = ImmutableArray.Create(MED007, MED008, MED009);
 
     static readonly ImmutableHashSet<string> TargetMethodNames
         = ImmutableHashSet.Create(
@@ -76,6 +85,7 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
             if (invocationExpr.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault() is not { } containingMethod)
                 return;
 
+            // ignore static methods
             if (containingMethod.Modifiers.Any(SyntaxKind.StaticKeyword))
                 return;
 
@@ -83,6 +93,11 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
             if (containingMethod.HasAttribute(x => x is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute"))
                 return;
         }
+
+        // ignore situations when the call already assigns to a field/property
+        if (invocationExpr.Parent is AssignmentExpressionSyntax aes && aes.Right == invocationExpr)
+            if (context.SemanticModel.GetSymbolInfo(aes.Left, context.CancellationToken).Symbol is IFieldSymbol or IPropertySymbol)
+                return;
 
         if (invocationExpr.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault() is not { } classDecl)
             return; // no parent class decl?
@@ -94,33 +109,28 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
                 m.HasAttribute(x => x is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute")
             );
 
-        // can create cache property -- report fixable diagnostic
         if (injectionMethod is null)
         {
-            context.ReportDiagnostic(Diagnostic.Create(MED007, invocationExpr.GetLocation(), invocationExpr.ToString()));
+            // needs a new [Inject] method -- report fixable diagnostic
+            context.ReportDiagnostic(Diagnostic.Create(MED009, invocationExpr.GetLocation(), invocationExpr.ToString()));
             return;
         }
 
-        var assignmentToProperty = injectionMethod.Body?.Statements
+        // can create cache property -- report fixable diagnostic
+        var assignmentsToProperty = injectionMethod?.Body?.Statements
             .OfType<ExpressionStatementSyntax>()
             .Select(x => x.Expression as AssignmentExpressionSyntax)
-            .FirstOrDefault(x => x is { Left: IdentifierNameSyntax identifier });
-
-        if (assignmentToProperty is null)
-            return;
-
-        var initializer = assignmentToProperty.Right switch
-        {
-            ObjectCreationExpressionSyntax { Initializer: { } x }         => x,
-            ImplicitObjectCreationExpressionSyntax { Initializer: { } x } => x,
-            _                                                             => null,
-        };
+            .Where(x => x is { Left: IdentifierNameSyntax })
+            .Select(x => x!.Right)
+            .ToArray() ?? [];
 
         // find existing initialization expression
-        if (initializer?.Expressions.OfType<AssignmentExpressionSyntax>().Any(a => SyntaxFactory.AreEquivalent(a.Right, invocationExpr)) is true)
+        if (assignmentsToProperty.Any(x => SyntaxFactory.AreEquivalent(x, invocationExpr)))
+        {
+            context.ReportDiagnostic(Diagnostic.Create(MED008, invocationExpr.GetLocation(), invocationExpr.ToString()));
             return;
+        }
 
-        // can add to existing cache property -- report fixable diagnostic
-        context.ReportDiagnostic(Diagnostic.Create(MED008, invocationExpr.GetLocation(), invocationExpr.ToString()));
+        context.ReportDiagnostic(Diagnostic.Create(MED007, invocationExpr.GetLocation(), invocationExpr.ToString()));
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -43,32 +44,35 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         isEnabledByDefault: true
     );
 
-    record struct GeneratorInput(
-        string SourceGeneratorOutputFilename,
-        string SourceGeneratorError,
-        CacheIgnore<List<string>> SourceGeneratorDiagnostics,
-        string ClassName,
-        bool IsUnityEditorCompile,
-        bool IsDebugCompile,
-        bool IsSealed,
-        bool IsStatic,
-        bool MakePublic,
-        EquatableArray<string> NamespaceImports,
-        EquatableArray<string> ContainingTypeDeclaration,
-        // ReSharper disable once NotAccessedPositionalProperty.Local
-        string MethodRawStringForCache,
-        CacheIgnore<Func<InitExpressionInfo[]>?> InitExpressionInfoArrayBuilderFunc
-    ) : IGeneratorInput;
+    record struct GeneratorInput() : IGeneratorTransformOutput
+    {
+        public string? SourceGeneratorOutputFilename { get; init; }
+        public string? SourceGeneratorError { get; set; }
+        public EquatableIgnoreList<string>? SourceGeneratorDiagnostics { get; set; } = [];
+        public bool IsUnityEditorCompile;
+        public bool IsDebugCompile;
+        public bool IsSealed;
+        public bool IsStatic;
+        public bool MakePublic;
+        public EquatableArray<string> NamespaceImports;
+        public EquatableArray<string> ContainingTypeDeclaration;
+        public EquatableArray<byte> MethodTextCheckSumForCache;
+        public EquatableIgnore<Func<string>> MethodXmlDocId;
+        public EquatableIgnore<Func<string>> ClassName;
+        public EquatableIgnore<Func<InitExpressionInfo[]>> InitExpressionInfoArrayBuilderFunc = new(() => []);
+    }
 
-    record struct InitExpressionInfo(
-        string PropertyName,
-        string InitExpression,
-        string? TypeFQN,
-        string TypeDisplayName,
-        string? CleanupExpression,
-        CacheIgnore<Location> Location,
-        ExpressionFlags Flags
-    );
+    record struct InitExpressionInfo
+    {
+        public string PropertyName;
+        public string InitExpression;
+        public string? TypeFQN;
+        public string TypeDisplayName;
+        public string? CleanupExpression;
+        public string? TypeXmlDocId;
+        public EquatableIgnore<Location> Location;
+        public ExpressionFlags Flags;
+    }
 
     [Flags]
     public enum ExpressionFlags : uint
@@ -103,37 +107,42 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         if (context.TargetNode is not MethodDeclarationSyntax methodDeclaration)
             return default;
 
-        var containingClass = methodDeclaration.FirstAncestorOrSelf<TypeDeclarationSyntax>();
+        var classDecl = methodDeclaration.FirstAncestorOrSelf<TypeDeclarationSyntax>();
 
-        if (containingClass is null)
+        if (classDecl is null)
             return default;
 
         var output = new GeneratorInput
         {
             SourceGeneratorOutputFilename = GetOutputFilename(
-                filePath: containingClass.Identifier.ToString(),
-                targetFQN: context.TargetSymbol.ToDisplayString(FullyQualifiedFormat),
+                filePath: classDecl.Identifier.ValueText,
+                targetFQN: methodDeclaration.Identifier.ValueText,
                 label: InjectAttributeName
             ),
-            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(containingClass),
-            MethodRawStringForCache = methodDeclaration.ToString(),
+            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(classDecl),
+            MethodTextCheckSumForCache = methodDeclaration.GetText().GetChecksum().AsArray(),
         };
 
-        if (context.SemanticModel.GetDeclaredSymbol(containingClass, ct) is not { TypeKind: TypeKind.Class } classSymbol)
+        if (context.SemanticModel.GetDeclaredSymbol(classDecl, ct) is not { TypeKind: TypeKind.Class } classSymbol)
             return output;
 
         if (context.TargetNode.SyntaxTree.GetRoot(ct) is CompilationUnitSyntax compilationUnit)
         {
-            output.NamespaceImports
-                = compilationUnit
-                    .Usings
-                    .Select(x => x.ToString())
-                    .Where(x => !string.IsNullOrEmpty(x))
-                    .ToArray();
+            var list = new List<string>();
+
+            foreach (var usingDirectiveSyntax in compilationUnit.Usings)
+                list.Add(usingDirectiveSyntax.ToString());
+
+            output.NamespaceImports = list.ToArray();
         }
 
-        output.ClassName = classSymbol.ToMinimalDisplayString(context.SemanticModel, methodDeclaration.SpanStart, MinimallyQualifiedFormat);
-        output.IsSealed = classSymbol.IsSealed;
+        output.ClassName = new(() => context.SemanticModel
+            .GetDeclaredSymbol(classDecl, ct)
+            ?.ToMinimalDisplayString(context.SemanticModel, methodDeclaration.SpanStart, MinimallyQualifiedFormat) ?? ""
+        );
+        output.MethodXmlDocId = new(() => context.TargetSymbol.GetDocumentationCommentId() ?? methodDeclaration.Identifier.ValueText);
+
+        output.IsSealed = classDecl.Modifiers.Any(SyntaxKind.SealedKeyword);
         output.IsStatic = methodDeclaration.Modifiers.Any(SyntaxKind.StaticKeyword);
         output.MakePublic = context.Attributes.FirstOrDefault()?.ConstructorArguments.Any(x => x.Value is true) is true;
         output.IsUnityEditorCompile = context.SemanticModel.IsDefined("UNITY_EDITOR");
@@ -366,15 +375,17 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                         flags.Set(IsArray, typeSymbol is IArrayTypeSymbol);
                         flags.Set(IsDisposable, typeSymbol.HasInterface("global::System.IDisposable"));
 
-                        return new InitExpressionInfo(
-                            PropertyName: assignment.Left.ToString().Trim(),
-                            InitExpression: expression.MakeString(),
-                            CleanupExpression: cleanupExpression,
-                            TypeFQN: typeFQN,
-                            TypeDisplayName: typeDisplayName,
-                            Location: assignment.GetLocation(),
-                            Flags: flags
-                        );
+                        return new InitExpressionInfo
+                        {
+                            PropertyName = assignment.Left.ToString().Trim(),
+                            InitExpression = expression.MakeString(),
+                            CleanupExpression = cleanupExpression,
+                            TypeFQN = typeFQN,
+                            TypeDisplayName = typeDisplayName,
+                            TypeXmlDocId = typeSymbol?.GetDocumentationCommentId(),
+                            Location = assignment.GetLocation(),
+                            Flags = flags,
+                        };
                     }
                 )
                 .ToArray()
@@ -385,7 +396,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
     void GenerateSource(SourceProductionContext context, GeneratorInput input)
     {
-        var expressions = input.InitExpressionInfoArrayBuilderFunc.Value?.Invoke() ?? [];
+        var expressions = input.InitExpressionInfoArrayBuilderFunc.Value();
 
         foreach (var group in expressions.GroupBy(x => x.PropertyName).Where(x => x.Count() > 1))
         foreach (var x in group)
@@ -399,8 +410,18 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             );
         }
 
+        string methodXmlDocId = input.MethodXmlDocId.Value();
+        string className = input.ClassName.Value();
+
+        var deferredLines = new List<string>();
+        void Defer(string line)
+            => deferredLines.Add(line);
+        void DeferLinebreak()
+            => deferredLines.Add("");
+
         Line.Append("#pragma warning disable CS0628 // New protected member declared in sealed type");
         Line.Append("#pragma warning disable CS0108 // Member hides inherited member; missing new keyword");
+        Line.Append("#pragma warning disable CS0618 // Type or member is obsolete");
         Linebreak();
 
         Line.Append(Alias.UsingInline);
@@ -438,6 +459,13 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             string opt = x.Flags.Has(IsOptional) ? "?" : "";
             string exc = x.Flags.Has(IsOptional) ? "" : "!";
 
+            void AppendInjectionDeclaredIn()
+            {
+                Line.Append($"/// <injected>");
+                Line.Append($"/// Injection declared on line {x.Location.Value.GetLineSpan().StartLinePosition.Line + 1} in <see cref=\"{methodXmlDocId}\"/>.");
+                Line.Append($"/// </injected>");
+            }
+
             void OpenListAndAppendOptionalDescription(string nullIf)
             {
                 if (x.Flags.Has(IsOptional))
@@ -462,14 +490,16 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                 }
             }
 
-            // handle singleton classes
+            // handle unrecognized types
             if (x.TypeFQN is null)
             {
                 Line.Append($"/// <summary>");
                 Line.Append($"/// <p><b>The source generator was unable to determine the type of this property.</b></p>");
                 Line.Append($"/// <p>Make sure that the assignment expression is correct, and that it isn't referring to other code-generated properties.</p>");
                 Line.Append($"/// </summary>");
+                AppendInjectionDeclaredIn();
                 Line.Append($"{@static}object {x.PropertyName};");
+                Linebreak();
 
                 context.ReportDiagnostic(
                     Diagnostic.Create(
@@ -479,17 +509,19 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                     )
                 );
             }
+            // handle singleton classes
             else if (x.Flags.Has(IsSingleton))
             {
                 if (input.IsUnityEditorCompile)
                 {
-                    Line.Append($"/// <summary> Provides access to the active <c>{x.TypeDisplayName.HtmlEncode()}</c> singleton instance. </summary>");
+                    Line.Append($"/// <summary> Provides access to the active <see cref=\"{x.TypeXmlDocId}\"/> singleton instance. </summary>");
                     Line.Append($"/// <remarks>");
                     OpenListAndAppendOptionalDescription(nullIf: "the singleton instance could not be found");
                     Line.Append($"/// </list>");
                     Line.Append($"/// Additional notes:");
                     Line.Append($"/// <inheritdoc cref=\"{x.TypeFQN}.Instance\"/>");
                     Line.Append($"/// </remarks>");
+                    AppendInjectionDeclaredIn();
                 }
 
                 if (!x.Flags.Has(IsOptional))
@@ -527,7 +559,10 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             else if (x.Flags.Has(IsTracked))
             {
                 if (input.IsUnityEditorCompile)
+                {
                     Line.Append($"/// <inheritdoc cref=\"{x.TypeFQN}.Instances\"/>");
+                    AppendInjectionDeclaredIn();
+                }
 
                 Line.Append($"{access}{@static}global::Medicine.Internal.TrackedInstances<{x.TypeFQN}> {x.PropertyName}");
                 using (Braces)
@@ -551,8 +586,8 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
                 if (input.IsUnityEditorCompile)
                 {
-                    Line.Append($"/// <summary> Cached <c>{x.TypeDisplayName.HtmlEncode()}</c> {label}.");
-                    Line.Append($"/// <br/>Initialized from expression: <c>{x.InitExpression.HtmlEncode()}</c> </summary>");
+                    Line.Append($"/// <summary> Cached <see cref=\"{x.TypeXmlDocId}\"/> {label}.");
+                    Line.Append($"/// <br/>Initialized from expression: <c>{x.InitExpression.HtmlEncode()}</c></summary>");
                     Line.Append($"/// <remarks>");
                     OpenListAndAppendOptionalDescription(nullIf: "the component could not be found");
                     if (x.TypeFQN?.StartsWith("global::Medicine.Internal.ComponentEnumerable<", Ordinal) is true)
@@ -565,6 +600,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                     Line.Append($"/// </list>");
 
                     Line.Append($"/// </remarks>");
+                    AppendInjectionDeclaredIn();
                 }
 
                 if (!x.Flags.Has(IsOptional))
@@ -580,13 +616,13 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                         {
                             if (input.IsUnityEditorCompile && !x.Flags.Has(IsDisposable))
                             {
-                                Line.Append($"{Alias.NoInline} void {m}Expr() => _{m}{x.PropertyName} = {x.InitExpression};");
+                                Line.Append($"{Alias.NoInline} void {m}Expr() => {m}MedicineInternal._{m}{x.PropertyName} = {x.InitExpression};");
                                 Line.Append($"if ({m}Utility.EditMode)");
                                 using (Indent)
                                     Line.Append($"{m}Expr();"); // in edit mode, always call initializer
                             }
 
-                            Line.Append($"return ref _{m}{x.PropertyName};");
+                            Line.Append($"return ref {m}MedicineInternal._{m}{x.PropertyName};");
                         }
                     }
                 }
@@ -606,7 +642,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                                     Line.Append($"return {m}Expr();"); // in edit mode, always call initializer
                             }
 
-                            Line.Append($"return _{m}{x.PropertyName}!;");
+                            Line.Append($"return {m}MedicineInternal._{m}{x.PropertyName}!;");
                         }
 
                         Line.Append($"{Alias.Inline} {@private}set");
@@ -616,31 +652,46 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                             {
                                 Line.Append($"if (!{m}Utility.IsNativeObjectAlive(value))");
                                 using (Indent)
-                                    Line.Append($"{m}Debug.LogError($\"Missing component: {x.TypeDisplayName} in {input.ClassName} '{{this.name}}'\", this);");
+                                    Line.Append($"{m}Debug.LogError($\"Missing component: {x.TypeDisplayName} in {className} '{{this.name}}'\", this);");
                             }
 
-                            Line.Append($"_{m}{x.PropertyName} = value;");
+                            Line.Append($"{m}MedicineInternal._{m}{x.PropertyName} = value;");
                         }
                     }
                 }
 
                 // backing field
-                Linebreak();
-                Line.Append(Alias.Hidden);
-                Line.Append($"{@static}{x.TypeFQN}{nul} _{m}{x.PropertyName};");
+                Defer($"internal {@static}{x.TypeFQN}{nul} _{m}{x.PropertyName};");
+                DeferLinebreak();
 
                 if (x.CleanupExpression is not null)
                 {
-                    Linebreak();
-                    Line.Append(Alias.Hidden);
-                    Line.Append($"static readonly global::System.Action<{x.TypeFQN}> _{m}{x.PropertyName}{m}CLEANUP");
-                    using (Indent)
-                        Line.Append($"= {x.CleanupExpression};");
+                    Defer($"internal static readonly global::System.Action<{x.TypeFQN}> _{m}{x.PropertyName}{m}CLEANUP = {x.CleanupExpression};");
+                    DeferLinebreak();
                 }
             }
 
             Linebreak();
         }
+
+        Line.Append(Alias.Hidden);
+        Line.Append(Alias.ObsoleteInternal);
+        Line.Append($"partial struct {m}MedicineInternalBackingStorage");
+        using (Braces)
+        {
+            foreach (var line in deferredLines)
+            {
+                if (line is { Length: >0})
+                    Line.Append(line);
+                else
+                    Linebreak();
+            }
+        }
+
+        Linebreak();
+        Line.Append(Alias.Hidden);
+        Line.Append(Alias.ObsoleteInternal);
+        Line.Append($"{m}MedicineInternalBackingStorage {m}MedicineInternal;");
 
         if (expressions.Any(x => x.Flags.Any(IsCleanupDestroy | IsCleanupDispose) || x.CleanupExpression is not null))
         {
@@ -661,7 +712,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                         Line.Append($"Destroy({x.PropertyName});");
 
                     if (x.CleanupExpression is not null)
-                        Line.Append($"_{m}{x.PropertyName}{m}CLEANUP({x.PropertyName}); // {x.CleanupExpression}");
+                        Line.Append($"{m}MedicineInternalBackingStorage._{m}{x.PropertyName}{m}CLEANUP({x.PropertyName}); // {x.CleanupExpression}");
                 }
             }
         }

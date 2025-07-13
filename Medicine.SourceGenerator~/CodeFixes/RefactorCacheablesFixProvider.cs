@@ -12,7 +12,7 @@ using static System.StringComparison;
 public class RefactorCacheablesFixProvider : CodeFixProvider
 {
     public sealed override ImmutableArray<string> FixableDiagnosticIds { get; }
-        = ImmutableArray.Create(RefactorRefsAnalyzer.MED007.Id, RefactorRefsAnalyzer.MED008.Id);
+        = ImmutableArray.Create(RefactorRefsAnalyzer.MED007.Id, RefactorRefsAnalyzer.MED008.Id, RefactorRefsAnalyzer.MED009.Id);
 
     public sealed override FixAllProvider? GetFixAllProvider() => null;
 
@@ -30,17 +30,62 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
         if (diagnosticNode is null)
             return;
 
-        context.RegisterCodeFix(
-            CodeAction.Create(
-                title: "Cache component reference",
-                createChangedDocument: ct => CacheComponentReferenceAsync(context.Document, diagnosticNode, ct),
-                equivalenceKey: "CacheComponentUse"
-            ),
-            diagnostic
-        );
+        if (diagnostic.Id is "MED009")
+        {
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    title: "Cache component reference (add Awake() above other methods)",
+                    createChangedDocument: ct => CacheComponentReferenceAsync(context.Document, diagnosticNode, NewMethodPlacement.AboveFirstMethod, ct),
+                    equivalenceKey: "CacheComponentUse"
+                ),
+                diagnostic
+            );
+
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    title: "Cache component reference (add Awake() at the top of the class)",
+                    createChangedDocument: ct => CacheComponentReferenceAsync(context.Document, diagnosticNode, NewMethodPlacement.TopOfClass, ct),
+                    equivalenceKey: "CacheComponentUse"
+                ),
+                diagnostic
+            );
+        }
+        else if (diagnostic.Id is "MED007")
+        {
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    title: "Cache component reference",
+                    createChangedDocument: ct => CacheComponentReferenceAsync(context.Document, diagnosticNode, default, ct),
+                    equivalenceKey: "CacheComponentUse"
+                ),
+                diagnostic
+            );
+        }
+        else if (diagnostic.Id is "MED008")
+        {
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    title: "Use existing cached component reference",
+                    createChangedDocument: ct => CacheComponentReferenceAsync(context.Document, diagnosticNode, default, ct),
+                    equivalenceKey: "CacheComponentUse"
+                ),
+                diagnostic
+            );
+        }
     }
 
-    static async Task<Document> CacheComponentReferenceAsync(Document document, InvocationExpressionSyntax invocationExpr, CancellationToken ct)
+    enum NewMethodPlacement
+    {
+        TopOfClass,
+        AboveFirstMethod,
+    }
+
+    static async Task<Document> CacheComponentReferenceAsync(
+        Document document,
+        InvocationExpressionSyntax invocationExpr,
+        NewMethodPlacement placement,
+        CancellationToken ct
+    )
     {
         var editor = await DocumentEditor.CreateAsync(document, ct).ConfigureAwait(false);
         var generator = editor.Generator;
@@ -99,7 +144,16 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
         if (methodToPatch is not null)
             editor.ReplaceNode(methodToPatch, newOrPatchedMethod);
         else
-            editor.InsertMembers(classDecl, 0, [newOrPatchedMethod]);
+        {
+            var firstMethod = placement is NewMethodPlacement.AboveFirstMethod
+                ? classDecl.Members.OfType<MethodDeclarationSyntax>().FirstOrDefault()
+                : null;
+
+            if (firstMethod is not null)
+                editor.InsertBefore(firstMethod, newOrPatchedMethod);
+            else
+                editor.InsertMembers(classDecl, 0, [newOrPatchedMethod]);
+        }
 
         editor.ReplaceNode(
             invocationExpr,
@@ -125,7 +179,7 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
 
             if (existingInjectAttribute is null)
             {
-                generator.AddAttributes(method, generator.Attribute("Inject"));
+                method = (MethodDeclarationSyntax)generator.AddAttributes(method, generator.Attribute("Inject"));
                 editor.EnsureNamespaceIsImported("Medicine");
             }
 

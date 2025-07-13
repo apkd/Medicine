@@ -5,21 +5,25 @@ using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 
-public interface IGeneratorInput
+public interface IGeneratorTransformOutputWithContext : IGeneratorTransformOutput
+{
+    public EquatableIgnore<GeneratorAttributeSyntaxContext> Context { get; set; }
+}
+
+public interface IGeneratorTransformOutput
 {
     string? SourceGeneratorOutputFilename { get; }
-    CacheIgnore<List<string>> SourceGeneratorDiagnostics { get; set; }
-    string SourceGeneratorError { get; set; }
+    EquatableIgnoreList<string>? SourceGeneratorDiagnostics { get; set; }
+    string? SourceGeneratorError { get; set; }
 }
 
 public abstract class BaseSourceGenerator
 {
     const int INDENT_SIZE = 4;
-    readonly StringBuilder text = new(capacity: 16384);
     int indent;
-    static readonly ConcurrentDictionary<(string, string, int), int> invokationCounter = new();
+    static readonly ConcurrentDictionary<(string, string, int), int> invocationCounter = new();
 
-    protected void HandleException<TInput>(SourceProductionContext context, TInput input) where TInput : IGeneratorInput { }
+    protected void HandleException<TInput>(SourceProductionContext context, TInput input) where TInput : IGeneratorTransformOutput { }
 
     protected static Func<GeneratorAttributeSyntaxContext, CancellationToken, TOutput> WrapTransform<TOutput>(
         Func<GeneratorAttributeSyntaxContext, CancellationToken, TOutput> action,
@@ -27,20 +31,46 @@ public abstract class BaseSourceGenerator
         [CallerFilePath] string? cfp = null,
         [CallerLineNumber] int cln = 0
     )
-        where TOutput : IGeneratorInput, new()
+        where TOutput : IGeneratorTransformOutput, new()
         => (context, ct) =>
         {
             try
             {
                 var time = Stopwatch.StartNew();
-                var result = action(context, ct);
-                int count = invokationCounter.AddOrUpdate((result.SourceGeneratorOutputFilename!, cfp!, cln), 1, (k, v) => ++v);
+                var output = action(context, ct);
+                int count = invocationCounter.AddOrUpdate((output.SourceGeneratorOutputFilename!, cfp!, cln), 1, (k, v) => ++v);
+#if DEBUG
+                output.SourceGeneratorDiagnostics ??= [];
+                output.SourceGeneratorDiagnostics.Add($"// Transform [{count}]: {time.Elapsed.TotalMilliseconds:0.00}ms");
+#endif
+                return output;
+            }
+            catch (Exception exception)
+            {
+                return new() { SourceGeneratorError = $"{exception}\nThrown in: {cae}" };
+            }
+        };
 
-                if (result.SourceGeneratorDiagnostics.Value is not { Count: > 0 })
-                    result.SourceGeneratorDiagnostics = new(new(capacity: 2));
-
-                result.SourceGeneratorDiagnostics.Value.Add($"// [{count}]: {time.Elapsed.TotalMilliseconds:0.00}ms");
-                return result;
+    protected static Func<TInput, CancellationToken, TOutput> WrapTransform<TInput, TOutput>(
+        Func<GeneratorAttributeSyntaxContext, CancellationToken, TOutput> action,
+        [CallerArgumentExpression("action")] string? cae = null,
+        [CallerFilePath] string? cfp = null,
+        [CallerLineNumber] int cln = 0
+    )
+        where TInput : IGeneratorTransformOutputWithContext
+        where TOutput : IGeneratorTransformOutput, new()
+        => (input, ct) =>
+        {
+            try
+            {
+                var time = Stopwatch.StartNew();
+                var output = action(input.Context, ct);
+                int count = invocationCounter.AddOrUpdate((output.SourceGeneratorOutputFilename!, cfp!, cln), 1, (k, v) => ++v);
+#if DEBUG
+                output.SourceGeneratorDiagnostics ??= [];
+                output.SourceGeneratorDiagnostics.Add($"// Transform [{count}]: {time.Elapsed.TotalMilliseconds:0.00}ms");
+#endif
+                return output;
             }
             catch (Exception exception)
             {
@@ -54,24 +84,32 @@ public abstract class BaseSourceGenerator
         [CallerFilePath] string? cfp = null,
         [CallerLineNumber] int cln = 0
     )
-        where TInput : IGeneratorInput
+        where TInput : IGeneratorTransformOutput
         => (context, input) =>
         {
+
             InitializeOutputSourceText();
             if (input.SourceGeneratorError is not { Length: > 0 } error)
             {
+                if (input.SourceGeneratorOutputFilename is not { Length: > 0 })
+                    return;
+
                 try
                 {
                     var time = Stopwatch.StartNew();
                     action(context, input);
-                    int count = invokationCounter.AddOrUpdate((input.SourceGeneratorOutputFilename!, cfp!, cln), 1, (k, v) => ++v);
-                    input.SourceGeneratorDiagnostics.Value.Add($"// {cae!}[{count}]: {time.Elapsed.TotalMilliseconds:0.00}ms");
+                    int count = invocationCounter.AddOrUpdate((input.SourceGeneratorOutputFilename!, cfp!, cln), 1, (k, v) => ++v);
+#if DEBUG
+                    input.SourceGeneratorDiagnostics ??= [];
+                    input.SourceGeneratorDiagnostics.Add($"// {cae!}[{count}]: {time.Elapsed.TotalMilliseconds:0.00}ms");
 
-                    if (input.SourceGeneratorDiagnostics.Value is { Count: > 0 })
-                        Line.Append("// Diagnostics:");
+                    Line.Append("// Diagnostics:");
 
-                    foreach (var line in input.SourceGeneratorDiagnostics.Value)
+                    foreach (var line in input.SourceGeneratorDiagnostics)
                         Line.Append(line);
+
+                    Line.Append($"// HashCode: {input.GetHashCode()}");
+#endif
 
                     context.AddSource(input.SourceGeneratorOutputFilename!, FinalizeOutputSourceText());
                     return;
@@ -85,6 +123,8 @@ public abstract class BaseSourceGenerator
 #if DEBUG
             foreach (var line in error.Split('\n', '\r').Where(x => x is { Length: > 0 }))
                 Line.Append("#error ").Append(line);
+#else
+            _ = error;
 #endif
 
             context.AddSource(input.SourceGeneratorOutputFilename ?? "Exception.g.cs", FinalizeOutputSourceText());
@@ -118,40 +158,42 @@ public abstract class BaseSourceGenerator
     protected void InitializeOutputSourceText()
     {
         indent = 0;
-        text.Clear()
+        Text.Clear()
             .AppendLine("// <auto-generated/>")
             .AppendLine("#nullable enable");
     }
 
     protected SourceText FinalizeOutputSourceText()
     {
-        string output = text.AppendLine().ToString();
-        text.Clear();
+        string output = Text.AppendLine().ToString();
+        Text.Clear();
         indent = 0;
         return SourceText.From(output, Encoding.UTF8);
     }
 
     public StringBuilder Append(string x)
-        => text.Append(x);
+        => Text.Append(x);
 
     public StringBuilder Append(char x)
-        => text.Append(x);
+        => Text.Append(x);
 
     protected void TrimEndWhitespace()
     {
-        while (char.IsWhiteSpace(text[^1]))
-            text.Remove(text.Length - 1, 1);
+        while (char.IsWhiteSpace(Text[^1]))
+            Text.Remove(Text.Length - 1, 1);
     }
 
     protected void Linebreak()
     {
-        if (text.Length is var n and >= 1)
-            if (text[n - 1] != '\n')
-                text.AppendLine();
+        if (Text.Length is var n and >= 1)
+            if (Text[n - 1] != '\n')
+                Text.AppendLine();
     }
 
-    protected StringBuilder Line
-        => text.AppendLine().Append(' ', indent);
+    public StringBuilder Text { get; } = new(capacity: 16384);
+
+    public StringBuilder Line
+        => Text.AppendLine().Append(' ', indent);
 
     protected static bool MatchFilePath(ReadOnlySpan<char> filePath, ReadOnlySpan<char> subString1, ReadOnlySpan<char> substring2)
         => filePath.Contains(subString1, StringComparison.Ordinal) ||
@@ -170,10 +212,10 @@ public abstract class BaseSourceGenerator
         Line.Append('}');
     }
 
-    protected void IncreaseIndent()
+    public void IncreaseIndent()
         => indent += INDENT_SIZE;
 
-    protected void DecreaseIndent()
+    public void DecreaseIndent()
         => indent -= INDENT_SIZE;
 
     protected IndentScope Indent

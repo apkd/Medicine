@@ -1,7 +1,7 @@
 using Microsoft.CodeAnalysis;
 
 [Generator]
-public sealed class IsExternalInitGenerator : IIncrementalGenerator
+public sealed class IsExternalInitSourceGenerator : IIncrementalGenerator
 {
     const string isExternalInitSourceCode
         = """
@@ -24,10 +24,18 @@ public sealed class IsExternalInitGenerator : IIncrementalGenerator
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
+        bool polySharpLoaded = AppDomain.CurrentDomain
+            .GetAssemblies()
+            .Any(x => x.GetName().Name is "PolySharp.SourceGenerators");
+
+        if (polySharpLoaded)
+            return;
+
         context.RegisterSourceOutput(
             source: context
                 .CompilationProvider
-                .Select((compilation, _) => compilation.Assembly.GetTypeByMetadataName(isExternalInitFQN) != null),
+                .Select((compilation, _) => new EquatableIgnore<Compilation>(compilation))
+                .Select((x, _) => x.Value.Assembly.GetTypeByMetadataName(isExternalInitFQN) != null),
             action: (sourceContext, isExternalInitDefined) =>
             {
                 if (isExternalInitDefined)

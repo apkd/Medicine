@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Medicine.Internal;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using static System.ComponentModel.EditorBrowsableState;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 using Component = UnityEngine.Component;
@@ -37,12 +38,18 @@ namespace Medicine
         public static T? Cleanup<T>(this T? value, Action<T> action)
             => value;
 
+        /// <inheritdoc cref="Find.ComponentsInScene{T}"/>
+        [MethodImpl(AggressiveInlining)]
+        public static ComponentsInSceneEnumerable<T> EnumerateComponentsInScene<T>(this Scene scene, bool includeInactive = false)
+            where T : class
+            => Find.ComponentsInScene<T>(scene, includeInactive);
+
         /// <summary>
         /// Enumerates every component of type <typeparamref name="T"/> found on the children
         /// of the GameObject.
         /// </summary>
         /// <typeparam name="T"> The component type to look for. </typeparam>
-        /// <param name="gameObject"> Root GameObject whose child hierarchy is inspected. </param>
+        /// <param name="gameObject"> Root GameObject, whose child hierarchy is inspected. </param>
         /// <param name="includeInactive"> Whether to include GameObjects that are currently inactive in the scene. </param>
         /// <returns> A sequence that produces every matching component in the child hierarchy. </returns>
         /// <remarks>
