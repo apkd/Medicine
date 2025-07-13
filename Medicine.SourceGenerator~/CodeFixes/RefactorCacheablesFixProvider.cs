@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Editing;
+using Microsoft.CodeAnalysis.Formatting;
 using System.Collections.Immutable;
 using System.Composition;
 using static System.StringComparison;
@@ -181,6 +182,15 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
             {
                 method = (MethodDeclarationSyntax)generator.AddAttributes(method, generator.Attribute("Inject"));
                 editor.EnsureNamespaceIsImported("Medicine");
+            }
+
+            if (method.Body is null && method.ExpressionBody is not null)
+            {
+                method = method.WithBody(
+                        SyntaxFactory.Block(SyntaxFactory.ExpressionStatement(method.ExpressionBody.Expression)))
+                    .WithExpressionBody(null)
+                    .WithSemicolonToken(default)
+                    .WithAdditionalAnnotations(Formatter.Annotation);
             }
 
             if (method.Body is null)

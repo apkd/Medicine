@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Editing;
 using System.Collections.Immutable;
 using System.Composition;
+using Microsoft.CodeAnalysis.Formatting;
 
 [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(VersionMigrationFixProvider)), Shared]
 public sealed class VersionMigrationFixProvider : CodeFixProvider
@@ -127,7 +128,6 @@ public sealed class VersionMigrationFixProvider : CodeFixProvider
             return editor.GetChangedDocument();
         }
 
-        string refsIdentifierName = "Refs";
         AttributeData? existingInjectAttribute = null;
 
         AttributeData? GetInjectAttribute(MethodDeclarationSyntax m)
@@ -140,9 +140,6 @@ public sealed class VersionMigrationFixProvider : CodeFixProvider
                              .FirstOrDefault(m => (existingInjectAttribute ??= GetInjectAttribute(m)) is not null)
                          ?? classDecl.Members.OfType<MethodDeclarationSyntax>()
                              .FirstOrDefault(m => m.Identifier.Text == "Awake" && !m.ParameterList.Parameters.Any());
-
-        if (existingInjectAttribute is { ConstructorArguments.Length: > 0 } injectAttrArg && injectAttrArg.ConstructorArguments[0].Value is string argName && !string.IsNullOrWhiteSpace(argName))
-            refsIdentifierName = argName;
 
         if (methodDecl is null)
         {
@@ -164,49 +161,23 @@ public sealed class VersionMigrationFixProvider : CodeFixProvider
             if (!methodDecl.HasAttribute(a => a is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute"))
                 methodDecl = (MethodDeclarationSyntax)generator.AddAttributes(methodDecl, generator.Attribute("Inject"));
 
-            var oldAssignment = methodDecl.Body?.Statements
-                .OfType<ExpressionStatementSyntax>()
-                .Select(s => s.Expression as AssignmentExpressionSyntax)
-                .FirstOrDefault(a => a?.Left is IdentifierNameSyntax { Identifier.Text: var text } && text == refsIdentifierName);
+            var propAssign = generator.ExpressionStatement(
+                generator.AssignmentStatement(
+                    generator.IdentifierName(propName),
+                    retrievalExpr
+                )
+            );
 
-            if (oldAssignment is null)
+            if (methodDecl.Body is null && methodDecl.ExpressionBody is not null)
             {
-                var propAssign = generator.ExpressionStatement(
-                    generator.AssignmentStatement(
-                        generator.IdentifierName(propName),
-                        retrievalExpr
-                    )
-                );
-
-                methodDecl = methodDecl.WithBody(methodDecl.Body?.AddStatements((StatementSyntax)propAssign));
+                methodDecl = methodDecl.WithBody(
+                        SyntaxFactory.Block(SyntaxFactory.ExpressionStatement(methodDecl.ExpressionBody.Expression)))
+                    .WithExpressionBody(null)
+                    .WithSemicolonToken(default)
+                    .WithAdditionalAnnotations(Formatter.Annotation);
             }
-            else
-            {
-                var rightExpr = oldAssignment.Right;
-                var initializer = rightExpr switch
-                {
-                    ObjectCreationExpressionSyntax { Initializer: { } x }         => x,
-                    ImplicitObjectCreationExpressionSyntax { Initializer: { } x } => x,
-                    _                                                             => null,
-                };
 
-                bool alreadyContains = methodDecl.Body?.Statements
-                    .OfType<ExpressionStatementSyntax>()
-                    .Select(s => s.Expression as AssignmentExpressionSyntax)
-                    .Any(a => a?.Left is IdentifierNameSyntax { Identifier.Text: var prop } && prop == propName) is true;
-
-                if (!alreadyContains)
-                {
-                    var propAssign = generator.ExpressionStatement(
-                        generator.AssignmentStatement(
-                            generator.IdentifierName(propName),
-                            retrievalExpr
-                        )
-                    );
-
-                    methodDecl = methodDecl.WithBody(methodDecl.Body?.AddStatements((StatementSyntax)propAssign));
-                }
-            }
+            methodDecl = methodDecl.WithBody(methodDecl.Body?.AddStatements((StatementSyntax)propAssign));
 
             editor.ReplaceNode(originalMethod, methodDecl);
         }
