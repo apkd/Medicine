@@ -67,8 +67,8 @@ public sealed class VersionMigrationAnalyzer : DiagnosticAnalyzer
                 "Medicine.Inject.FromParents.Lazy";
 
         if (prop.HasAttribute(AttributePredicate))
-            if (prop.AccessorList?.Accessors.Count is 1)
-                if (prop.AccessorList.Accessors[0].Kind() == SyntaxKind.GetAccessorDeclaration)
+            if (prop.AccessorList?.Accessors.Count is 1 or 2)
+                if (prop.AccessorList.Accessors.Any(x => x.Keyword.IsKind(SyntaxKind.GetKeyword)))
                     if (context.SemanticModel.GetDeclaredSymbol(prop) is { } symbol)
                         if (symbol.HasAttribute(attributeFQNs.Contains))
                             context.ReportDiagnostic(Diagnostic.Create(MED012, prop.GetLocation(), prop.Identifier.Text));
