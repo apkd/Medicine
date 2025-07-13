@@ -441,7 +441,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 extraTrackingMethods:
                 [
                     input.AttributeArguments.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Register(transform)" : null,
-                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{input.TypeFQN}, {x}>.Register(this)"),
+                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Register(this)"),
                     ..input.InstanceDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Register(this)"),
                 ]
             );
@@ -453,7 +453,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 extraTrackingMethods:
                 [
                     input.AttributeArguments.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Unregister(index)" : null,
-                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{input.TypeFQN}, {x}>.Unregister(this)"),
+                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Unregister(this)"),
                     ..input.InstanceDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Unregister(index)"),
                 ]
             );
