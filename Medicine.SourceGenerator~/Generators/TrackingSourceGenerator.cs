@@ -176,8 +176,6 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 Line.Append(Alias.Hidden);
                 Line.Append(Alias.ObsoleteInternal);
                 Line.Append($"{@protected}{@new}void {methodName}()");
-                if (input.HasBaseDeclarationsWithAttribute)
-                    Line.Append($"base.{methodName}();");
             }
             else
             {
@@ -203,6 +201,9 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
             using (Braces)
             {
+                if (input.HasBaseDeclarationsWithAttribute)
+                    Line.Append($"base.{methodName}();");
+
                 Line.Append($"{(storeIndex ? "int index = " : "")}{trackingMethod}(this);");
 
                 foreach (var extraTrackingMethod in extraTrackingMethods)
