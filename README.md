@@ -1,4 +1,5 @@
-# Medicine ***v3***
+Medicine ***v3***
+=================
 
 ### ***Medicine*** is a collection of tools for working with components in Unity.
 
@@ -9,7 +10,7 @@
 Features
 --------
 
-##### Cache and validate component references
+#### Cache and validate component references
 - Write a simple assignment, and Medicine will automatically generate backing fields and null checks for your components.
 - Simply tag a method with `[Inject]` and make the class `partial`:
 
@@ -30,7 +31,7 @@ partial class MyComponent : MonoBehaviour
 }
 ```
 
-##### Easily write and access singletons
+#### Easily write and access singletons
 
 - Simply tag a component with the `[Singleton]` attribute
 - Access your singleton from anywhere with `T.Instance` or `Find.Singleton<T>()`
@@ -43,7 +44,8 @@ class GameController : MonoBehaviour { }
 ```
 var mySingleton = GameController.Instance;
 ```
-##### Easily track and iterate over all instances of a component
+
+#### Easily track and iterate over all instances of a component
 - Put `[Track]` on your component and you're done!
 - Access the active instances using `T.Instances` or `Find.Instances<T>()`
 - Fast and efficient under the hood
@@ -60,7 +62,7 @@ foreach (var instance in Enemy.Instances)
 }
 ```
 
-##### Optimized utilities for finding objects
+#### Optimized utilities for finding objects
 - Non-alloc equivalents of the `GetComponents...<T>` family of functions.
 - Non-alloc enumerator for finding all components of type in a scene.
 - Slightly faster variants of common functions, such as `FindObjectsByType<T>`.
@@ -77,13 +79,14 @@ foreach (var rigidbody in gameObject.scene.EnumerateComponentsInScene<Rigidbody>
 }
 
 // this version of FindObjectsByType omits an array allocation/copy,
-// but it still alocates an array and is pretty slow.
+// but it still allocates an array and is pretty slow.
 // (you should use [Track] instead whenever possible)
 GameObject[] allObjects = Find.ObjectsByType<GameObject>();
 ```
 
-## How to install
-Compatibility: ***Unity 2019.3 or newer***
+How to install
+--------------
+Compatibility: ***Unity 2021.3 or newer***
 
 Open "Add package from git URL" in the Unity Package Manager and paste the repository URL:
 ##### `https://github.com/apkd/Medicine.git`
