@@ -86,7 +86,7 @@ GameObject[] allObjects = Find.ObjectsByType<GameObject>();
 
 How to install
 --------------
-Compatibility: ***Unity 2021.3 or newer***
+Compatibility: ***Unity 2022.3 or newer***
 
 Open "Add package from git URL" in the Unity Package Manager and paste the repository URL:
 ##### `https://github.com/apkd/Medicine.git`
