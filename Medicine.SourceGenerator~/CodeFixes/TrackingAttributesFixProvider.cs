@@ -77,8 +77,11 @@ public sealed class TrackingAttributesFixProvider : CodeFixProvider
         var newAttrList = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(newAttr));
         var newTypeDeclaration = typeDeclaration
             .WithAttributeLists(SyntaxFactory.List(filteredAttributeLists))
-            .AddAttributeLists(newAttrList)
-            .AddModifiers(SyntaxFactory.Token(SyntaxKind.PartialKeyword));
+            .AddAttributeLists(newAttrList);
+
+        if (!typeDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword))
+            newTypeDeclaration = newTypeDeclaration.AddModifiers(SyntaxFactory.Token(SyntaxKind.PartialKeyword));
+
         var newRoot = root.ReplaceNode(typeDeclaration, newTypeDeclaration);
 
         if (newRoot is CompilationUnitSyntax compilationUnit)
