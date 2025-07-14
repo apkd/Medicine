@@ -7,23 +7,11 @@ using Microsoft.CodeAnalysis.Editing;
 
 public static class Utility
 {
-    public static readonly DiagnosticDescriptor DebugDiagnosticDescriptor = new(
-        id: "MED999",
-        title: "Debug",
-        messageFormat: "'{0}'",
-        category: "Debug",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true
-    );
-
     public static unsafe string MakeString(this ReadOnlySpan<char> chars)
     {
         var ptr = (char*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(chars));
         return new(ptr, 0, chars.Length);
     }
-
-    public static Diagnostic DebugDiagnostic(Location location, string msg)
-        => Diagnostic.Create(DebugDiagnosticDescriptor, location, msg);
 
     public static void EnsureNamespaceIsImported(this DocumentEditor editor, string namespaceName)
     {

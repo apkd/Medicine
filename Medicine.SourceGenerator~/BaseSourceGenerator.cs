@@ -13,15 +13,23 @@ public interface IGeneratorTransformOutputWithContext : IGeneratorTransformOutpu
 public interface IGeneratorTransformOutput
 {
     string? SourceGeneratorOutputFilename { get; }
-    EquatableIgnoreList<string>? SourceGeneratorDiagnostics { get; set; }
     string? SourceGeneratorError { get; set; }
+    EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
 }
 
 public abstract class BaseSourceGenerator
 {
     const int INDENT_SIZE = 4;
     int indent;
-    static readonly ConcurrentDictionary<(string, string, int), int> invocationCounter = new();
+
+    static readonly DiagnosticDescriptor ExceptionDiagnosticDescriptor = new(
+        id: "MED911",
+        title: "Exception",
+        messageFormat: "'{0}'",
+        category: "Exception",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
 
     protected void HandleException<TInput>(SourceProductionContext context, TInput input) where TInput : IGeneratorTransformOutput { }
 
@@ -38,16 +46,14 @@ public abstract class BaseSourceGenerator
             {
                 var time = Stopwatch.StartNew();
                 var output = action(context, ct);
-                int count = invocationCounter.AddOrUpdate((output.SourceGeneratorOutputFilename!, cfp!, cln), 1, (k, v) => ++v);
-#if DEBUG
-                output.SourceGeneratorDiagnostics ??= [];
-                output.SourceGeneratorDiagnostics.Add($"// Transform [{count}]: {time.Elapsed.TotalMilliseconds:0.00}ms");
-#endif
+                output.SourceGeneratorErrorLocation = context.TargetNode.GetLocation();
+                float elapsed = (float)time.Elapsed.TotalMilliseconds;
+                MedicineMetrics.Reporter?.Report(output.SourceGeneratorOutputFilename, Stat.TransformTimeMs, elapsed);
                 return output;
             }
             catch (Exception exception)
             {
-                return new() { SourceGeneratorError = $"{exception}\nThrown in: {cae}" };
+                return new() { SourceGeneratorError = $"{exception}\nThrown in: {cae}", SourceGeneratorErrorLocation = context.TargetNode.GetLocation() };
             }
         };
 
@@ -65,16 +71,14 @@ public abstract class BaseSourceGenerator
             {
                 var time = Stopwatch.StartNew();
                 var output = action(input.Context, ct);
-                int count = invocationCounter.AddOrUpdate((output.SourceGeneratorOutputFilename!, cfp!, cln), 1, (k, v) => ++v);
-#if DEBUG
-                output.SourceGeneratorDiagnostics ??= [];
-                output.SourceGeneratorDiagnostics.Add($"// Transform [{count}]: {time.Elapsed.TotalMilliseconds:0.00}ms");
-#endif
+                output.SourceGeneratorErrorLocation = input.Context.Value.TargetNode.GetLocation();
+                float elapsed = (float)time.Elapsed.TotalMilliseconds;
+                MedicineMetrics.Reporter?.Report(output.SourceGeneratorOutputFilename, Stat.TransformTimeMs, elapsed);
                 return output;
             }
             catch (Exception exception)
             {
-                return new() { SourceGeneratorError = $"{exception}\nThrown in: {cae}" };
+                return new() { SourceGeneratorError = $"{exception}\nThrown in: {cae}", SourceGeneratorErrorLocation = input.Context.Value.TargetNode.GetLocation() };
             }
         };
 
@@ -87,31 +91,28 @@ public abstract class BaseSourceGenerator
         where TInput : IGeneratorTransformOutput
         => (context, input) =>
         {
-
             InitializeOutputSourceText();
-            if (input.SourceGeneratorError is not { Length: > 0 } error)
-            {
-                if (input.SourceGeneratorOutputFilename is not { Length: > 0 })
-                    return;
 
+            string? error = input.SourceGeneratorError;
+
+            if (input.SourceGeneratorOutputFilename is not { Length: > 0 })
+            {
+                error = "The source generator did not specify an output filename. This is a bug in the source generator.";
+                ;
+            }
+            else if (error is not { Length: > 0 })
+            {
+                // main path - try to generate the source
                 try
                 {
                     var time = Stopwatch.StartNew();
+
+                    // invoke generator action
                     action(context, input);
-                    int count = invocationCounter.AddOrUpdate((input.SourceGeneratorOutputFilename!, cfp!, cln), 1, (k, v) => ++v);
-#if DEBUG
-                    input.SourceGeneratorDiagnostics ??= [];
-                    input.SourceGeneratorDiagnostics.Add($"// {cae!}[{count}]: {time.Elapsed.TotalMilliseconds:0.00}ms");
 
-                    Line.Append("// Diagnostics:");
-
-                    foreach (var line in input.SourceGeneratorDiagnostics)
-                        Line.Append(line);
-
-                    Line.Append($"// HashCode: {input.GetHashCode()}");
-#endif
-
-                    context.AddSource(input.SourceGeneratorOutputFilename!, FinalizeOutputSourceText());
+                    float elapsed = (float)time.Elapsed.TotalMilliseconds;
+                    MedicineMetrics.Reporter?.Report(input.SourceGeneratorOutputFilename, Stat.SourceGenerationTimeMs, elapsed);
+                    AddOutputSourceTextToCompilation(input.SourceGeneratorOutputFilename, context);
                     return;
                 }
                 catch (Exception exception)
@@ -120,22 +121,49 @@ public abstract class BaseSourceGenerator
                 }
             }
 
-#if DEBUG
-            foreach (var line in error.Split('\n', '\r').Where(x => x is { Length: > 0 }))
-                Line.Append("#error ").Append(line);
-#else
-            _ = error;
-#endif
+            // handle errors/exceptions
+            {
+                context.ReportDiagnostic(
+                    Diagnostic.Create(
+                        ExceptionDiagnosticDescriptor,
+                        input.SourceGeneratorErrorLocation.Value,
+                        error
+                    )
+                );
 
-            context.AddSource(input.SourceGeneratorOutputFilename ?? "Exception.g.cs", FinalizeOutputSourceText());
+                string filename = input.SourceGeneratorOutputFilename ?? GetErrorOutputFilename(input.SourceGeneratorErrorLocation, error);
+                AddOutputSourceTextToCompilation(filename, context);
+            }
         };
+
+    protected static string GetErrorOutputFilename(Location location, string error)
+    {
+        string filename = Path.GetFileNameWithoutExtension(location.SourceTree!.FilePath);
+        var result = $"{filename}.Exception.{Hash():x8}.g.cs";
+        return result;
+
+        int Hash()
+        {
+            unchecked
+            {
+                int hash = 23;
+
+                foreach (char c in error)
+                    hash = hash * 31 + c;
+
+                foreach (char c in filename)
+                    hash = hash * 31 + c;
+
+                return hash;
+            }
+        }
+    }
 
     protected static string GetOutputFilename(string filePath, string targetFQN, string label)
     {
         string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(filePath);
         string typename = new string(targetFQN.Select(x => char.IsLetterOrDigit(x) ? x : '_').ToArray());
         var result = $"{fileNameWithoutExtension}.{typename}.{label}.{Hash():x8}.g.cs";
-        Debug.WriteLine(result);
         return result;
 
         int Hash()
@@ -163,12 +191,23 @@ public abstract class BaseSourceGenerator
             .AppendLine("#nullable enable");
     }
 
-    protected SourceText FinalizeOutputSourceText()
+    void AddOutputSourceTextToCompilation(string filename, SourceProductionContext context)
     {
         string output = Text.AppendLine().ToString();
+
+        if (MedicineMetrics.Reporter is { } reporter)
+        {
+            int lineCount = 0;
+            foreach (var c in output.AsSpan())
+                if (c is '\n')
+                    lineCount++;
+
+            reporter.Report(filename, Stat.LinesOfCodeGenerated, lineCount);
+        }
+
         Text.Clear();
         indent = 0;
-        return SourceText.From(output, Encoding.UTF8);
+        context.AddSource(filename, SourceText.From(output, Encoding.UTF8));
     }
 
     public StringBuilder Append(string x)

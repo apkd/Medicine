@@ -29,7 +29,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; set; }
-        public EquatableIgnoreList<string>? SourceGeneratorDiagnostics { get; set; } = [];
+        public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
+
         public string? Attribute;
         public (bool TrackInstanceIDs, bool TrackTransforms, int InitialCapacity, int DesiredJobCount, bool Manual) AttributeArguments;
         public EquatableArray<string> ContainingTypeDeclaration;

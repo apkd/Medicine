@@ -28,16 +28,16 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
     [SuppressMessage("ReSharper", "NotAccessedPositionalProperty.Local")]
     record struct CacheInput() : IGeneratorTransformOutputWithContext
     {
+        public EquatableIgnore<GeneratorAttributeSyntaxContext> Context { get; set; }
+        public string? SourceGeneratorOutputFilename { get; set; }
+        public string? SourceGeneratorError { get; set; }
+        public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
+
         // explicitly avoid regenerating code unless this property has changed.
         // - this generator is fairly slow and can potentially depend on a lot of unpredictable context
         // - in most cases, though, we're only interested in the body of the method/property changing
         //   ReSharper disable once NotAccessedField.Local
         public EquatableArray<byte> RawTextForCache;
-
-        public EquatableIgnore<GeneratorAttributeSyntaxContext> Context { get; set; }
-        public string? SourceGeneratorOutputFilename { get; set; }
-        public EquatableIgnoreList<string>? SourceGeneratorDiagnostics { get; set; } = [];
-        public string? SourceGeneratorError { get; set; }
     }
 
     static CacheInput TransformForCache(GeneratorAttributeSyntaxContext context, CancellationToken ct)
@@ -51,7 +51,8 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; set; }
-        public EquatableIgnoreList<string>? SourceGeneratorDiagnostics { get; set; } = [];
+        public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
+
         public EquatableArray<string> Declaration;
         public string? WrapperName;
         public string? EnumerableFQN;

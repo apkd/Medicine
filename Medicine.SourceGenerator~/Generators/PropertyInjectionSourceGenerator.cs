@@ -48,7 +48,8 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; set; }
-        public EquatableIgnoreList<string>? SourceGeneratorDiagnostics { get; set; } = [];
+        public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
+
         public bool IsUnityEditorCompile;
         public bool IsDebugCompile;
         public bool IsSealed;
