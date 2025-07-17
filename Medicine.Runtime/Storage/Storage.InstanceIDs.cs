@@ -15,10 +15,14 @@ namespace Medicine.Internal
         {
             public static NativeList<int> List;
 
-            public static void Initialize()
+            // initialize the class on first access
+            // ReSharper disable once UnusedMember.Local
+            static readonly int initToken = Initialize();
+
+            public static int Initialize()
             {
                 if (List.IsCreated)
-                    return;
+                    return 0;
 
 #if UNITY_2023_1_OR_NEWER
                 List = new(initialCapacity: 8, Allocator.Domain);
@@ -28,6 +32,7 @@ namespace Medicine.Internal
                 beforeAssemblyUnload += static () => List.Dispose();
 #endif
 #endif
+                return 0;
             }
         }
     }

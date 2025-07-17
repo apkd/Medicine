@@ -18,6 +18,10 @@ namespace Medicine.Internal
         {
             public static NativeList<TData> List;
 
+            // initialize the class on first access
+            // ReSharper disable once UnusedMember.Local
+            static readonly int initToken = Initialize();
+
             public static void Register(T instance)
             {
                 TData state;
@@ -51,7 +55,7 @@ namespace Medicine.Internal
                 catch (System.Exception ex)
                 {
                     Debug.LogError(
-                        $"Failed to invoke {typeof(T).Name}.Initialize(out {typeof(TData).Name} state). " +
+                        $"Failed to invoke {typeof(T).Name}.Cleanup(ref {typeof(TData).Name} state). " +
                         $"Please make sure this method never throws. " +
                         $"This will cause tracking logic errors in release builds."
                     );
@@ -64,10 +68,10 @@ namespace Medicine.Internal
                     List.RemoveAtSwapBack(elementIndex);
             }
 
-            public static void Initialize()
+            public static int Initialize()
             {
                 if (List.IsCreated)
-                    return;
+                    return 0;
 
 #if UNITY_2023_1_OR_NEWER
                 List = new(initialCapacity: 8, Allocator.Domain);
@@ -77,6 +81,7 @@ namespace Medicine.Internal
                 beforeAssemblyUnload += static () => List.Dispose();
 #endif
 #endif
+                return 0;
             }
         }
     }

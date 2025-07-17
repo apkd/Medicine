@@ -319,18 +319,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             using (Braces)
             {
                 Line.Append(Alias.Inline).Append(" get");
-                using (Braces)
-                {
-                    Line.Append($"return {m}Storage.InstanceIDs<{input.TypeFQN}>.List.AsArray();");
-                    Linebreak();
-                    if (input.IsUnityEditorCompile)
-                        Line.Append("[global::UnityEditor.InitializeOnLoadMethod]");
-                    Line.Append("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
-                    Line.Append($"static void {m}Init()");
-
-                    using (Indent)
-                        Line.Append($"=> {m}Storage.InstanceIDs<{input.TypeFQN}>.Initialize();");
-                }
+                using (Indent)
+                    Line.Append($"=> {m}Storage.InstanceIDs<{input.TypeFQN}>.List.AsArray();");
             }
 
             Linebreak();
@@ -349,18 +339,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                     using (Braces)
                     {
                         Line.Append($"{Alias.Inline} get");
-                        using (Braces)
-                        {
-                            Line.Append($"return {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.List.AsArray();");
-                            Linebreak();
-                            if (input.IsUnityEditorCompile)
-                                Line.Append("[global::UnityEditor.InitializeOnLoadMethod]");
-                            Line.Append("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
-                            Line.Append($"static void {m}Init()");
-
-                            using (Indent)
-                                Line.Append($"=> {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.Initialize();");
-                        }
+                        using (Indent)
+                            Line.Append($"=> {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.List.AsArray();");
                     }
                 }
             }
@@ -442,7 +422,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 methodName: "OnEnableINTERNAL",
                 methodCalls:
                 [
-                    $"{m}Storage.Instances<{input.TypeFQN}>.Register{withId}(this);",
+                    $"{m}Storage.Instances<{input.TypeFQN}>.Register{withId}(this)",
                     input.AttributeArguments.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Register(transform)" : null,
                     ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Register(this)"),
                     ..input.InstanceDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Register(this)"),
@@ -453,7 +433,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 methodName: "OnDisableINTERNAL",
                 methodCalls:
                 [
-                    $"int index = {m}Storage.Instances<{input.TypeFQN}>.Unregister{withId}(this);",
+                    $"int index = {m}Storage.Instances<{input.TypeFQN}>.Unregister{withId}(this)",
                     ..input.InstanceDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Unregister(this, index)").Reverse(),
                     ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Unregister(this)").Reverse(),
                     input.AttributeArguments.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Unregister(index)" : null,
