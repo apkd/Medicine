@@ -38,6 +38,7 @@ namespace Medicine.Internal
                         $"Please make sure this method never throws. " +
                         $"This will cause tracking logic errors in release builds."
                     );
+                    Debug.LogException(ex);
                 }
 #else
                 instance.Initialize(out var state);
@@ -59,6 +60,7 @@ namespace Medicine.Internal
                         $"Please make sure this method never throws. " +
                         $"This will cause tracking logic errors in release builds."
                     );
+                    Debug.LogException(ex);
                     return;
                 }
 #else
