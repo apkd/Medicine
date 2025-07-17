@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using static System.ComponentModel.EditorBrowsableState;
 
@@ -48,6 +49,14 @@ namespace Medicine.Internal
 
             public static void Unregister(T instance, int elementIndex)
             {
+                if (!Utility.IsNativeObjectAlive(instance as UnityEngine.Object))
+                    return;
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                var safety = NativeListUnsafeUtility.GetAtomicSafetyHandle(ref List);
+                AtomicSafetyHandle.EnforceAllBufferJobsHaveCompleted(safety);
+#endif
+
 #if DEBUG
                 try
                 {
