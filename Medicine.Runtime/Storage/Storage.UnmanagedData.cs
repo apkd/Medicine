@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Unity.Collections;
+using UnityEngine;
 using static System.ComponentModel.EditorBrowsableState;
 
 // ReSharper disable UnusedType.Global
@@ -19,12 +20,46 @@ namespace Medicine.Internal
 
             public static void Register(T instance)
             {
+                TData state;
+#if DEBUG
+                try
+                {
+                    instance.Initialize(out state);
+                }
+                catch (System.Exception ex)
+                {
+                    state = default;
+                    Debug.LogError(
+                        $"Failed to invoke {typeof(T).Name}.Initialize(out {typeof(TData).Name} state). " +
+                        $"Please make sure this method never throws. " +
+                        $"This will cause tracking logic errors in release builds."
+                    );
+                }
+#else
                 instance.Initialize(out var state);
+#endif
                 List.Add(state);
             }
 
-            public static void Unregister(int elementIndex)
+            public static void Unregister(T instance, int elementIndex)
             {
+#if DEBUG
+                try
+                {
+                    instance.Cleanup(ref List.ElementAt(elementIndex));
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogError(
+                        $"Failed to invoke {typeof(T).Name}.Initialize(out {typeof(TData).Name} state). " +
+                        $"Please make sure this method never throws. " +
+                        $"This will cause tracking logic errors in release builds."
+                    );
+                    return;
+                }
+#else
+                instance.Cleanup(ref List.ElementAt(elementIndex));
+#endif
                 if (elementIndex >= 0)
                     List.RemoveAtSwapBack(elementIndex);
             }

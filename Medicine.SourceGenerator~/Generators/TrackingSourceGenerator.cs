@@ -170,7 +170,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             IncreaseIndent();
         }
 
-        void EmitRegistrationMethod(string methodName, string trackingMethod, bool storeIndex = false, params string?[] extraTrackingMethods)
+        void EmitRegistrationMethod(string methodName, params string?[] methodCalls)
         {
             if (!input.AttributeArguments.Manual)
             {
@@ -205,11 +205,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 if (input.HasBaseDeclarationsWithAttribute)
                     Line.Append($"base.{methodName}();");
 
-                Line.Append($"{(storeIndex ? "int index = " : "")}{trackingMethod}(this);");
-
-                foreach (var extraTrackingMethod in extraTrackingMethods)
-                    if (extraTrackingMethod is not null)
-                        Line.Append(extraTrackingMethod).Append(';');
+                foreach (var methodCall in methodCalls)
+                    Line.Append(methodCall).Append(';');
             }
 
             Linebreak();
@@ -393,8 +390,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             }
 
             Linebreak();
-            EmitRegistrationMethod("OnEnableINTERNAL", $"{m}Storage.Singleton<{input.TypeFQN}>.Register");
-            EmitRegistrationMethod("OnDisableINTERNAL", $"{m}Storage.Singleton<{input.TypeFQN}>.Unregister");
+            EmitRegistrationMethod("OnEnableINTERNAL", $"{m}Storage.Singleton<{input.TypeFQN}>.Register(this);");
+            EmitRegistrationMethod("OnDisableINTERNAL", $"{m}Storage.Singleton<{input.TypeFQN}>.Unregister(this);");
 
             if (input.IsUnityEditorCompile)
             {
@@ -437,10 +434,9 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
             EmitRegistrationMethod(
                 methodName: "OnEnableINTERNAL",
-                trackingMethod: $"{m}Storage.Instances<{input.TypeFQN}>.Register{withId}",
-                storeIndex: false,
-                extraTrackingMethods:
+                methodCalls:
                 [
+                    $"{m}Storage.Instances<{input.TypeFQN}>.Register{withId}(this);",
                     input.AttributeArguments.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Register(transform)" : null,
                     ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Register(this)"),
                     ..input.InstanceDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Register(this)"),
@@ -449,13 +445,12 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
             EmitRegistrationMethod(
                 methodName: "OnDisableINTERNAL",
-                trackingMethod: $"{m}Storage.Instances<{input.TypeFQN}>.Unregister{withId}",
-                storeIndex: true,
-                extraTrackingMethods:
+                methodCalls:
                 [
+                    $"int index = {m}Storage.Instances<{input.TypeFQN}>.Unregister{withId}(this);",
+                    ..input.InstanceDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Unregister(this, index)").Reverse(),
+                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Unregister(this)").Reverse(),
                     input.AttributeArguments.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Unregister(index)" : null,
-                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Unregister(this)"),
-                    ..input.InstanceDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Unregister(index)"),
                 ]
             );
 
