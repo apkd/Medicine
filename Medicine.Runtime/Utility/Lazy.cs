@@ -1,6 +1,5 @@
 using System;
 using System.Runtime.CompilerServices;
-using Medicine.Internal;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 
 namespace Medicine
@@ -34,6 +33,16 @@ namespace Medicine
         public static implicit operator T(LazyRef<T> lazyRef)
             => lazyRef.Value;
 
+        // not evaluating the func because it seems likely that the struct is
+        // boxed for the ToString() call anyway
+        public override string ToString()
+            => obj switch
+            {
+                T value => value.ToString(),
+                Func<T> => $"LazyRef<{typeof(T).Name}> (unevaluated)",
+                _       => $"LazyRef<{typeof(T).Name}> (null)",
+            };
+
         public T Value
         {
             [MethodImpl(AggressiveInlining)]
@@ -50,11 +59,7 @@ namespace Medicine
                         obj = result;
                         return result;
                     default:
-#if DEBUG
-                        throw new InvalidOperationException($"Unexpected object type: {obj.GetType().Name} vs {typeof(T).Name}");
-#else
-                            return null;
-#endif
+                        return (obj = null) as T;
                 }
             }
         }
@@ -69,12 +74,21 @@ namespace Medicine
         public LazyVal(Func<T> lazy)
         {
             MedicineUnsafeShim.SkipInit(out obj);
-            this.init = lazy;
+            init = lazy;
         }
 
         [MethodImpl(AggressiveInlining)]
         public static implicit operator T(in LazyVal<T> lazyVal)
             => lazyVal.Value;
+
+        // not evaluating the func because it seems likely that the struct is
+        // boxed for the ToString() call anyway
+        public override string ToString()
+            => init switch
+            {
+                null => obj.ToString(),
+                _    => $"LazyRef<{typeof(T).Name}> (unevaluated)",
+            };
 
         public T Value
         {
