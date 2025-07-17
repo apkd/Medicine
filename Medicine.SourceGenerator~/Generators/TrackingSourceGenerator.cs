@@ -283,6 +283,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 {
                     Line.Append($"return {m}Storage.TransformAccess<{input.TypeFQN}>.Transforms;");
                     Linebreak();
+                    if (input.IsUnityEditorCompile)
+                        Line.Append("[global::UnityEditor.InitializeOnLoadMethod]");
                     Line.Append("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
                     Line.Append($"static void {m}Init()");
 
@@ -321,6 +323,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 {
                     Line.Append($"return {m}Storage.InstanceIDs<{input.TypeFQN}>.List.AsArray();");
                     Linebreak();
+                    if (input.IsUnityEditorCompile)
+                        Line.Append("[global::UnityEditor.InitializeOnLoadMethod]");
                     Line.Append("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
                     Line.Append($"static void {m}Init()");
 
@@ -349,6 +353,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                         {
                             Line.Append($"return {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.List.AsArray();");
                             Linebreak();
+                            if (input.IsUnityEditorCompile)
+                                Line.Append("[global::UnityEditor.InitializeOnLoadMethod]");
                             Line.Append("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
                             Line.Append($"static void {m}Init()");
 
