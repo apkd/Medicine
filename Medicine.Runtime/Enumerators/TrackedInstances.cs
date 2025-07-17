@@ -4,9 +4,11 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using JetBrains.Annotations;
+using UnityEngine.Assertions;
 using UnityEngine.Pool;
 using static System.ComponentModel.EditorBrowsableState;
 using static System.Runtime.CompilerServices.MethodImplOptions;
+
 // ReSharper disable UnusedMember.Global
 
 namespace Medicine.Internal
@@ -49,12 +51,16 @@ namespace Medicine.Internal
         }
 
         public T this[int index]
-            => Storage.Instances<T>.List[index];
+        {
+            [MethodImpl(AggressiveInlining)]
+            get => Storage.Instances<T>.List[index];
+        }
 
 #if MODULE_ZLINQ
         /// <summary>
         /// Returns a ValueEnumerable struct that allows chaining of ZLinq operators.
         /// </summary>
+        [MethodImpl(AggressiveInlining)]
         public ValueEnumerable<FromList<T>, T> AsValueEnumerable()
         {
 #if UNITY_EDITOR
@@ -70,11 +76,35 @@ namespace Medicine.Internal
         /// It is up to the caller to call <c>Dispose()</c> on the returned PooledObject handle.
         /// </summary>
         [MustDisposeResource]
-        public PooledObject<List<T>> ToPooledList(out List<T> list)
+        [MethodImpl(AggressiveInlining)]
+        public PooledList<T> ToPooledList(out List<T> list)
         {
-            var handle = ListPool<T>.Get(out list);
+            var handle = PooledList.Get(out list);
             list.AddRange(Storage.Instances<T>.List);
             return handle;
+        }
+
+        public void CopyTo(List<T> destination, int extraCapacity = 16)
+        {
+            if (Count is 0)
+                return;
+
+            if (destination.Capacity < Count)
+                destination.Capacity = Count + extraCapacity;
+
+            var destinationListView = destination.AsInternalsView();
+            destinationListView.Count = Count;
+
+            Storage.Instances<T>.List.CopyTo(
+                array: destinationListView.Array!,
+                arrayIndex: 0
+            );
+
+            Array.Clear(
+                array: destinationListView.Array!,
+                index: destinationListView.Array!.Length - Count,
+                length: Count
+            );
         }
 
         /// <summary>
@@ -86,11 +116,16 @@ namespace Medicine.Internal
         /// The components will be copied to a pooled list, which avoids unnecessary allocations.
         /// The list is returned to the pool automatically after enumeration.
         /// </remarks>
-        public WithImmediateCopy Immediate
-            => default;
-
-        public struct WithImmediateCopy : ILinqFallbackEnumerable<PooledListEnumerator<T>, T>
+        public ImmediateEnumerable WithCopy
         {
+            [MethodImpl(AggressiveInlining)]
+            get => default;
+        }
+
+        public struct ImmediateEnumerable : ILinqFallbackEnumerable<PooledListEnumerator<T>, T>
+        {
+            [EditorBrowsable(Never)]
+            [MethodImpl(AggressiveInlining)]
             public PooledListEnumerator<T> GetEnumerator()
             {
 #if UNITY_EDITOR
@@ -107,9 +142,153 @@ namespace Medicine.Internal
             /// <summary>
             /// Returns a ValueEnumerable struct that allows chaining of ZLinq operators.
             /// </summary>
+            [MethodImpl(AggressiveInlining)]
             public ValueEnumerable<PooledListEnumerator<T>, T> AsValueEnumerable()
                 => new(GetEnumerator());
 #endif
+        }
+
+        /// <summary>
+        /// Returns a <see cref="StrideEnumerable" /> that allows enumeration with a specified stride.
+        /// The enumerable will yield every N-th element, with an offset incremented each frame.
+        /// This is useful for creating a "rare update" mechanism that updates each object roughly once per N frames.
+        /// </summary>
+        /// <remarks>
+        /// Keep in mind that objects are re-ordered in internal storage when they are enabled and disabled.
+        /// This might result in missed or repeated instances when enumerated in consecutive frames.
+        /// While this level of consistency is sufficient for many systems, you might want to implement a custom
+        /// mechanism if you require better predictability.
+        /// </remarks>
+        /// <param name="stride">
+        /// The step size to use for iterating through the instances.
+        /// For example, <c>stride: 1</c> is equivalent to normally enumerating the sequence,
+        /// <c>stride: 2</c> yield every second element, <c>stride: 3</c> yields every third, and so on.
+        /// </param>
+        [MethodImpl(AggressiveInlining)]
+        public StrideEnumerable WithStride(int stride)
+            => new(stride);
+
+        public readonly struct StrideEnumerable : ILinqFallbackEnumerable<StrideEnumerator, T>
+        {
+            readonly int stride;
+
+            public StrideEnumerable(int stride)
+                => this.stride = stride;
+
+            [MethodImpl(AggressiveInlining)]
+            public StrideEnumerator GetEnumerator()
+                => new(Storage.Instances<T>.List, stride);
+
+#if MODULE_ZLINQ
+            /// <summary>
+            /// Returns a ValueEnumerable struct that allows chaining of ZLinq operators.
+            /// </summary>
+            [MethodImpl(AggressiveInlining)]
+            public ValueEnumerable<StrideEnumerator, T> AsValueEnumerable()
+                => new(GetEnumerator());
+#endif
+        }
+
+        public struct StrideEnumerator : IValueEnumerator<T>
+        {
+            readonly T[] array;
+            readonly int n;
+            readonly int stride;
+#if DEBUG
+            readonly ListView<T> listView;
+            readonly int version;
+#endif
+            int index;
+
+            internal StrideEnumerator(List<T> list, int stride)
+            {
+                Assert.IsTrue(stride > 0, "Stride must be greater than 0.");
+                int frameCount = UnityEngine.Time.frameCount;
+                var view = list.AsInternalsView();
+                array = view.Array;
+                n = view.Count;
+                index = frameCount % stride - stride;
+                this.stride = stride;
+#if DEBUG
+                this.listView = view;
+                version = view.Version;
+#endif
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            public bool MoveNext()
+            {
+#if DEBUG
+                [MethodImpl(NoInlining)]
+                static void VersionHasChanged()
+                {
+                    string type = typeof(T).Name;
+                    string msg
+                        = $"An instance of '{type}' was enabled or disabled during " +
+                          $"{nameof(Find)}.{nameof(Find.Instances)}<{type}> enumeration. This will result in invalid behaviour. " +
+                          $"You can use .{nameof(WithCopy)} to work around this problem at a small performance cost.";
+
+                    UnityEngine.Debug.LogError(msg);
+                }
+
+                if (listView.Version != version)
+                {
+                    VersionHasChanged();
+                    return false;
+                }
+#endif
+
+                return (index += stride) < n;
+            }
+
+            public ref readonly T Current
+            {
+                [MethodImpl(AggressiveInlining)]
+                get => ref array[index];
+            }
+
+            bool IValueEnumerator<T>.TryGetNext(out T current)
+            {
+                if (MoveNext())
+                {
+                    current = Current;
+                    return true;
+                }
+
+                MedicineUnsafeShim.SkipInit(out current);
+                return false;
+            }
+
+            bool IValueEnumerator<T>.TryGetNonEnumeratedCount(out int count)
+            {
+                count = n;
+                return true;
+            }
+
+            bool IValueEnumerator<T>.TryGetSpan(out ReadOnlySpan<T> span)
+            {
+#if DEBUG
+                span = default;
+                return false;
+#else
+                span = array.AsSpan(0, n);
+                return true;
+#endif
+            }
+
+            bool IValueEnumerator<T>.TryCopyTo(Span<T> destination, Index offset)
+            {
+#if MODULE_ZLINQ && !DEBUG
+                if (ZLinq.Internal.EnumeratorHelper.TryGetSlice<T>(array, offset, destination.Length, out var slice))
+                {
+                    slice.CopyTo(destination);
+                    return true;
+                }
+#endif
+                return false;
+            }
+
+            void IDisposable.Dispose() { }
         }
 
         [DisallowReadonly]
@@ -147,7 +326,7 @@ namespace Medicine.Internal
                     string msg
                         = $"An instance of '{type}' was enabled or disabled during " +
                           $"{nameof(Find)}.{nameof(Find.Instances)}<{type}> enumeration. This will result in invalid behaviour. " +
-                          $"You can use .{nameof(Immediate)} to work around this problem at a small performance cost.";
+                          $"You can use .{nameof(WithCopy)} to work around this problem at a small performance cost.";
 
                     UnityEngine.Debug.LogError(msg);
                 }
@@ -182,18 +361,32 @@ namespace Medicine.Internal
 
             bool IValueEnumerator<T>.TryGetNonEnumeratedCount(out int count)
             {
-                MedicineUnsafeShim.SkipInit(out count);
-                return false;
+                count = n;
+                return true;
             }
 
             bool IValueEnumerator<T>.TryGetSpan(out ReadOnlySpan<T> span)
             {
+#if DEBUG
                 span = default;
                 return false;
+#else
+                span = array.AsSpan(0, n);
+                return true;
+#endif
             }
 
             bool IValueEnumerator<T>.TryCopyTo(Span<T> destination, Index offset)
-                => false;
+            {
+#if MODULE_ZLINQ && !DEBUG
+                if (ZLinq.Internal.EnumeratorHelper.TryGetSlice<T>(array, offset, destination.Length, out var slice))
+                {
+                    slice.CopyTo(destination);
+                    return true;
+                }
+#endif
+                return false;
+            }
 
             void IDisposable.Dispose() { }
         }
