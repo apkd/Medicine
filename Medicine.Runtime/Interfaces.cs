@@ -10,7 +10,11 @@ namespace Medicine
         /// <summary>
         /// The index of this instance. This property is automatically updated.
         /// </summary>
-        int InstanceIndex { get; set; }
+        int InstanceIndex
+        {
+            get => -1;
+            set => _ = value;
+        }
     }
 
     /// <summary>

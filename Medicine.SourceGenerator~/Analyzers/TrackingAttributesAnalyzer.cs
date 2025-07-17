@@ -199,7 +199,10 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
         if (!containingType.Is(medicineFindFQN))
             return;
 
-        if (context.SemanticModel.GetTypeInfo(typeArgumentSyntax).Type is not { } typeArgument)
+        if (context.SemanticModel.GetTypeInfo(typeArgumentSyntax).Type is not INamedTypeSymbol typeArgument)
+            return;
+
+        if (typeArgument.IsUnboundGenericType)
             return;
 
         if (!typeArgument.HasAttribute(attributeFQN))

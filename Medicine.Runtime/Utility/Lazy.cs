@@ -1,5 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
+using Medicine.Internal;
+using Unity.Collections.LowLevel.Unsafe;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 
 namespace Medicine
@@ -48,19 +50,15 @@ namespace Medicine
             [MethodImpl(AggressiveInlining)]
             get
             {
-                switch (obj)
+                var temp = obj;
+                if (temp is Func<T> init)
                 {
-                    case T value:
-                        return value;
-                    case null:
-                        return null;
-                    case Func<T> init:
-                        var result = init();
-                        obj = result;
-                        return result;
-                    default:
-                        return (obj = null) as T;
+                    var result = init();
+                    obj = result;
+                    return result;
                 }
+
+                return UnsafeUtility.As<object, T>(ref temp);
             }
         }
     }

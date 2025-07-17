@@ -6,26 +6,32 @@ static class Constants
     public const string Namespace = "Medicine";
     public const string NamespaceWithGlobal = $"global::{Namespace}";
 
+    public const string MedicineSettingsAttributeFQN = $"{NamespaceWithGlobal}.MedicineSettingsAttribute";
+
     public const string InjectAttributeNameShort = "Inject";
     public const string InjectAttributeName = $"{InjectAttributeNameShort}Attribute";
     public const string InjectAttributeMetadataName = $"{Namespace}.{InjectAttributeName}";
     public const string InjectAttributeFQN = $"{NamespaceWithGlobal}.{InjectAttributeName}";
 
     public const string SingletonAttributeName = "SingletonAttribute";
+    public const string SingletonAttributeMetadataName = $"{Namespace}.{SingletonAttributeName}";
     public const string SingletonAttributeFQN = $"{NamespaceWithGlobal}.{SingletonAttributeName}";
 
     public const string TrackAttributeName = "TrackAttribute";
+    public const string TrackAttributeMetadataName = $"{Namespace}.{TrackAttributeName}";
     public const string TrackAttributeFQN = $"{NamespaceWithGlobal}.{TrackAttributeName}";
+
+    public const string WrapValueEnumerableAttributeName = "WrapValueEnumerableAttribute";
+    public const string WrapValueEnumerableAttributeMetadataName = $"{Namespace}.{WrapValueEnumerableAttributeName}";
+    public const string WrapValueEnumerableAttributeFQN = $"{NamespaceWithGlobal}.{WrapValueEnumerableAttributeName}";
+
+    public const string GenerateConstantsAttributeFQN = $"{NamespaceWithGlobal}.GenerateUnityConstantsAttribute";
 
     public const string UnmanagedDataInterfaceName = "IUnmanagedData";
     public const string UnmanagedDataInterfaceFQN = $"{NamespaceWithGlobal}.{UnmanagedDataInterfaceName}";
 
     public const string IInstanceIndexInterfaceName = "IInstanceIndex";
     public const string IInstanceIndexInterfaceFQN = $"{NamespaceWithGlobal}.{IInstanceIndexInterfaceName}";
-
-    public const string WrapValueEnumerableAttributeName = "WrapValueEnumerableAttribute";
-    public const string WrapValueEnumerableAttributeMetadataName = $"{Namespace}.{WrapValueEnumerableAttributeName}";
-    public const string WrapValueEnumerableAttributeFQN = $"{NamespaceWithGlobal}.{WrapValueEnumerableAttributeName}";
 
     public static class Alias
     {

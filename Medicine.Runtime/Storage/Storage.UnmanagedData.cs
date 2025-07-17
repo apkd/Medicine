@@ -17,11 +17,25 @@ namespace Medicine.Internal
             where T : class, IUnmanagedData<TData>
             where TData : unmanaged
         {
-            public static NativeList<TData> List;
+            public static NativeList<TData> List = Initialize();
+            public static NativeArray<TData> Array;
 
-            // initialize the class on first access
-            // ReSharper disable once UnusedMember.Local
-            static readonly int initToken = Initialize();
+            /// <summary>
+            /// This method is used to statically initialize the static fields on first access.
+            /// </summary>
+            static NativeList<TData> Initialize()
+            {
+#if UNITY_2023_1_OR_NEWER
+                List = new(initialCapacity: 8, Allocator.Domain);
+#else
+                List = new(initialCapacity: 8, Allocator.Persistent);
+#if UNITY_EDITOR
+                beforeAssemblyUnload += static () => List.Dispose();
+#endif
+#endif
+                Array = List.AsArray();
+                return List;
+            }
 
             public static void Register(T instance)
             {
@@ -45,11 +59,15 @@ namespace Medicine.Internal
                 instance.Initialize(out var state);
 #endif
                 List.Add(state);
+                Array = List.AsArray();
             }
 
             public static void Unregister(T instance, int elementIndex)
             {
-                if (!Utility.IsNativeObjectAlive(instance as UnityEngine.Object))
+                if (!Utility.IsNativeObjectAlive(instance as Object))
+                    return;
+
+                if (elementIndex < 0)
                     return;
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
@@ -75,24 +93,9 @@ namespace Medicine.Internal
 #else
                 instance.Cleanup(ref List.ElementAt(elementIndex));
 #endif
-                if (elementIndex >= 0)
-                    List.RemoveAtSwapBack(elementIndex);
-            }
+                List.RemoveAtSwapBack(elementIndex);
 
-            public static int Initialize()
-            {
-                if (List.IsCreated)
-                    return 0;
-
-#if UNITY_2023_1_OR_NEWER
-                List = new(initialCapacity: 8, Allocator.Domain);
-#else
-                List = new(initialCapacity: 8, Allocator.Persistent);
-#if UNITY_EDITOR
-                beforeAssemblyUnload += static () => List.Dispose();
-#endif
-#endif
-                return 0;
+                Array = List.AsArray();
             }
         }
     }

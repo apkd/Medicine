@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-using System.Diagnostics;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -54,13 +52,32 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         public bool IsDebugCompile;
         public bool IsSealed;
         public bool IsStatic;
-        public bool MakePublic;
+        public bool? MakePublic;
+        public int ForceDebug;
         public EquatableArray<string> NamespaceImports;
         public EquatableArray<string> ContainingTypeDeclaration;
-        public EquatableArray<byte> MethodTextCheckSumForCache;
         public EquatableIgnore<Func<string>> MethodXmlDocId;
         public EquatableIgnore<Func<string>> ClassName;
         public EquatableIgnore<Func<InitExpressionInfo[]>> InitExpressionInfoArrayBuilderFunc = new(() => []);
+
+        // ReSharper disable once NotAccessedField.Local
+        public EquatableArray<byte> MethodTextCheckSumForCache;
+    }
+
+    readonly record struct MedicineSettings
+    {
+        public readonly bool? MakePublic;
+        public readonly int ForceDebug;
+
+        public MedicineSettings(Compilation compilation)
+        {
+            var args = compilation.Assembly
+                .GetAttribute(MedicineSettingsAttributeFQN)
+                .GetAttributeConstructorArguments();
+
+            MakePublic = args.Get("makePublic", true);
+            ForceDebug = args.Get("debug", 0);
+        }
     }
 
     record struct InitExpressionInfo
@@ -78,30 +95,50 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
     [Flags]
     public enum ExpressionFlags : uint
     {
-        IsSingleton = 1 << 0,
-        IsTracked = 1 << 1,
-        NeedsNullCheck = 1 << 2,
-        IsDisposable = 1 << 3,
-        IsArray = 1 << 4,
-        IsLazy = 1 << 5,
-        IsValueType = 1 << 6,
-        IsOptional = 1 << 7,
-        IsTransient = 1 << 8,
-        IsCleanupDispose = 1 << 9,
-        IsCleanupDestroy = 1 << 10,
+        IsSingleton = 1 << 00,
+        IsTracked = 1 << 01,
+        NeedsNullCheck = 1 << 02,
+        IsUnityObject = 1 << 03,
+        IsUnityComponent = 1 << 04,
+        IsUnityScriptableObject = 1 << 05,
+        IsDisposable = 1 << 06,
+        IsArray = 1 << 07,
+        IsLazy = 1 << 08,
+        IsValueType = 1 << 09,
+        IsOptional = 1 << 10,
+        IsTransient = 1 << 11,
+        IsCleanupDispose = 1 << 12,
+        IsCleanupDestroy = 1 << 13,
     }
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
-        => context.RegisterSourceOutput(
-            context.SyntaxProvider
-                .ForAttributeWithMetadataName(
-                    fullyQualifiedMetadataName: InjectAttributeMetadataName,
-                    predicate: static (node, _)
-                        => node is MethodDeclarationSyntax syntax && !syntax.Modifiers.Any(SyntaxKind.AbstractKeyword),
-                    transform: WrapTransform(TransformSyntaxContext)
-                ),
+    {
+        var medicineSettings = context.CompilationProvider
+            .Select((x, ct) => new MedicineSettings(x));
+
+        var syntaxProvider = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                fullyQualifiedMetadataName: InjectAttributeMetadataName,
+                predicate: static (node, _)
+                    => node is MethodDeclarationSyntax syntax && !syntax.Modifiers.Any(SyntaxKind.AbstractKeyword),
+                transform: WrapTransform(TransformSyntaxContext)
+            );
+
+        context.RegisterSourceOutput(
+            source: syntaxProvider.Combine(medicineSettings).Select((x, ct) =>
+            {
+                x.Left.MakePublic ??= x.Right.MakePublic;
+                x.Left.IsDebugCompile = x.Right.ForceDebug switch
+                {
+                    1 => true,
+                    2 => false,
+                    _ => x.Left.IsDebugCompile,
+                };
+                return x.Left;
+            }),
             action: WrapGenerateSource<GeneratorInput>(GenerateSource)
         );
+    }
 
     static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, CancellationToken ct)
     {
@@ -141,13 +178,21 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             .GetDeclaredSymbol(classDecl, ct)
             ?.ToMinimalDisplayString(context.SemanticModel, methodDeclaration.SpanStart, MinimallyQualifiedFormat) ?? ""
         );
+
         output.MethodXmlDocId = new(() => context.TargetSymbol.GetDocumentationCommentId() ?? methodDeclaration.Identifier.ValueText);
+
+        (output.MakePublic, output.ForceDebug) = context.Attributes.First()
+            .GetAttributeConstructorArguments()
+            .Select(x => (
+                    makePublic: x.Get<bool>("makePublic", null),
+                    forceDebug: x.Get("forceDebug", 0)
+                )
+            );
 
         output.IsSealed = classDecl.Modifiers.Any(SyntaxKind.SealedKeyword);
         output.IsStatic = methodDeclaration.Modifiers.Any(SyntaxKind.StaticKeyword);
-        output.MakePublic = context.Attributes.FirstOrDefault()?.ConstructorArguments.Any(x => x.Value is true) is true;
-        output.IsUnityEditorCompile = context.SemanticModel.IsDefined("UNITY_EDITOR");
         output.IsDebugCompile = context.SemanticModel.IsDefined("DEBUG");
+        output.IsUnityEditorCompile = context.SemanticModel.IsDefined("UNITY_EDITOR");
 
         // defer the expensive calls to the source gen phase
         output.InitExpressionInfoArrayBuilderFunc = new(() =>
@@ -188,7 +233,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                         ITypeSymbol? GetDelegateReturnType(ExpressionSyntax delegateExpression)
                             => delegateExpression switch
                             {
-                                LambdaExpressionSyntax { Body: InvocationExpressionSyntax body }
+                                LambdaExpressionSyntax { Body: ExpressionSyntax body }
                                     => context.SemanticModel.GetTypeInfo(body, ct).Type,
                                 LambdaExpressionSyntax { Body: BlockSyntax body }
                                     => body.DescendantNodes()
@@ -307,10 +352,12 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                                     typeSymbol = typeSymbolForDisplayName = accessedExpressionSymbol;
                         }
 
-                        if ((isTracked, typeSymbol) is (true, { Name: "TrackedInstances<T>.WithImmediateCopy", ContainingType.TypeArguments: [var trackedInstancesType] }))
-                            typeSymbolForDisplayName = trackedInstancesType;
-                        else if ((isTracked, typeSymbol) is (true, INamedTypeSymbol { TypeArguments: [var first2] }))
-                            typeSymbolForDisplayName = first2;
+                        const string name1 = "TrackedInstances<T>.ImmediateEnumerable";
+                        const string name2 = "TrackedInstances<T>.StrideEnumerable";
+                        if ((isTracked, typeSymbol) is (true, { Name: name1 or name2, ContainingType.TypeArguments: [var containingTypeArg] }))
+                            typeSymbolForDisplayName = containingTypeArg;
+                        else if ((isTracked, typeSymbol) is (true, INamedTypeSymbol { TypeArguments: [var typeArg] }))
+                            typeSymbolForDisplayName = typeArg;
 
                         if (isSingleton)
                         {
@@ -357,12 +404,22 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                         flags.Set(
                             NeedsNullCheck,
                             value: typeSymbol?.IsReferenceType is true &&
-                                   assignment.Right is not BaseObjectCreationExpressionSyntax &&
+                                   // assignment.Right is not BaseObjectCreationExpressionSyntax &&
                                    typeSymbol is not IArrayTypeSymbol &&
                                    !flags.Has(IsOptional) &&
                                    !flags.Has(IsTransient) &&
                                    !isSingleton &&
                                    !isTracked
+                        );
+
+                        flags.Set(
+                            IsUnityObject,
+                            value: typeSymbol.InheritsFrom("global::UnityEngine.Object")
+                        );
+
+                        flags.Set(
+                            IsUnityComponent,
+                            value: typeSymbol.InheritsFrom("global::UnityEngine.Component")
                         );
 
                         flags.Set(
@@ -415,21 +472,26 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         string className = input.ClassName.Value();
 
         var deferredLines = new List<string>();
+
         void Defer(string line)
             => deferredLines.Add(line);
+
         void DeferLinebreak()
             => deferredLines.Add("");
 
-        Line.Append("#pragma warning disable CS0628 // New protected member declared in sealed type");
-        Line.Append("#pragma warning disable CS0108 // Member hides inherited member; missing new keyword");
-        Line.Append("#pragma warning disable CS0618 // Type or member is obsolete");
+        Line.Write($"// makepublic: {input.MakePublic?.ToString() ?? "null"}");
+        Line.Write($"// debug: {input.ForceDebug.ToString()}");
+
+        Line.Write("#pragma warning disable CS0628 // New protected member declared in sealed type");
+        Line.Write("#pragma warning disable CS0108 // Member hides inherited member; missing new keyword");
+        Line.Write("#pragma warning disable CS0618 // Type or member is obsolete");
         Linebreak();
 
-        Line.Append(Alias.UsingInline);
-        Line.Append(Alias.UsingUtility);
-        Line.Append(Alias.UsingFind);
-        Line.Append(Alias.UsingStorage);
-        Line.Append(Alias.UsingDebug);
+        Line.Write(Alias.UsingInline);
+        Line.Write(Alias.UsingUtility);
+        Line.Write(Alias.UsingFind);
+        Line.Write(Alias.UsingStorage);
+        Line.Write(Alias.UsingDebug);
 
         string access = input switch
         {
@@ -443,14 +505,14 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
         Linebreak();
         foreach (var @using in input.NamespaceImports)
-            Line.Append(@using);
+            Line.Write(@using);
 
         Linebreak();
 
         foreach (var x in input.ContainingTypeDeclaration)
         {
-            Line.Append(x);
-            Line.Append('{');
+            Line.Write(x);
+            Line.Write('{');
             IncreaseIndent();
         }
 
@@ -462,44 +524,44 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
             void AppendInjectionDeclaredIn()
             {
-                Line.Append($"/// <injected>");
-                Line.Append($"/// Injection declared on line {x.Location.Value.GetLineSpan().StartLinePosition.Line + 1} in <see cref=\"{methodXmlDocId}\"/>.");
-                Line.Append($"/// </injected>");
+                Line.Write($"/// <injected>");
+                Line.Write($"/// Injection declared on line {x.Location.Value.GetLineSpan().StartLinePosition.Line + 1} in <see cref=\"{methodXmlDocId}\"/>.");
+                Line.Write($"/// </injected>");
             }
 
             void OpenListAndAppendOptionalDescription(string nullIf)
             {
                 if (x.Flags.Has(IsOptional))
-                    Line.Append($"/// This code-generated property is marked as <c>.Optional()</c>:");
+                    Line.Write($"/// This code-generated property is marked as <c>.Optional()</c>:");
                 else if (x.Flags.Has(NeedsNullCheck))
-                    Line.Append($"/// This code-generated property is checked for <c>null</c>:");
+                    Line.Write($"/// This code-generated property is checked for <c>null</c>:");
 
-                Line.Append($"/// <list type=\"bullet\">");
+                Line.Write($"/// <list type=\"bullet\">");
                 if (x.Flags.Has(IsOptional))
                 {
-                    Line.Append($"/// <item>This property will <b>silently</b> return <c>null</c> if {nullIf}.</item>");
-                    Line.Append($"/// <item>Remove <c>.Optional()</c> from the end of the assignment to re-enable the null check + error log. </item>");
+                    Line.Write($"/// <item>This property will <b>silently</b> return <c>null</c> if {nullIf}.</item>");
+                    Line.Write($"/// <item>Remove <c>.Optional()</c> from the end of the assignment to re-enable the null check + error log. </item>");
                 }
                 else if (x.Flags.Has(NeedsNullCheck))
                 {
-                    Line.Append($"/// <item>This property <b>will log an error</b> and return <c>null</c> if {nullIf}.</item>");
-                    Line.Append($"/// <item>Append <c>.Optional()</c> at the end of the assignment to suppress the null check + error log. </item>");
+                    Line.Write($"/// <item>This property <b>will log an error</b> and return <c>null</c> if {nullIf}.</item>");
+                    Line.Write($"/// <item>Append <c>.Optional()</c> at the end of the assignment to suppress the null check + error log. </item>");
                 }
                 else if (x.Flags.Has(IsArray))
                 {
-                    Line.Append($"/// <item>This property will never return <c>null</c> - will always fall back to an empty array.</item>");
+                    Line.Write($"/// <item>This property will never return <c>null</c> - will always fall back to an empty array.</item>");
                 }
             }
 
             // handle unrecognized types
             if (x.TypeFQN is null)
             {
-                Line.Append($"/// <summary>");
-                Line.Append($"/// <p><b>The source generator was unable to determine the type of this property.</b></p>");
-                Line.Append($"/// <p>Make sure that the assignment expression is correct, and that it isn't referring to other code-generated properties.</p>");
-                Line.Append($"/// </summary>");
+                Line.Write($"/// <summary>");
+                Line.Write($"/// <p><b>The source generator was unable to determine the type of this property.</b></p>");
+                Line.Write($"/// <p>Make sure that the assignment expression is correct, and that it isn't referring to other code-generated properties.</p>");
+                Line.Write($"/// </summary>");
                 AppendInjectionDeclaredIn();
-                Line.Append($"{@static}object {x.PropertyName};");
+                Line.Write($"{@static}object {x.PropertyName};");
                 Linebreak();
 
                 context.ReportDiagnostic(
@@ -515,45 +577,45 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             {
                 if (input.IsUnityEditorCompile)
                 {
-                    Line.Append($"/// <summary> Provides access to the active <see cref=\"{x.TypeXmlDocId}\"/> singleton instance. </summary>");
-                    Line.Append($"/// <remarks>");
+                    Line.Write($"/// <summary> Provides access to the active <see cref=\"{x.TypeXmlDocId}\"/> singleton instance. </summary>");
+                    Line.Write($"/// <remarks>");
                     OpenListAndAppendOptionalDescription(nullIf: "the singleton instance could not be found");
-                    Line.Append($"/// </list>");
-                    Line.Append($"/// Additional notes:");
-                    Line.Append($"/// <inheritdoc cref=\"{x.TypeFQN}.Instance\"/>");
-                    Line.Append($"/// </remarks>");
+                    Line.Write($"/// </list>");
+                    Line.Write($"/// Additional notes:");
+                    Line.Write($"/// <inheritdoc cref=\"{x.TypeFQN}.Instance\"/>");
+                    Line.Write($"/// </remarks>");
                     AppendInjectionDeclaredIn();
                 }
 
                 if (!x.Flags.Has(IsOptional))
-                    Line.Append("[global::System.Diagnostics.CodeAnalysis.AllowNull, global::JetBrains.Annotations.CanBeNull]");
+                    Line.Write("[global::System.Diagnostics.CodeAnalysis.AllowNull, global::JetBrains.Annotations.CanBeNull]");
 
-                Line.Append($"{access}{@static}{x.TypeFQN}{opt} {x.PropertyName}");
+                Line.Write($"{access}{@static}{x.TypeFQN}{opt} {x.PropertyName}");
                 using (Braces)
                 {
                     // always get a fresh singleton instance
                     if (x.Flags.Has(NeedsNullCheck))
                     {
                         // check that the singleton exists and if not, log error
-                        Line.Append("get");
+                        Line.Write("get");
                         using (Braces)
                         {
-                            Line.Append($"var instance = {x.TypeFQN}.Instance;");
-                            Line.Append($"if (!{m}Utility.IsNativeObjectAlive(instance))");
+                            Line.Write($"var instance = {x.TypeFQN}.Instance;");
+                            Line.Write($"if (!{m}Utility.IsNativeObjectAlive(instance))");
                             using (Indent)
-                                Line.Append($"{m}Debug.LogError($\"No registered singleton instance: {x.TypeDisplayName}\");");
+                                Line.Write($"{m}Debug.LogError($\"No registered singleton instance: {x.TypeDisplayName}\");");
 
-                            Line.Append($"return instance{exc};");
+                            Line.Write($"return instance{exc};");
                         }
                     }
                     else
                     {
                         // just return
-                        Line.Append($"{Alias.Inline} get => {x.TypeFQN}.Instance;");
+                        Line.Write($"{Alias.Inline} get => {x.TypeFQN}.Instance;");
                     }
 
                     // discard the assign - only need this for type resolution
-                    Line.Append($"{Alias.Inline} set {{ }}");
+                    Line.Write($"{Alias.Inline} set {{ }}");
                 }
             }
             // handle tracked classes
@@ -561,18 +623,18 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             {
                 if (input.IsUnityEditorCompile)
                 {
-                    Line.Append($"/// <inheritdoc cref=\"{x.TypeFQN}.Instances\"/>");
+                    Line.Write($"/// <inheritdoc cref=\"{x.TypeFQN}.Instances\"/>");
                     AppendInjectionDeclaredIn();
                 }
 
-                Line.Append($"{access}{@static}global::Medicine.Internal.TrackedInstances<{x.TypeFQN}> {x.PropertyName}");
+                Line.Write($"{access}{@static}global::Medicine.Internal.TrackedInstances<{x.TypeFQN}> {x.PropertyName}");
                 using (Braces)
                 {
                     // we can save some memory by omitting the backing field when the struct is a static accessor with no stored state
-                    Line.Append($"{Alias.Inline} get => default;");
+                    Line.Write($"{Alias.Inline} get => default;");
 
                     // discard the assign - only need this for type resolution
-                    Line.Append($"{Alias.Inline} set {{ }}");
+                    Line.Write($"{Alias.Inline} set {{ }}");
                 }
             }
             // handle other classes and structs
@@ -587,76 +649,87 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
                 if (input.IsUnityEditorCompile)
                 {
-                    Line.Append($"/// <summary> Cached <see cref=\"{x.TypeXmlDocId}\"/> {label}.");
-                    Line.Append($"/// <br/>Initialized from expression: <c>{x.InitExpression.HtmlEncode()}</c></summary>");
-                    Line.Append($"/// <remarks>");
+                    Line.Write($"/// <summary> Cached <see cref=\"{x.TypeXmlDocId}\"/> {label}.");
+                    Line.Write($"/// <br/>Initialized from expression: <c>{x.InitExpression.HtmlEncode()}</c></summary>");
+                    Line.Write($"/// <remarks>");
                     OpenListAndAppendOptionalDescription(nullIf: "the component could not be found");
                     if (x.TypeFQN?.StartsWith("global::Medicine.Internal.ComponentEnumerable<", Ordinal) is true)
-                        Line.Append($"/// <item> This struct lazily enumerates all components of the given type.</item>");
+                        Line.Write($"/// <item> This struct lazily enumerates all components of the given type.</item>");
                     else if (x.TypeFQN?.StartsWith("global::Medicine.Internal.ComponentsInSceneEnumerable<", Ordinal) is true)
-                        Line.Append($"/// <item> This struct lazily enumerates all components of the given type that exist in the given scene.</item>");
+                        Line.Write($"/// <item> This struct lazily enumerates all components of the given type that exist in the given scene.</item>");
                     else if (x.Flags.Has(IsLazy))
-                        Line.Append($"/// <item> This property lazily evaluates the given expression.</item>");
+                        Line.Write($"/// <item> This property lazily evaluates the given expression.</item>");
 
-                    Line.Append($"/// </list>");
+                    Line.Write($"/// </list>");
 
-                    Line.Append($"/// </remarks>");
+                    Line.Write($"/// </remarks>");
                     AppendInjectionDeclaredIn();
                 }
 
                 if (!x.Flags.Has(IsOptional))
-                    Line.Append("[global::System.Diagnostics.CodeAnalysis.AllowNull, global::JetBrains.Annotations.CanBeNull]");
+                    Line.Write("[global::System.Diagnostics.CodeAnalysis.AllowNull, global::JetBrains.Annotations.CanBeNull]");
 
                 if (x.Flags.Has(IsValueType))
                 {
-                    Line.Append($"{access}{@static}ref {x.TypeFQN}{opt} {x.PropertyName}");
+                    Line.Write($"{access}{@static}ref {x.TypeFQN}{opt} {x.PropertyName}");
                     using (Braces)
                     {
-                        Line.Append($"{Alias.Inline} get");
+                        Line.Write($"{Alias.Inline} get");
                         using (Braces)
                         {
                             if (input.IsUnityEditorCompile && !x.Flags.Has(IsDisposable))
                             {
-                                Line.Append($"{Alias.NoInline} void {m}Expr() => {m}MedicineInternal._{m}{x.PropertyName} = {x.InitExpression};");
-                                Line.Append($"if ({m}Utility.EditMode)");
+                                Line.Write($"{Alias.NoInline} void {m}Expr() => {m}MedicineInternal._{m}{x.PropertyName} = {x.InitExpression};");
+                                Line.Write($"if ({m}Utility.EditMode)");
                                 using (Indent)
-                                    Line.Append($"{m}Expr();"); // in edit mode, always call initializer
+                                    Line.Write($"{m}Expr();"); // in edit mode, always call initializer
                             }
 
-                            Line.Append($"return ref {m}MedicineInternal._{m}{x.PropertyName};");
+                            Line.Write($"return ref {m}MedicineInternal._{m}{x.PropertyName};");
                         }
                     }
                 }
                 else
                 {
-                    Line.Append($"{access}{@static}{x.TypeFQN}{opt} {x.PropertyName}");
+                    Line.Write($"{access}{@static}{x.TypeFQN}{opt} {x.PropertyName}");
                     using (Braces)
                     {
-                        Line.Append($"{Alias.Inline} get");
+                        Line.Write($"{Alias.Inline} get");
                         using (Braces)
                         {
                             if (input.IsUnityEditorCompile && !x.Flags.Has(IsDisposable))
                             {
-                                Line.Append($"{Alias.NoInline} {x.TypeFQN}{opt} {m}Expr() => {x.InitExpression};");
-                                Line.Append($"if ({m}Utility.EditMode)");
+                                Line.Write($"{Alias.NoInline} {x.TypeFQN}{opt} {m}Expr() => {x.InitExpression};");
+                                Line.Write($"if ({m}Utility.EditMode)");
                                 using (Indent)
-                                    Line.Append($"return {m}Expr();"); // in edit mode, always call initializer
+                                    Line.Write($"return {m}Expr();"); // in edit mode, always call initializer
                             }
 
-                            Line.Append($"return {m}MedicineInternal._{m}{x.PropertyName}!;");
+                            Line.Write($"return {m}MedicineInternal._{m}{x.PropertyName}!;");
                         }
 
-                        Line.Append($"{Alias.Inline} {@private}set");
+                        Line.Write($"{Alias.Inline} {@private}set");
                         using (Braces)
                         {
                             if (input.IsDebugCompile && x.Flags.Has(NeedsNullCheck))
                             {
-                                Line.Append($"if (!{m}Utility.IsNativeObjectAlive(value))");
+                                if (x.Flags.Has(IsUnityObject))
+                                    Line.Write($"if (!{m}Utility.IsNativeObjectAlive(value))");
+                                else
+                                    Line.Write($"if (value is null)");
+
+                                string typeLabel = x.Flags switch
+                                {
+                                    _ when x.Flags.Has(IsUnityComponent)        => "component",
+                                    _ when x.Flags.Has(IsUnityScriptableObject) => "scriptable object",
+                                    _                                           => "object",
+                                };
+
                                 using (Indent)
-                                    Line.Append($"{m}Debug.LogError($\"Missing component: {x.TypeDisplayName} in {className} '{{this.name}}'\", this);");
+                                    Line.Write($"{m}Debug.LogError($\"Missing {typeLabel}: {x.TypeDisplayName} '{x.PropertyName}' in {className} '{{this.name}}'\", this);");
                             }
 
-                            Line.Append($"{m}MedicineInternal._{m}{x.PropertyName} = value;");
+                            Line.Write($"{m}MedicineInternal._{m}{x.PropertyName} = value;");
                         }
                     }
                 }
@@ -675,45 +748,45 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             Linebreak();
         }
 
-        Line.Append(Alias.Hidden);
-        Line.Append(Alias.ObsoleteInternal);
-        Line.Append($"partial struct {m}MedicineInternalBackingStorage");
+        Line.Write(Alias.Hidden);
+        Line.Write(Alias.ObsoleteInternal);
+        Line.Write($"partial struct {m}MedicineInternalBackingStorage");
         using (Braces)
         {
             foreach (var line in deferredLines)
             {
-                if (line is { Length: >0})
-                    Line.Append(line);
+                if (line is { Length: > 0 })
+                    Line.Write(line);
                 else
                     Linebreak();
             }
         }
 
         Linebreak();
-        Line.Append(Alias.Hidden);
-        Line.Append(Alias.ObsoleteInternal);
-        Line.Append($"{m}MedicineInternalBackingStorage {m}MedicineInternal;");
+        Line.Write(Alias.Hidden);
+        Line.Write(Alias.ObsoleteInternal);
+        Line.Write($"{m}MedicineInternalBackingStorage {m}MedicineInternal;");
 
         if (expressions.Any(x => x.Flags.Any(IsCleanupDestroy | IsCleanupDispose) || x.CleanupExpression is not null))
         {
             Linebreak();
-            Line.Append($"{access}void Cleanup()");
+            Line.Write($"{access}void Cleanup()");
             using (Braces)
             {
-                Line.Append($"if ({m}Utility.EditMode)");
+                Line.Write($"if ({m}Utility.EditMode)");
                 using (Indent)
-                    Line.Append($"return;");
+                    Line.Write($"return;");
 
                 foreach (var x in expressions)
                 {
                     if (x.Flags.Has(IsCleanupDispose))
-                        Line.Append(x.PropertyName).Append(".Dispose();");
+                        Line.Write($"{x.PropertyName}.Dispose();");
 
                     if (x.Flags.Has(IsCleanupDestroy))
-                        Line.Append($"Destroy({x.PropertyName});");
+                        Line.Write($"Destroy({x.PropertyName});");
 
                     if (x.CleanupExpression is not null)
-                        Line.Append($"{m}MedicineInternalBackingStorage._{m}{x.PropertyName}{m}CLEANUP({x.PropertyName}); // {x.CleanupExpression}");
+                        Line.Write($"{m}MedicineInternalBackingStorage._{m}{x.PropertyName}{m}CLEANUP({x.PropertyName}); // {x.CleanupExpression}");
                 }
             }
         }
@@ -721,7 +794,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         foreach (var x in input.ContainingTypeDeclaration)
         {
             DecreaseIndent();
-            Line.Append('}');
+            Line.Write('}');
         }
     }
 }

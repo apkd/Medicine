@@ -13,17 +13,10 @@ namespace Medicine.Internal
         [EditorBrowsable(Never)]
         public static class InstanceIDs<T> where T : class
         {
-            public static NativeList<int> List;
+            public static NativeList<int> List = Initialize();
 
-            // initialize the class on first access
-            // ReSharper disable once UnusedMember.Local
-            static readonly int initToken = Initialize();
-
-            public static int Initialize()
+            static NativeList<int> Initialize()
             {
-                if (List.IsCreated)
-                    return 0;
-
 #if UNITY_2023_1_OR_NEWER
                 List = new(initialCapacity: 8, Allocator.Domain);
 #else
@@ -32,7 +25,7 @@ namespace Medicine.Internal
                 beforeAssemblyUnload += static () => List.Dispose();
 #endif
 #endif
-                return 0;
+                return List;
             }
         }
     }

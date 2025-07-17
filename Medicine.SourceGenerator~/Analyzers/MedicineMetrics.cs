@@ -1,10 +1,11 @@
+using System.Collections.Concurrent;
+using System.Collections.Immutable;
+using System.Composition;
+using System.Diagnostics;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
-using System.Collections.Immutable;
-using System.Composition;
-using System.Diagnostics;
 using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
 using static Constants;
@@ -48,7 +49,7 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
         = new();
 #endif
 
-    static readonly Dictionary<(Stat Stat, string Filename), float> Stats = new();
+    static readonly ConcurrentDictionary<(Stat Stat, string Filename), float> Stats = new();
 
     public static readonly DiagnosticDescriptor MedicineStatsDiagnosticDescriptor = new(
         id: nameof(MedicineMetrics),

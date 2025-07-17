@@ -20,24 +20,23 @@ public interface IGeneratorTransformOutput
 public abstract class BaseSourceGenerator
 {
     const int INDENT_SIZE = 4;
+
+    // todo: this seems to work fine, but some answers online suggest that storing state in the generator is potentially unsafe.
+    // it would be best to re-work this so that this state is stored in the generator's local scope.
+    public StringBuilder Text { get; } = new(capacity: 16384);
     int indent;
 
     static readonly DiagnosticDescriptor ExceptionDiagnosticDescriptor = new(
         id: "MED911",
         title: "Exception",
-        messageFormat: "'{0}'",
+        messageFormat: "Exception: {0}",
         category: "Exception",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true
     );
 
-    protected void HandleException<TInput>(SourceProductionContext context, TInput input) where TInput : IGeneratorTransformOutput { }
-
     protected static Func<GeneratorAttributeSyntaxContext, CancellationToken, TOutput> WrapTransform<TOutput>(
-        Func<GeneratorAttributeSyntaxContext, CancellationToken, TOutput> action,
-        [CallerArgumentExpression("action")] string? cae = null,
-        [CallerFilePath] string? cfp = null,
-        [CallerLineNumber] int cln = 0
+        Func<GeneratorAttributeSyntaxContext, CancellationToken, TOutput> action
     )
         where TOutput : IGeneratorTransformOutput, new()
         => (context, ct) =>
@@ -53,15 +52,12 @@ public abstract class BaseSourceGenerator
             }
             catch (Exception exception)
             {
-                return new() { SourceGeneratorError = $"{exception}\nThrown in: {cae}", SourceGeneratorErrorLocation = context.TargetNode.GetLocation() };
+                return new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = context.TargetNode.GetLocation() };
             }
         };
 
     protected static Func<TInput, CancellationToken, TOutput> WrapTransform<TInput, TOutput>(
-        Func<GeneratorAttributeSyntaxContext, CancellationToken, TOutput> action,
-        [CallerArgumentExpression("action")] string? cae = null,
-        [CallerFilePath] string? cfp = null,
-        [CallerLineNumber] int cln = 0
+        Func<GeneratorAttributeSyntaxContext, CancellationToken, TOutput> action
     )
         where TInput : IGeneratorTransformOutputWithContext
         where TOutput : IGeneratorTransformOutput, new()
@@ -78,15 +74,12 @@ public abstract class BaseSourceGenerator
             }
             catch (Exception exception)
             {
-                return new() { SourceGeneratorError = $"{exception}\nThrown in: {cae}", SourceGeneratorErrorLocation = input.Context.Value.TargetNode.GetLocation() };
+                return new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = input.Context.Value.TargetNode.GetLocation() };
             }
         };
 
     protected Action<SourceProductionContext, TInput> WrapGenerateSource<TInput>(
-        Action<SourceProductionContext, TInput> action,
-        [CallerArgumentExpression("action")] string? cae = null,
-        [CallerFilePath] string? cfp = null,
-        [CallerLineNumber] int cln = 0
+        Action<SourceProductionContext, TInput> action
     )
         where TInput : IGeneratorTransformOutput
         => (context, input) =>
@@ -95,12 +88,10 @@ public abstract class BaseSourceGenerator
 
             string? error = input.SourceGeneratorError;
 
-            if (input.SourceGeneratorOutputFilename is not { Length: > 0 })
-            {
+            if (error is not { Length: > 0 } && input.SourceGeneratorOutputFilename is not { Length: > 0 })
                 error = "The source generator did not specify an output filename. This is a bug in the source generator.";
-                ;
-            }
-            else if (error is not { Length: > 0 })
+
+            if (error is not { Length: > 0 })
             {
                 // main path - try to generate the source
                 try
@@ -112,12 +103,12 @@ public abstract class BaseSourceGenerator
 
                     float elapsed = (float)time.Elapsed.TotalMilliseconds;
                     MedicineMetrics.Reporter?.Report(input.SourceGeneratorOutputFilename, Stat.SourceGenerationTimeMs, elapsed);
-                    AddOutputSourceTextToCompilation(input.SourceGeneratorOutputFilename, context);
+                    AddOutputSourceTextToCompilation(input.SourceGeneratorOutputFilename!, context);
                     return;
                 }
                 catch (Exception exception)
                 {
-                    error = $"{exception}\nThrown in: {cae}";
+                    error = $"{exception}";
                 }
             }
 
@@ -210,12 +201,6 @@ public abstract class BaseSourceGenerator
         context.AddSource(filename, SourceText.From(output, Encoding.UTF8));
     }
 
-    public StringBuilder Append(string x)
-        => Text.Append(x);
-
-    public StringBuilder Append(char x)
-        => Text.Append(x);
-
     protected void TrimEndWhitespace()
     {
         while (char.IsWhiteSpace(Text[^1]))
@@ -228,8 +213,6 @@ public abstract class BaseSourceGenerator
             if (Text[n - 1] != '\n')
                 Text.AppendLine();
     }
-
-    public StringBuilder Text { get; } = new(capacity: 16384);
 
     public StringBuilder Line
         => Text.AppendLine().Append(' ', indent);
@@ -272,6 +255,9 @@ public abstract class BaseSourceGenerator
 
         public void Dispose()
             => generator.DecreaseIndent();
+
+        public StringBuilder Append(char x, BaseSourceGenerator baseSourceGenerator)
+            => baseSourceGenerator.Text.Append(x);
     }
 
     protected readonly struct BracesScope : IDisposable

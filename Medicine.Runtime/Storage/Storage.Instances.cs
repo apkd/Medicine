@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using static System.ComponentModel.EditorBrowsableState;
 using Object = UnityEngine.Object;
@@ -17,10 +18,10 @@ namespace Medicine.Internal
         [EditorBrowsable(Never)]
         public static class Instances<T> where T : class
         {
-            /// <summary>
+            /// <remarks>
             /// Do not access directly!
-            /// <p>Use <see cref="Find.Instances{T}"/> instead.</p>
-            /// </summary>
+            /// <p>Use <see cref="Find.Instances{T}"/> or the generated <c>.Instances</c> property instead.</p>
+            /// </remarks>
             public static readonly List<T> List = new(capacity: 8);
 
             /// <summary>
@@ -141,6 +142,12 @@ namespace Medicine.Internal
             public static int UnregisterWithInstanceID(T instance)
             {
                 int index = Unregister(instance);
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                var safety = NativeListUnsafeUtility.GetAtomicSafetyHandle(ref InstanceIDs<T>.List);
+                AtomicSafetyHandle.EnforceAllBufferJobsHaveCompleted(safety);
+#endif
+
                 if (index >= 0)
                     InstanceIDs<T>.List.RemoveAtSwapBack(index);
 
@@ -153,7 +160,17 @@ namespace Medicine.Internal
                 static int editModeVersion = int.MinValue;
                 static readonly bool editModeIsScriptableObject = typeof(ScriptableObject).IsAssignableFrom(typeof(T));
 
-                public static void Invalidate()
+                /// <remarks>
+                /// This method is used to hook into the object constructor to invalidate the active object list.
+                /// <list type="bullet">
+                /// <item>Used as a hacky "OnObjectInstanceCreated" kind of callback</item>
+                /// <item>This is used in user classes - technically we could just emit a ctor, but that could conflict with user code</item>
+                /// <item>This is less ideal than OnEnable, but we don't want to mark user types with [ExecuteAlways]...</item>
+                /// <item>Imprecise, but only used in edit mode, and in case the tracked list is accessed multiple times per update</item>
+                /// <item>None of this code is shipped in game builds - we want [Track] to be as lightweight as possible</item>
+                /// </list>
+                /// </remarks>
+                public static int Invalidate()
                     => editModeVersion = int.MinValue;
 
                 static bool AnyInstanceBecameInvalid()
@@ -176,9 +193,11 @@ namespace Medicine.Internal
                 {
                     int frameCount = Time.frameCount;
 
+#if !MEDICINE_EDITMODE_ALWAYS_REFRESH
                     if (editModeVersion == frameCount)   // refresh once per frame
                         if (!AnyInstanceBecameInvalid()) // refresh more often if we detect changes
                             return;
+#endif
 
                     editModeVersion = frameCount;
 

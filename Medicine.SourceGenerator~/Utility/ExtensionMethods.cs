@@ -9,10 +9,21 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static System.StringComparison;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 
+#pragma warning disable CS9113 // Parameter is unread.
+
 [EditorBrowsable(EditorBrowsableState.Never)]
 [SuppressMessage("ReSharper", "MemberCanBePrivate.Global")]
 public static class ExtensionMethods
 {
+    public static StringBuilder Write(this StringBuilder self, [InterpolatedStringHandlerArgument(nameof(self))] StringBuilderInterpolatedString value)
+        => self;
+
+    public static StringBuilder Write(this StringBuilder self, string? text)
+        => self.Append(text);
+
+    public static StringBuilder Write(this StringBuilder self, char character)
+        => self.Append(character);
+
     public static string HtmlEncode(this string self)
         => System.Web.HttpUtility.HtmlEncode(self);
 
@@ -30,54 +41,6 @@ public static class ExtensionMethods
 
     public static T[] AsArray<T>(this ImmutableArray<T> array)
         => Unsafe.As<ImmutableArray<T>, ValueTuple<T[]>>(ref array).Item1;
-
-    public static void AppendLongGenericTypeName(this StringBuilder stringBuilder, BaseSourceGenerator sourceGenerator, string? name)
-    {
-        if (name is null)
-            return;
-
-        var span = name.AsSpan();
-        int tuple = 0;
-
-        foreach (var ch in span)
-        {
-            switch (ch)
-            {
-                case '<':
-                    sourceGenerator.Append(ch);
-                    sourceGenerator.IncreaseIndent();
-                    sourceGenerator.Line.Append("");
-                    break;
-
-                case '>':
-                    sourceGenerator.Append(ch);
-                    sourceGenerator.DecreaseIndent();
-                    break;
-
-                case ',':
-                    sourceGenerator.Append(ch);
-                    sourceGenerator.Line.Append("");
-                    break;
-
-                case ' ':
-                    if (tuple > 0)
-                        goto default;
-                    continue;
-
-                case '(':
-                    tuple += 1;
-                    goto default;
-
-                case ')':
-                    tuple -= 1;
-                    goto default;
-
-                default:
-                    sourceGenerator.Append(ch);
-                    break;
-            }
-        }
-    }
 
     public static string? GetSafeSymbolName(this ISymbol? symbol, SemanticModel model, int position)
     {
@@ -106,7 +69,8 @@ public static class ExtensionMethods
         this SyntaxNode node,
         string replacement,
         SemanticModel semanticModel,
-        CancellationToken ct)
+        CancellationToken ct
+    )
     {
         return node.ReplaceNodes(
             nodes: node.DescendantNodesAndSelf(),
@@ -160,7 +124,7 @@ public static class ExtensionMethods
         => self?.ToDisplayString(FullyQualifiedFormat);
 
     public static bool InheritsFrom(this ITypeSymbol? self, string baseTypeFullyQualifiedName)
-        => self?.GetBaseTypes().Any(x => x.Is(baseTypeFullyQualifiedName)) is true;
+        => self is not null && self.IsReferenceType && self.GetBaseTypes().Any(x => x.Is(baseTypeFullyQualifiedName));
 
     public static bool HasAttribute(this ISymbol? self, string attributeFullyQualifiedName)
         => self?.GetAttributes().Any(x => x.AttributeClass.Is(attributeFullyQualifiedName)) is true;
@@ -179,4 +143,97 @@ public static class ExtensionMethods
 
     public static bool HasInterface(this ITypeSymbol? self, string interfaceFullyQualifiedName)
         => self?.AllInterfaces.Any(x => x.Is(interfaceFullyQualifiedName)) is true;
+
+    public static AttributeConstructorArgumentsDict GetAttributeConstructorArguments(this AttributeData? attributeData)
+        => new(attributeData);
+}
+
+public readonly struct AttributeConstructorArgumentsDict
+{
+    readonly Dictionary<string, object> values = new(StringComparer.Ordinal);
+
+    public AttributeConstructorArgumentsDict(AttributeData? attributeData, CancellationToken ct = default)
+    {
+        try
+        {
+            if (attributeData is null)
+                return;
+
+            var ctor = attributeData.AttributeConstructor ?? throw new("Attribute constructor is null");
+            var ctorParams = ctor.Parameters;
+            var ctorArgs = attributeData.ConstructorArguments;
+
+            // keep only the constructor parameters that the caller actually wrote
+            var explicitOrdinals = GetExplicitConstructorOrdinals(attributeData, ct);
+
+            foreach (int ordinal in explicitOrdinals)
+                if (ctorArgs[ordinal].Value is { } arg)
+                    values[ctorParams[ordinal].Name] = arg;
+
+            // foreach (var namedArg in attributeData.NamedArguments)
+            //     if (namedArg.Value.Value is { } value)
+            //         values[namedArg.Key] = value;
+        }
+        catch (Exception)
+        {
+            // ignored
+        }
+    }
+
+    static IEnumerable<int> GetExplicitConstructorOrdinals(AttributeData attributeData, CancellationToken ct)
+    {
+        var ordinals = new HashSet<int>();
+        try
+        {
+            var parameterSymbols = attributeData.AttributeConstructor!.Parameters;
+
+            if (attributeData.ApplicationSyntaxReference?.GetSyntax(ct) is not AttributeSyntax { ArgumentList: { } argumentList })
+                return ordinals; // metadata-only attribute → syntax unavailable
+
+            int positionalIndex = 0;
+            foreach (var arg in argumentList.Arguments)
+            {
+                // if (arg.NameEquals != null)
+                //     continue;
+
+                if (arg.NameColon != null) // paramName: expr
+                {
+                    var name = arg.NameColon.Name.Identifier.ValueText;
+                    ordinals.Add(parameterSymbols.First(p => p.Name == name).Ordinal);
+                }
+                else // pure positional
+                {
+                    ordinals.Add(positionalIndex);
+                    positionalIndex++;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // ignored
+        }
+
+        return ordinals;
+    }
+
+    public T? Get<T>(string name, T? defaultValue)
+    {
+        if (values.TryGetValue(name, out var value))
+            if (value is not null)
+                return (T)value;
+
+        return defaultValue;
+    }
+
+    public T? Get<T>(string name, T? defaultValue) where T : struct
+    {
+        if (values.TryGetValue(name, out var value))
+            if (value is T typedValue)
+                return typedValue;
+
+        return defaultValue;
+    }
+
+    public T Select<T>(Func<AttributeConstructorArgumentsDict, T> selector)
+        => selector(this);
 }

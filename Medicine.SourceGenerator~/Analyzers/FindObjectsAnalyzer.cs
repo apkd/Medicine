@@ -4,6 +4,8 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 
+#pragma warning disable RS2008
+
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 sealed class FindObjectsAnalyzer : DiagnosticAnalyzer
 {

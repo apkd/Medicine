@@ -16,7 +16,7 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
             context
                 .SyntaxProvider
                 .ForAttributeWithMetadataName(
-                    fullyQualifiedMetadataName: "Medicine.WrapValueEnumerableAttribute",
+                    fullyQualifiedMetadataName: Constants.WrapValueEnumerableAttributeMetadataName,
                     predicate: static (x, ct) => x is MethodDeclarationSyntax or PropertyDeclarationSyntax,
                     transform: WrapTransform(TransformForCache)
                 )
@@ -47,7 +47,7 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
             Context = context,
         };
 
-    record struct GeneratorInput() : IGeneratorTransformOutput
+    record struct GeneratorInput : IGeneratorTransformOutput
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; set; }
@@ -126,13 +126,19 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
         }
         else
         {
-            return default;
+            return new() { SourceGeneratorError = $"Unexpected symbol type." };
         }
 
+        var outputFilename = GetOutputFilename(declSyntax.SyntaxTree.FilePath, wrapperName, context.TargetSymbol.GetFQN()!);
         var retExpr = GetSymbolRetExpr(context.TargetSymbol);
 
+        var output = new GeneratorInput
+        {
+            SourceGeneratorOutputFilename = outputFilename,
+        };
+
         if (retExpr is null)
-            return default;
+            return output with { SourceGeneratorError = $"Couldn't find the return expression." };
 
         var model = context.SemanticModel;
 
@@ -153,9 +159,9 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
             return result;
         }
 
-        var innerType = TryGetTypeFromExpression(retExpr);
+        var retExprType = TryGetTypeFromExpression(retExpr);
 
-        if (innerType is null or IErrorTypeSymbol)
+        if (retExprType is null or IErrorTypeSymbol)
         {
             var identifiersToPatch = retExpr
                 .DescendantNodesAndSelf()
@@ -163,21 +169,21 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
                 .ToArray();
 
             if (identifiersToPatch.Length > 0)
-                innerType = ReevaluateWithPatchedIdentifiers(model, retExpr, identifiersToPatch, ct);
+                retExprType = ReevaluateWithPatchedIdentifiers(model, retExpr, identifiersToPatch, ct);
         }
 
-        if (innerType is null or IErrorTypeSymbol)
-            return new() { SourceGeneratorError = $"Could not get inner type of return expression. {retExpr}" };
+        if (retExprType is null or IErrorTypeSymbol)
+            return output with { SourceGeneratorError = $"Couldn't find type of the return expression." };
 
         IMethodSymbol? GetInstanceMethod()
-            => innerType.GetMembers("GetEnumerator")
+            => retExprType.GetMembers("GetEnumerator")
                 .OfType<IMethodSymbol>()
                 .FirstOrDefault(x => x is { IsStatic: false, IsGenericMethod: false, Parameters.Length: 0 });
 
         IMethodSymbol? GetExtensionMethod()
             => model.LookupSymbols(
                     position: retExpr.SpanStart,
-                    container: innerType,
+                    container: retExprType,
                     name: "GetEnumerator",
                     includeReducedExtensionMethods: true
                 )
@@ -187,24 +193,23 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
         var getEnumerator = GetInstanceMethod() ?? GetExtensionMethod();
 
         if (getEnumerator is null)
-            return new() { SourceGeneratorError = "Could not get GetEnumerator method." };
+            return output with { SourceGeneratorError = "Could not get the GetEnumerator method." };
 
         string? enumeratorNamespace = getEnumerator.IsExtensionMethod
             ? getEnumerator.ContainingNamespace.ToDisplayString()
             : null;
 
-        return new()
+        return output with
         {
             Declaration = Utility.DeconstructTypeDeclaration(declSyntax),
             WrapperName = wrapperName,
             MethodTextChecksumForCache = context.TargetNode.GetText().GetChecksum(),
-            EnumerableFQN = innerType.ToDisplayString(FullyQualifiedFormat),
+            EnumerableFQN = retExprType.ToDisplayString(FullyQualifiedFormat),
             EnumeratorFQN = getEnumerator.ReturnType.ToDisplayString(FullyQualifiedFormat),
             EnumeratorInnerFQN = (getEnumerator.ReturnType as INamedTypeSymbol)!.TypeArguments.First().ToDisplayString(FullyQualifiedFormat),
-            ElementTypeFQN = (innerType as INamedTypeSymbol)!.TypeArguments.Last().ToDisplayString(FullyQualifiedFormat),
+            ElementTypeFQN = (retExprType as INamedTypeSymbol)!.TypeArguments.Last().ToDisplayString(FullyQualifiedFormat),
             GetEnumeratorNamespace = enumeratorNamespace,
             IsPublic = declSyntax.Modifiers.Any(SyntaxKind.PublicKeyword),
-            SourceGeneratorOutputFilename = GetOutputFilename(declSyntax.SyntaxTree.FilePath, wrapperName, context.TargetSymbol.GetFQN()!),
         };
     }
 
@@ -212,78 +217,74 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
     {
         if (input.GetEnumeratorNamespace is not null)
         {
-            Line.Append("using ").Append(input.GetEnumeratorNamespace).Append(';');
+            Line.Write($"using {input.GetEnumeratorNamespace};");
             Linebreak();
         }
 
         foreach (var x in input.Declaration.AsSpan())
         {
-            Line.Append(x);
-            Line.Append('{');
+            Line.Write(x);
+            Line.Write('{');
             IncreaseIndent();
         }
 
-        Line.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
+        Line.Write("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
 
-        Line.Append(input.IsPublic ? "public " : "").Append("readonly struct ").Append(input.WrapperName);
+        string @public = input.IsPublic ? "public " : "";
+        Line.Write($"{@public}readonly struct {input.WrapperName}");
         using (Indent)
         {
-            Line.Append($": global::ZLinq.IValueEnumerable<");
+            Line.Write($": global::ZLinq.IValueEnumerable<");
             using (Indent)
             {
-                Line.AppendLongGenericTypeName(this, input.EnumeratorInnerFQN);
-                Append(',');
-                Line.Append(input.ElementTypeFQN);
-                Append(">");
+                Line.Write($"{new LongGenericTypeName(this, input.EnumeratorInnerFQN)},");
+                Line.Write($"{input.ElementTypeFQN}>");
             }
         }
 
         using (Braces)
         {
-            Line.Append("public ");
+            Line.Write("public");
             using (Indent)
             {
-                Line.AppendLongGenericTypeName(this, input.EnumerableFQN);
-                Append(" Enumerable { get; init; }");
+                Line.Write($"{new LongGenericTypeName(this, input.EnumerableFQN)} Enumerable {{ get; init; }}");
             }
 
             Linebreak();
-            Line.Append("public static implicit operator ").Append(input.WrapperName).Append('(');
+            Line.Write("public");
             using (Indent)
             {
-                Line.AppendLongGenericTypeName(this, input.EnumerableFQN);
-                Append(" Enumerable)");
+                Line.Write($"static implicit operator {input.WrapperName}(");
                 using (Indent)
-                    Line.Append("=> new() { Enumerable = Enumerable };");
-            }
-
-            Linebreak();
-
-            Line.Append("public ");
-            using (Indent)
-            {
-                Text.AppendLongGenericTypeName(this, input.EnumeratorFQN);
-                Append(" GetEnumerator()");
-                using (Indent)
-                    Line.Append("=> Enumerable.GetEnumerator();");
+                {
+                    Line.Write($"{new LongGenericTypeName(this, input.EnumerableFQN)} enumerable)")
+                        .Write(" => new() { Enumerable = enumerable };");
+                }
             }
 
             Linebreak();
 
-            Line.Append("public ");
+            Line.Write("public");
             using (Indent)
             {
-                Text.AppendLongGenericTypeName(this, input.EnumerableFQN);
-                Append(" AsValueEnumerable()");
-                using (Indent)
-                    Line.Append("=> Enumerable;");
+                Line.Write($"{new LongGenericTypeName(this, input.EnumeratorFQN)} GetEnumerator()")
+                    .Write(" => Enumerable.GetEnumerator();");
+            }
+
+            Linebreak();
+
+            Line.Write("public");
+            using (Indent)
+            {
+                Line.Write($"{new LongGenericTypeName(this, input.EnumerableFQN)} AsValueEnumerable()")
+                    .Write(" => Enumerable;");
             }
         }
 
         foreach (var x in input.Declaration.AsSpan())
         {
             DecreaseIndent();
-            Line.Append('}');
+            Line.Write('}');
         }
     }
 

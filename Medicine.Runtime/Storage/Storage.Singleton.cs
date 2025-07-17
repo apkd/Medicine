@@ -19,6 +19,10 @@ namespace Medicine.Internal
 #if UNITY_EDITOR
             static T instance;
 
+            /// <remarks>
+            /// Do not access directly!
+            /// <p>Use <see cref="Find.Singleton{T}"/> or the generated <c>.Instance</c> property instead.</p>
+            /// </remarks>
             public static T Instance
             {
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -78,7 +82,8 @@ namespace Medicine.Internal
                 static readonly bool editModeIsScriptableObject
                     = typeof(ScriptableObject).IsAssignableFrom(typeof(T));
 
-                public static void Invalidate()
+                /// <inheritdoc cref="Storage.Instances{T}.EditMode.Invalidate()"/>
+                public static int Invalidate()
                     => editModeVersion = int.MinValue;
 
                 static bool InstanceBecameInvalid()
@@ -102,9 +107,11 @@ namespace Medicine.Internal
                 {
                     int frameCount = Time.frameCount;
 
+#if !MEDICINE_EDITMODE_ALWAYS_REFRESH
                     if (editModeVersion == frameCount) // refresh once per frame
                         if (!InstanceBecameInvalid())  // refresh more often if we detect changes
                             return;
+#endif
 
                     editModeVersion = frameCount;
                     Instance = Search();

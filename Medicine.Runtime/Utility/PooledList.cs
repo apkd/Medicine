@@ -34,6 +34,12 @@ namespace Medicine
         /// </exception>
         public void Dispose()
             => PooledList.Dispose(List, ref disposable);
+
+        public bool IsDisposed
+        {
+            [MethodImpl(AggressiveInlining)]
+            get => PooledList.IsDisposed(disposable);
+        }
     }
 
     public static class PooledList
@@ -79,9 +85,13 @@ namespace Medicine
                 => obj is null;
         }
 
+        [MethodImpl(AggressiveInlining)]
+        internal static bool IsDisposed<T>(PooledObject<List<T>> disposable)
+            => UnsafeUtility.As<PooledObject<List<T>>, PooledObjectData>(ref disposable).IsDisposed;
+
         internal static void Dispose<T>(List<T> list, ref PooledObject<List<T>> disposable)
         {
-            if (UnsafeUtility.As<PooledObject<List<T>>, PooledObjectData>(ref disposable).IsDisposed)
+            if (IsDisposed(disposable))
                 return;
 
 #if MEDICINE_NO_FUNSAFE

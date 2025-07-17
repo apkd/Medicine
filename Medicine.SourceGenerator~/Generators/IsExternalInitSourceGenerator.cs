@@ -28,6 +28,8 @@ public sealed class IsExternalInitSourceGenerator : IIncrementalGenerator
             .GetAssemblies()
             .Any(x => x.GetName().Name is "PolySharp.SourceGenerators");
 
+        // this shim is also supplied by PolySharp, so we can skip the IsExternalInitSourceGenerator registration
+        // if we detect that the PolySharp.SourceGenerators assembly is present in Roslyn
         if (polySharpLoaded)
             return;
 
