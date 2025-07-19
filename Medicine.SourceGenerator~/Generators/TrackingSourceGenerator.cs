@@ -117,8 +117,16 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
         Line.Write(Alias.UsingInline);
         Linebreak();
 
-        input.EmitIInstanceIndex &= !input.HasIInstanceIndex;
-        input.HasIInstanceIndex |= input.EmitIInstanceIndex;
+        if (input.Attribute is TrackAttributeMetadataName)
+        {
+            input.EmitIInstanceIndex &= !input.HasIInstanceIndex;
+            input.HasIInstanceIndex |= input.EmitIInstanceIndex;
+        }
+        else
+        {
+            input.EmitIInstanceIndex = false;
+            input.HasIInstanceIndex = false;
+        }
 
         string @protected = input.IsSealed ? "" : "protected ";
         string @new = input.HasBaseDeclarationsWithAttribute ? "new " : "";
