@@ -15,6 +15,7 @@ namespace Medicine.Internal
     using ZLinq;
     using MedicineUnsafeShim = Unsafe;
 #endif
+
     [EditorBrowsable(Never)]
     public readonly struct ComponentsInSceneEnumerable<T> : ILinqFallbackEnumerable<ComponentsInSceneEnumerator<T>, T>
         where T : class
@@ -25,7 +26,7 @@ namespace Medicine.Internal
         public ComponentsInSceneEnumerable(Scene scene, bool includeInactive)
             => (this.scene, this.includeInactive) = (scene, includeInactive);
 
-        [EditorBrowsable(EditorBrowsableState.Never)]
+        [EditorBrowsable(Never)]
         public ComponentsInSceneEnumerator<T> GetEnumerator()
             => new(scene, includeInactive);
 
@@ -48,7 +49,7 @@ namespace Medicine.Internal
         readonly bool includeInactive;
         PooledList<GameObject> rootListDisposable;
         PooledList<T> componentListDisposable;
-        ListEnumerator<UnityEngine.GameObject> rootEnumerator;
+        ListEnumerator<GameObject> rootEnumerator;
         ListEnumerator<T> componentEnumerator;
 
         public ComponentsInSceneEnumerator(Scene scene, bool includeInactive)
@@ -68,8 +69,12 @@ namespace Medicine.Internal
             while (!componentEnumerator.MoveNext())
             {
                 // no components left; try to move to the next root
-                if (!rootEnumerator.MoveNext())
-                    return false; // no more roots; done iterating
+                do
+                {
+                    if (!rootEnumerator.MoveNext())
+                        return false; // no more roots; done iterating
+                }
+                while (!includeInactive && !rootEnumerator.Current.activeInHierarchy);
 
                 // get components from root
                 rootEnumerator.Current.GetComponentsInChildren(includeInactive, componentList);
