@@ -7,6 +7,9 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 {
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
+        var medicineSettings = context.CompilationProvider
+            .Select((x, ct) => new MedicineSettings(x));
+
         foreach (var attributeName in new[] { SingletonAttributeMetadataName, TrackAttributeMetadataName })
         {
             context.RegisterImplementationSourceOutput(
@@ -18,7 +21,9 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                             => TransformSyntaxContext(attributeSyntaxContext, ct, attributeName, $"global::Medicine.{attributeName}")
                         )
                     )
-                    .Where(x => x.Attribute is { Length: > 0 }),
+                    .Where(x => x.Attribute is { Length: > 0 })
+                    .Combine(medicineSettings)
+                    .Select((x, ct) => x.Left with { EmitIInstanceIndex = x.Right.AlwaysTrackInstanceIndices }),
                 WrapGenerateSource<GeneratorInput>(GenerateSource)
             );
         }
@@ -38,6 +43,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
         public string? TypeFQN;
         public string? TypeDisplayName;
         public bool HasIInstanceIndex;
+        public bool EmitIInstanceIndex;
         public bool IsSealed;
         public bool IsUnityEditorCompile;
         public bool HasBaseDeclarationsWithAttribute;
@@ -111,8 +117,15 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
         Line.Write(Alias.UsingInline);
         Linebreak();
 
+        input.EmitIInstanceIndex &= !input.HasIInstanceIndex;
+        input.HasIInstanceIndex |= input.EmitIInstanceIndex;
+
         string @protected = input.IsSealed ? "" : "protected ";
         string @new = input.HasBaseDeclarationsWithAttribute ? "new " : "";
+
+        var unmanagedDataInfo = input.UnmanagedDataFQNs.AsArray()
+            .Select(x => (dataType: x, dataTypeShort: x.Split('.', ':').Last()))
+            .ToArray();
 
         var declarations = input.ContainingTypeDeclaration.AsSpan();
         int lastDeclaration = declarations.Length - 1;
@@ -142,6 +155,9 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             }
 
             Line.Write(declarations[i]);
+            if (i == lastDeclaration && input.EmitIInstanceIndex)
+                Text.Append($" : {IInstanceIndexInterfaceFQN}");
+
             Line.Write('{');
             IncreaseIndent();
         }
@@ -198,8 +214,8 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             if (input.AttributeArguments.TrackTransforms)
                 Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.TransformAccessArray\"/> transform array </item>");
 
-            foreach (var dataType in input.UnmanagedDataFQNs)
-                Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataType.Split('.', ':').Last()}Array\"/> data array </item>");
+            foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
+                Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/> data array </item>");
         }
 
         if (input.HasIInstanceIndex)
@@ -263,6 +279,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                     Linebreak();
                     if (input.IsUnityEditorCompile)
                         Line.Append("[global::UnityEditor.InitializeOnLoadMethod]");
+
                     Line.Append("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
                     Line.Append($"static void {m}Init()");
 
@@ -305,13 +322,26 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             Line.Write($"public static class Unmanaged");
             using (Braces)
             {
-                foreach (var dataType in input.UnmanagedDataFQNs)
+                foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
                 {
                     Linebreak();
-                    Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataType.Split('.', ':').Last()}Array");
+                    Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataTypeShort}Array");
 
                     using (Braces)
                         Line.Write($"{Alias.Inline} get => ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.Array;");
+                }
+            }
+
+            if (input.HasIInstanceIndex)
+            {
+                Linebreak();
+                foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
+                {
+                    Linebreak();
+                    Line.Write($"public ref {dataType} {dataTypeShort}");
+
+                    using (Indent)
+                        Line.Write($"=> ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.ElementAtRefRW({m}MedicineInternalInstanceIndex);");
                 }
             }
 

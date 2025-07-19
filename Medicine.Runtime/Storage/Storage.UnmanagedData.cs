@@ -1,8 +1,10 @@
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using static System.ComponentModel.EditorBrowsableState;
+using static System.Runtime.CompilerServices.MethodImplOptions;
 
 // ReSharper disable UnusedType.Global
 // ReSharper disable UnusedMember.Global
@@ -19,6 +21,10 @@ namespace Medicine.Internal
         {
             public static NativeList<TData> List = Initialize();
             public static NativeArray<TData> Array;
+
+            [MethodImpl(AggressiveInlining)]
+            public static unsafe ref TData ElementAtRefRW(int index)
+                => ref UnsafeUtility.ArrayElementAsRef<TData>(Array.GetUnsafePtr(), index);
 
             /// <summary>
             /// This method is used to statically initialize the static fields on first access.

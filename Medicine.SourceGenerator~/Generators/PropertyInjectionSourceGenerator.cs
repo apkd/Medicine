@@ -64,22 +64,6 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         public EquatableArray<byte> MethodTextCheckSumForCache;
     }
 
-    readonly record struct MedicineSettings
-    {
-        public readonly bool? MakePublic;
-        public readonly int ForceDebug;
-
-        public MedicineSettings(Compilation compilation)
-        {
-            var args = compilation.Assembly
-                .GetAttribute(MedicineSettingsAttributeFQN)
-                .GetAttributeConstructorArguments();
-
-            MakePublic = args.Get("makePublic", true);
-            ForceDebug = args.Get("debug", 0);
-        }
-    }
-
     record struct InitExpressionInfo
     {
         public string PropertyName;
@@ -478,9 +462,6 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
         void DeferLinebreak()
             => deferredLines.Add("");
-
-        Line.Write($"// makepublic: {input.MakePublic?.ToString() ?? "null"}");
-        Line.Write($"// debug: {input.ForceDebug.ToString()}");
 
         Line.Write("#pragma warning disable CS0628 // New protected member declared in sealed type");
         Line.Write("#pragma warning disable CS0108 // Member hides inherited member; missing new keyword");

@@ -7,6 +7,8 @@ using static System.AttributeTargets;
 using static System.ComponentModel.EditorBrowsableState;
 using static JetBrains.Annotations.ImplicitUseTargetFlags;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Medicine.Tests")]
+
 // ReSharper disable MemberHidesStaticFromOuterClass
 // ReSharper disable UnusedType.Global
 // ReSharper disable UnusedMember.Global
@@ -28,8 +30,14 @@ namespace Medicine
         /// By default, they are only available in debug builds and in the editor.
         /// This parameter lets you override this and force debugging to be always on or off.
         /// </param>
+        /// <param name="alwaysTrackInstanceIndices">
+        /// If set to <c>true</c>, the source generator will automatically implement the <see cref="IInstanceIndex"/>
+        /// interface on all classes tracked by <see cref="TrackAttribute"/>. This saves you from having to
+        /// add the interfaces yourself if you want to put them on all tracked types anyway.
+        /// </param>
         public MedicineSettingsAttribute(
             bool makePublic = true,
+            bool alwaysTrackInstanceIndices = false,
             MedicineDebugMode debug = MedicineDebugMode.Automatic
         ) { }
     }
