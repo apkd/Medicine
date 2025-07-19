@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using UnityEngine;
+using UnityEngine.Assertions;
 using UnityEngine.SceneManagement;
 using static System.ComponentModel.EditorBrowsableState;
 using static System.Runtime.CompilerServices.MethodImplOptions;
@@ -54,6 +55,7 @@ namespace Medicine.Internal
 
         public ComponentsInSceneEnumerator(Scene scene, bool includeInactive)
         {
+            Assert.IsTrue(scene.IsValid());
             rootListDisposable = PooledList.Get<GameObject>(out var rootList);
             componentListDisposable = PooledList.Get(out componentList);
             scene.GetRootGameObjects(rootList);
