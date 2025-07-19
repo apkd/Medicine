@@ -1,7 +1,7 @@
 namespace Medicine
 {
     /// <summary>
-    /// Provides a <see cref="TrackAttribute"/>-marked class with an InstanceIndex property
+    /// Provides a <see cref="TrackAttribute"/>-marked class with an <c>InstanceIndex</c> property
     /// which is automatically updated to represent the index to the object's data in the instance list,
     /// <see cref="IUnmanagedData{TData}"/> arrays, <see cref="UnityEngine.Jobs.TransformAccessArray"/>, etc.
     /// </summary>

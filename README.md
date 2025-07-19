@@ -93,9 +93,12 @@ Open "Add package from git URL" in the Unity Package Manager and paste the repos
 
 Optional dependencies:
 - [ZLinq](https://github.com/Cysharp/ZLinq)
-    - For querying components with efficient, GC-free LINQ-like queries - highly recommended!
+    - Optimized, GC-free LINQ-like queries - highly recommended!
     - Medicine data structures implement `AsValueEnumerable()`, allowing you to easily query components with ZLinq.
 - [PolySharp](https://github.com/Sergio0694/PolySharp)
     - Enables the use of various modern C# features in Unity projects.
+    - Unlocks C# features such as: [`init` setters](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/init)! [`[CallerArgumentExpression]`](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-10.0/caller-argument-expression)! [`[InterpolatedStringHandler]`](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/tokens/interpolated#compilation-of-interpolated-strings)!
+    - Medicine relies on some of these, but will generate its own fallback replacements
+      when PolySharp is not detected.
 - [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity)
     - Easiest way to install the above two packages.
