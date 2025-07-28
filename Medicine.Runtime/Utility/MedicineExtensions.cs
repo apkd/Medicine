@@ -3,8 +3,10 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using JetBrains.Annotations;
 using Medicine.Internal;
 using UnityEngine;
+using UnityEngine.Pool;
 using UnityEngine.SceneManagement;
 using static System.ComponentModel.EditorBrowsableState;
 using static System.Runtime.CompilerServices.MethodImplOptions;
@@ -123,5 +125,56 @@ namespace Medicine
         public static ComponentsEnumerable<T> EnumerateComponents<T>(this Component component)
             where T : class
             => ComponentsEnumerable<T>.InSelf(component);
+
+#if MODULE_ZLINQ
+        /// <summary>
+        /// Enumerates to a <see cref="PooledList{T}"/>, internally based on <see cref="ListPool{T}"/>.
+        /// Remember to call <see cref="Dispose"/> <b>exactly once</b> to return the list to the pool.
+        /// </summary>
+        [MustDisposeResource]
+        public static PooledList<T> ToPooledList<TEnumerator, T>(this ZLinq.ValueEnumerable<TEnumerator, T> source)
+            where TEnumerator : struct, ZLinq.IValueEnumerator<T>
+#if NET9_0_OR_GREATER
+        , allows ref struct
+#endif
+        {
+            using var enumerator = source.Enumerator;
+            var pooledList = PooledList.Get<T>();
+            var list = pooledList.List;
+
+            if (enumerator.TryGetNonEnumeratedCount(out var count))
+            {
+                if (count is 0)
+                    return pooledList;
+
+                if (list.Capacity < count)
+                    list.Capacity = count;
+
+                var listView = list.AsInternalsView();
+                var array = listView.Array;
+                listView.Count = count;
+
+                if (enumerator.TryCopyTo(array.AsSpan(0, count), 0))
+                    return pooledList;
+
+                var i = 0;
+                while (enumerator.TryGetNext(out var item))
+                {
+                    array![i] = item;
+                    i++;
+                }
+            }
+            else
+            {
+                if (list.Capacity is 0)
+                    list.Capacity = 16;
+
+                while (enumerator.TryGetNext(out var item))
+                    list.Add(item);
+            }
+
+            return pooledList;
+        }
     }
+#endif
 }
