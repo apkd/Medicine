@@ -1,3 +1,6 @@
+#if MODULE_ZLINQ
+using ZLinq;
+#endif
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -5,7 +8,6 @@ using System.Collections.Generic;
 using System.Linq;
 using Medicine;
 using UnityEngine.Animations;
-using ZLinq;
 using Object = UnityEngine.Object;
 
 public sealed class MedicineExtensionsTests

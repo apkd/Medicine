@@ -175,6 +175,6 @@ namespace Medicine
 
             return pooledList;
         }
-    }
 #endif
+    }
 }
