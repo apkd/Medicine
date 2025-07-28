@@ -1,0 +1,29 @@
+{
+    "name": "Medicine.Tests",
+    "rootNamespace": "",
+    "references": [
+        "GUID:0da17716f00131847b25e24f8b6e7c58",
+        "GUID:c71612acbe346a344abbc0dcfdf4f0bd",
+        "GUID:dd45bb705edc4cf47acd3a4ae20a9e23"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "ZLinq.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.cysharp.zlinq",
+            "expression": "",
+            "define": "MODULE_ZLINQ"
+        }
+    ],
+    "noEngineReferences": false
+}
