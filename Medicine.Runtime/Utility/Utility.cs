@@ -67,5 +67,14 @@ namespace Medicine.Internal
         [MethodImpl(AggressiveInlining)]
         public static bool IsNativeObjectAlive(UnityEngine.Object? obj)
             => !ReferenceEquals(obj, null) && isNativeObjectAliveDelegate(obj);
+
+        [MethodImpl(AggressiveInlining)]
+        public static bool IsValueType<T>()
+            => TypeCache<T>.IsValueType is 1;
+
+        static class TypeCache<T>
+        {
+            public static readonly byte IsValueType = typeof(T).IsValueType ? (byte)1 : (byte)0;
+        }
     }
 }

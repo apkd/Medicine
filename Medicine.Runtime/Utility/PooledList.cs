@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -17,8 +18,7 @@ namespace Medicine
     /// Remember to call <see cref="Dispose"/> <b>exactly once</b> to return the list to the pool.
     /// </summary>
     /// <typeparam name="T">Type of the list element.</typeparam>
-    public struct PooledList<T> : IDisposable
-        where T : class
+    public struct PooledList<T> : IEnumerable<T>, IDisposable
     {
         public readonly List<T> List;
         PooledObject<List<T>> disposable;
@@ -40,6 +40,21 @@ namespace Medicine
             [MethodImpl(AggressiveInlining)]
             get => PooledList.IsDisposed(disposable);
         }
+
+        public int Count
+            => List.Count;
+
+        public Span<T> Span
+            => List.AsInternalsView().Array.AsSpan(0, List.Count);
+
+        public List<T>.Enumerator GetEnumerator()
+            => List.GetEnumerator();
+
+        IEnumerator<T> IEnumerable<T>.GetEnumerator()
+            => List.GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator()
+            => List.GetEnumerator();
     }
 
     public static class PooledList
@@ -50,7 +65,6 @@ namespace Medicine
         /// </summary>
         [MustDisposeResource]
         public static PooledList<T> Get<T>(out List<T> list)
-            where T : class
         {
             // we can save some memory by sharing the same pooled lists for all object types :see_no_evil:
             // - various Unity APIs expect a typed list, which inflates the number of pool
@@ -59,14 +73,22 @@ namespace Medicine
             // - ListPool always clears the list when returned to the pool, and we always restore the type back to
             //   the original type, so it should be fine to release the lists to the global shared pool
             // - set MEDICINE_NO_FUNSAFE to disable this optimization and fall back to normal pool usage
+            PooledObject<List<T>> disposable;
 #if MEDICINE_NO_FUNSAFE
-            var disposable = ListPool<T>.Get(out var list);
+            disposable = ListPool<T>.Get(out var list);
 #else
-            var disposableGeneric = ListPool<object>.Get(out var listGeneric);
-            var disposable = UnsafeUtility.As<PooledObject<List<object>>, PooledObject<List<T>>>(ref disposableGeneric);
-            var array = listGeneric.AsInternalsView().Array;
-            SetManagedObjectType<T[]>(array);
-            list = SetManagedObjectType<List<T>>(listGeneric)!;
+            if (Utility.IsValueType<T>())
+            {
+                disposable = ListPool<T>.Get(out list);
+            }
+            else
+            {
+                var disposableGeneric = ListPool<object>.Get(out var listGeneric);
+                disposable = UnsafeUtility.As<PooledObject<List<object>>, PooledObject<List<T>>>(ref disposableGeneric);
+                var array = listGeneric.AsInternalsView().Array;
+                SetManagedObjectType<T[]>(array);
+                list = SetManagedObjectType<List<T>>(listGeneric)!;
+            }
 #endif
             return new(list, disposable);
         }
@@ -74,7 +96,7 @@ namespace Medicine
         /// <inheritdoc cref="Get{T}(out System.Collections.Generic.List{T})"/>
         [MustDisposeResource]
         [MethodImpl(AggressiveInlining)]
-        public static PooledList<T> Get<T>() where T : class
+        public static PooledList<T> Get<T>()
             => Get<T>(out _);
 
         readonly struct PooledObjectData
@@ -97,10 +119,17 @@ namespace Medicine
 #if MEDICINE_NO_FUNSAFE
             disposable.InvokeDispose();
 #else
-            var array = list.AsInternalsView().Array;
-            SetManagedObjectType<object[]>(array);
-            SetManagedObjectType<List<object>>(list);
-            UnsafeUtility.As<PooledObject<List<T>>, PooledObject<List<object>>>(ref disposable).InvokeDispose();
+            if (Utility.IsValueType<T>())
+            {
+                disposable.InvokeDispose();
+            }
+            else // restore the list/array type before dispose
+            {
+                var array = list.AsInternalsView().Array;
+                SetManagedObjectType<object[]>(array);
+                SetManagedObjectType<List<object>>(list);
+                UnsafeUtility.As<PooledObject<List<T>>, PooledObject<List<object>>>(ref disposable).InvokeDispose();
+            }
 #endif
             disposable = default;
         }
