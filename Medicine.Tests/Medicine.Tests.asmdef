@@ -25,5 +25,8 @@
             "define": "MODULE_ZLINQ"
         }
     ],
+    "optionalUnityReferences": [
+      "TestAssemblies"
+    ],
     "noEngineReferences": false
 }
