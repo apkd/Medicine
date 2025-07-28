@@ -9,11 +9,10 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static System.StringComparison;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 
-#pragma warning disable CS9113 // Parameter is unread.
 
 [EditorBrowsable(EditorBrowsableState.Never)]
 [SuppressMessage("ReSharper", "MemberCanBePrivate.Global")]
-public static class ExtensionMethods
+public static partial class ExtensionMethods
 {
     public static StringBuilder Write(this StringBuilder self, [InterpolatedStringHandlerArgument(nameof(self))] StringBuilderInterpolatedString value)
         => self;
@@ -23,6 +22,9 @@ public static class ExtensionMethods
 
     public static StringBuilder Write(this StringBuilder self, char character)
         => self.Append(character);
+
+    public static string Join(this IEnumerable<string> self, string separator)
+        => string.Join(separator, self);
 
     public static string HtmlEncode(this string self)
         => System.Web.HttpUtility.HtmlEncode(self);

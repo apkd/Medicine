@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static System.StringComparison;
+using static ActiveProprocessorSymbolNames;
 using static Constants;
 using static InjectionSourceGenerator.ExpressionFlags;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
@@ -48,8 +49,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         public string? SourceGeneratorError { get; set; }
         public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
 
-        public bool IsUnityEditorCompile;
-        public bool IsDebugCompile;
+        public ActiveProprocessorSymbolNames Symbols;
         public bool IsSealed;
         public bool IsStatic;
         public bool? MakePublic;
@@ -111,14 +111,10 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         context.RegisterSourceOutput(
             source: syntaxProvider.Combine(medicineSettings).Select((x, ct) =>
             {
-                x.Left.MakePublic ??= x.Right.MakePublic;
-                x.Left.IsDebugCompile = x.Right.ForceDebug switch
-                {
-                    1 => true,
-                    2 => false,
-                    _ => x.Left.IsDebugCompile,
-                };
-                return x.Left;
+                var (input, settings) = x;
+                input.MakePublic ??= settings.MakePublic;
+                input.Symbols.SetForceDebug(settings.ForceDebug);
+                return input;
             }),
             action: WrapGenerateSource<GeneratorInput>(GenerateSource)
         );
@@ -175,8 +171,6 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
         output.IsSealed = classDecl.Modifiers.Any(SyntaxKind.SealedKeyword);
         output.IsStatic = methodDeclaration.Modifiers.Any(SyntaxKind.StaticKeyword);
-        output.IsDebugCompile = context.SemanticModel.IsDefined("DEBUG");
-        output.IsUnityEditorCompile = context.SemanticModel.IsDefined("UNITY_EDITOR");
 
         // defer the expensive calls to the source gen phase
         output.InitExpressionInfoArrayBuilderFunc = new(() =>
@@ -556,7 +550,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             // handle singleton classes
             else if (x.Flags.Has(IsSingleton))
             {
-                if (input.IsUnityEditorCompile)
+                if (input.Symbols.Has(UNITY_EDITOR))
                 {
                     Line.Write($"/// <summary> Provides access to the active <see cref=\"{x.TypeXmlDocId}\"/> singleton instance. </summary>");
                     Line.Write($"/// <remarks>");
@@ -602,7 +596,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             // handle tracked classes
             else if (x.Flags.Has(IsTracked))
             {
-                if (input.IsUnityEditorCompile)
+                if (input.Symbols.Has(UNITY_EDITOR))
                 {
                     Line.Write($"/// <inheritdoc cref=\"{x.TypeFQN}.Instances\"/>");
                     AppendInjectionDeclaredIn();
@@ -628,7 +622,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                     _         => "instance",
                 };
 
-                if (input.IsUnityEditorCompile)
+                if (input.Symbols.Has(UNITY_EDITOR))
                 {
                     Line.Write($"/// <summary> Cached <see cref=\"{x.TypeXmlDocId}\"/> {label}.");
                     Line.Write($"/// <br/>Initialized from expression: <c>{x.InitExpression.HtmlEncode()}</c></summary>");
@@ -658,7 +652,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                         Line.Write($"{Alias.Inline} get");
                         using (Braces)
                         {
-                            if (input.IsUnityEditorCompile && !x.Flags.Has(IsDisposable))
+                            if (input.Symbols.Has(UNITY_EDITOR) && !x.Flags.Has(IsDisposable))
                             {
                                 Line.Write($"{Alias.NoInline} void {m}Expr() => {m}MedicineInternal._{m}{x.PropertyName} = {x.InitExpression};");
                                 Line.Write($"if ({m}Utility.EditMode)");
@@ -678,7 +672,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                         Line.Write($"{Alias.Inline} get");
                         using (Braces)
                         {
-                            if (input.IsUnityEditorCompile && !x.Flags.Has(IsDisposable))
+                            if (input.Symbols.Has(UNITY_EDITOR) && !x.Flags.Has(IsDisposable))
                             {
                                 Line.Write($"{Alias.NoInline} {x.TypeFQN}{opt} {m}Expr() => {x.InitExpression};");
                                 Line.Write($"if ({m}Utility.EditMode)");
@@ -692,7 +686,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                         Line.Write($"{Alias.Inline} {@private}set");
                         using (Braces)
                         {
-                            if (input.IsDebugCompile && x.Flags.Has(NeedsNullCheck))
+                            if (input.Symbols.Has(DEBUG) && x.Flags.Has(NeedsNullCheck))
                             {
                                 if (x.Flags.Has(IsUnityObject))
                                     Line.Write($"if (!{m}Utility.IsNativeObjectAlive(value))");

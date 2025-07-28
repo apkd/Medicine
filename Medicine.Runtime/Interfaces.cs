@@ -1,3 +1,5 @@
+using System;
+
 namespace Medicine
 {
     /// <summary>
@@ -15,6 +17,11 @@ namespace Medicine
             get => -1;
             set => _ = value;
         }
+    }
+
+    public interface IFindByID<out T> where T : unmanaged, IEquatable<T>
+    {
+        public T ID { get; }
     }
 
     /// <summary>

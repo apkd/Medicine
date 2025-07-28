@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using static ActiveProprocessorSymbolNames;
 using static Constants;
 
 [Generator]
@@ -40,13 +41,15 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
         public EquatableArray<string> ContainingTypeDeclaration;
         public EquatableArray<string> InterfacesWithAttribute;
         public EquatableArray<string> UnmanagedDataFQNs;
+        public EquatableArray<string> TrackingIdFQNs;
         public string? TypeFQN;
         public string? TypeDisplayName;
+        public ActiveProprocessorSymbolNames Symbols;
         public bool HasIInstanceIndex;
         public bool EmitIInstanceIndex;
         public bool IsSealed;
-        public bool IsUnityEditorCompile;
         public bool HasBaseDeclarationsWithAttribute;
+        public bool IsComponent;
     }
 
     static GeneratorInput TransformSyntaxContext(
@@ -76,10 +79,6 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 )
             );
 
-        var preprocessorSymbolNames = context.SemanticModel
-            .SyntaxTree.Options.PreprocessorSymbolNames
-            .ToArray();
-
         return new()
         {
             SourceGeneratorOutputFilename = GetOutputFilename(typeDeclaration.SyntaxTree.FilePath, typeDeclaration.Identifier.ValueText, attributeName),
@@ -90,11 +89,16 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 .Where(x => x.GetFQN()?.StartsWith(UnmanagedDataInterfaceFQN) is true)
                 .Select(x => x.TypeArguments.FirstOrDefault().GetFQN()!)
                 .ToArray(),
+            TrackingIdFQNs = classSymbol.Interfaces
+                .Where(x => x.GetFQN()?.StartsWith(TrackingIdInterfaceFQN) is true)
+                .Select(x => x.TypeArguments.FirstOrDefault().GetFQN()!)
+                .ToArray(),
             HasIInstanceIndex = classSymbol.HasInterface(IInstanceIndexInterfaceFQN),
             TypeFQN = classSymbol.GetFQN()!,
             TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
             IsSealed = classSymbol.IsSealed,
-            IsUnityEditorCompile = preprocessorSymbolNames.Contains("UNITY_EDITOR"),
+            Symbols = context.SemanticModel.GetActivePreprocessorSymbols(),
+            IsComponent = classSymbol.InheritsFrom("global::UnityEngine.Component"),
             InterfacesWithAttribute
                 = classSymbol.Interfaces
                     .Where(x => x.HasAttribute(attributeFQN))
@@ -132,25 +136,34 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
         string @new = input.HasBaseDeclarationsWithAttribute ? "new " : "";
 
         var unmanagedDataInfo = input.UnmanagedDataFQNs.AsArray()
-            .Select(x => (dataType: x, dataTypeShort: x.Split('.', ':').Last()))
+            .Select(x => (dataType: x, dataTypeShort: x.Split('.', ':').Last().HtmlEncode()))
             .ToArray();
 
         var declarations = input.ContainingTypeDeclaration.AsSpan();
         int lastDeclaration = declarations.Length - 1;
         for (int i = 0; i < declarations.Length; i++)
         {
-            if (i == lastDeclaration && input.IsUnityEditorCompile)
+            if (i == lastDeclaration && input.Symbols.Has(UNITY_EDITOR))
             {
                 if (input.Attribute is TrackAttributeMetadataName)
                 {
+                    string active = input.IsComponent ? "(enabled) instances of this component" : "instances of this class";
                     Line.Write("/// <remarks>");
-                    Line.Write($"/// The instances of this class are tracked, and contains additional generated properties:");
+                    Line.Write($"/// Active {active} are tracked, and contain additional generated static properties:");
                     Line.Write($"/// <list type=\"bullet\">");
-                    EmitGeneratedPropertiesListComment();
-                    if (input.HasIInstanceIndex)
-                        Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIndex\"/> property, which is the instance's index into the above </item>");
-
+                    WriteGeneratedArraysComment();
                     Line.Write($"/// </list>");
+                    if (input.HasIInstanceIndex)
+                    {
+                        Line.Write($"/// And the following additional instance properties:");
+                        Line.Write($"/// <list type=\"bullet\">");
+                        Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIndex\"/> property, which is the instance's index into the above arrays </item>");
+                        foreach (var (_, dataTypeShort) in unmanagedDataInfo)
+                            Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.{dataTypeShort}\"/> per-instance data accessor </item>");
+
+                        Line.Write($"/// </list>");
+                    }
+
                     Line.Write("/// </remarks>");
                 }
                 else if (input.Attribute is SingletonAttributeMetadataName)
@@ -185,7 +198,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                     ? $"RegisterInstance"
                     : $"UnregisterInstance";
 
-                if (input.IsUnityEditorCompile)
+                if (input.Symbols.Has(UNITY_EDITOR))
                 {
                     Line.Write($"/// <summary>");
                     Line.Write($"/// Manually {(register ? "registers" : "unregisters")} this instance {(register ? "in" : "from")} the <c>{input.Attribute}</c> storage.");
@@ -213,16 +226,17 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             Linebreak();
         }
 
-        void EmitGeneratedPropertiesListComment()
+        void WriteGeneratedArraysComment()
         {
             Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Instances\"/> tracked instance list </item>");
+
             if (input.AttributeArguments.TrackInstanceIDs)
                 Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIDs\"/> instance ID array </item>");
 
             if (input.AttributeArguments.TrackTransforms)
                 Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.TransformAccessArray\"/> transform array </item>");
 
-            foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
+            foreach (var (_, dataTypeShort) in unmanagedDataInfo)
                 Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/> data array </item>");
         }
 
@@ -234,12 +248,12 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             }
             else
             {
-                if (input.IsUnityEditorCompile)
+                if (input.Symbols.Has(UNITY_EDITOR))
                 {
                     Line.Write($"/// <summary>");
                     Line.Write($"/// Represents the index of this instance in the following static storage arrays:");
                     Line.Write($"/// <list type=\"bullet\">");
-                    EmitGeneratedPropertiesListComment();
+                    WriteGeneratedArraysComment();
                     Line.Write($"/// </list>");
                     Line.Write($"/// </summary>");
                     Line.Write($"/// <remarks>");
@@ -270,7 +284,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
         if (input.AttributeArguments.TrackTransforms)
         {
-            if (input.IsUnityEditorCompile)
+            if (input.Symbols.Has(UNITY_EDITOR))
             {
                 Line.Write($"/// <summary>");
                 Line.Write($"/// Allows job access to the transforms of the tracked {input.TypeDisplayName} instances.");
@@ -285,7 +299,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 {
                     Line.Append($"return {m}Storage.TransformAccess<{input.TypeFQN}>.Transforms;");
                     Linebreak();
-                    if (input.IsUnityEditorCompile)
+                    if (input.Symbols.Has(UNITY_EDITOR))
                         Line.Append("[global::UnityEditor.InitializeOnLoadMethod]");
 
                     Line.Append("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
@@ -302,7 +316,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
         if (input.AttributeArguments.TrackInstanceIDs)
         {
-            if (input.IsUnityEditorCompile)
+            if (input.Symbols.Has(UNITY_EDITOR))
             {
                 Line.Write($"/// <summary>");
                 Line.Write($"/// Gets an array of instance IDs for the tracked type's enabled instances.");
@@ -327,13 +341,42 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
         if (input.UnmanagedDataFQNs.Length > 0)
         {
+            if (input.Symbols.Has(UNITY_EDITOR))
+            {
+                Line.Write($"/// <summary>");
+                Line.Write($"/// Allows job access to the unmanaged data arrays of the tracked {input.TypeDisplayName} instances");
+                Line.Write($"/// of this component type.");
+                Line.Write($"/// </summary>");
+                Line.Write($"/// <remarks>");
+                Line.Write($"/// The unmanaged data is stored in a <see cref=\"global::Unity.Collections.NativeArray{{T}}\"/>, where each element");
+                Line.Write($"/// corresponds to the tracked instance with the appropriate <see cref=\"Medicine.IInstanceIndex\">instance index</see>.");
+                Line.Write($"/// </remarks>");
+                string s = input.UnmanagedDataFQNs.Length > 1 ? "s" : "";
+                string origin = unmanagedDataInfo.Select(x => $"<c>IUnmanagedData&lt;{x.dataTypeShort}&gt;</c>").Join(", ");
+                Line.Write($"/// <codegen>Generated because of the implemented interface{s}: {origin}</codegen>");
+            }
+
             Line.Write($"public static class Unmanaged");
             using (Braces)
             {
                 foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
                 {
                     Linebreak();
-                    Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataTypeShort}Array");
+                    if (input.Symbols.Has(UNITY_EDITOR))
+                    {
+                        Line.Write($"/// <summary>");
+                        Line.Write($"/// Gets an array of <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instances.");
+                        Line.Write($"/// You can use this array in jobs or Burst-compiled functions.");
+                        Line.Write($"/// </summary>");
+                        Line.Write($"/// <remarks>");
+                        Line.Write($"/// Each element in the native array corresponds to the tracked instance with the appropriate instance index.");
+                        Line.Write($"/// Implementing the <see cref=\"Medicine.IInstanceIndex\"/> interface will generate a property that lets each");
+                        Line.Write($"/// instance access its own data. Otherwise, you can access the data statically via this array, and");
+                        Line.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
+                        Line.Write($"/// </remarks>");
+                        Line.Write($"/// <codegen>Generated because of the following implemented interface: <c>IUnmanagedData&lt;{dataTypeShort}&gt;</c></codegen>");
+                        Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataTypeShort}Array");
+                    }
 
                     using (Braces)
                         Line.Write($"{Alias.Inline} get => ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.Array;");
@@ -346,19 +389,58 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
                 {
                     Linebreak();
+                    if (input.Symbols.Has(UNITY_EDITOR))
+                    {
+                        Line.Write($"/// <summary>");
+                        Line.Write($"/// Gets a reference to the <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instance.");
+                        Line.Write($"/// You can use this reference in jobs or Burst-compiled functions.");
+                        Line.Write($"/// </summary>");
+                        Line.Write($"/// <remarks>");
+                        Line.Write($"/// The reference corresponds to the tracked instance with the appropriate instance index.");
+                        Line.Write($"/// Implementing the <see cref=\"Medicine.IInstanceIndex\"/> interface will generate a property that lets each");
+                        Line.Write($"/// instance access its own data. Otherwise, you can access the data statically via this array, and");
+                        Line.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
+                    }
+
                     Line.Write($"public ref {dataType} {dataTypeShort}");
 
-                    using (Indent)
-                        Line.Write($"=> ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.ElementAtRefRW({m}MedicineInternalInstanceIndex);");
+                    using (Braces)
+                    {
+                        Line.Write($"{Alias.Inline} get");
+                        using (Indent)
+                            Line.Write($"=> ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.ElementAtRefRW({m}MedicineInternalInstanceIndex);");
+                    }
                 }
             }
 
             Linebreak();
         }
 
+        if (input.TrackingIdFQNs is { Length: > 0 })
+        {
+            foreach (var idType in input.TrackingIdFQNs)
+            {
+                Line.Write(Alias.Inline);
+                Line.Write($"public static {input.TypeFQN}? FindByID({idType} id)");
+
+                using (Indent)
+                    Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Map.TryGetValue(id, out var result) ? result : null;");
+
+                Linebreak();
+
+                Line.Write(Alias.Inline);
+                Line.Write($"public static bool TryFindByID({idType} id, out {input.TypeFQN} result)");
+
+                using (Indent)
+                    Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Map.TryGetValue(id, out result);");
+
+                Linebreak();
+            }
+        }
+
         if (input.Attribute is SingletonAttributeMetadataName)
         {
-            if (input.IsUnityEditorCompile)
+            if (input.Symbols.Has(UNITY_EDITOR))
             {
                 Line.Write($"/// <summary>");
                 Line.Write($"/// Retrieves the active <see cref=\"{input.TypeDisplayName}\"/> singleton instance.");
@@ -387,7 +469,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             EmitRegistrationMethod("OnEnableINTERNAL", $"{m}Storage.Singleton<{input.TypeFQN}>.Register(this)");
             EmitRegistrationMethod("OnDisableINTERNAL", $"{m}Storage.Singleton<{input.TypeFQN}>.Unregister(this)");
 
-            if (input.IsUnityEditorCompile)
+            if (input.Symbols.Has(UNITY_EDITOR))
             {
                 Linebreak();
                 Line.Write(Alias.Hidden);
@@ -397,7 +479,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
         }
         else if (input.Attribute is TrackAttributeMetadataName)
         {
-            if (input.IsUnityEditorCompile)
+            if (input.Symbols.Has(UNITY_EDITOR))
             {
                 Line.Write($"/// <summary>");
                 Line.Write($"/// Allows enumeration of all enabled instances of <see cref=\"{input.TypeDisplayName?.HtmlEncode()}\"/>.");
@@ -433,6 +515,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                     input.AttributeArguments.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Register(transform)" : null,
                     ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Register(this)"),
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Register(this)"),
+                    ..input.TrackingIdFQNs.AsArray().Select(x => $"{m}Storage.LookupByID<{input.TypeFQN}, {x}>.Register(this)"),
                 ]
             );
 
@@ -441,13 +524,14 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 methodCalls:
                 [
                     $"int index = {m}Storage.Instances<{input.TypeFQN}>.Unregister{withId}(this)",
+                    ..input.TrackingIdFQNs.AsArray().Select(x => $"{m}Storage.LookupByID<{input.TypeFQN}, {x}>.Unregister(this)"),
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Unregister(this, index)").Reverse(),
                     ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Unregister(this)").Reverse(),
                     input.AttributeArguments.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Unregister(index)" : null,
                 ]
             );
 
-            if (input.IsUnityEditorCompile)
+            if (input.Symbols.Has(UNITY_EDITOR))
             {
                 Linebreak();
                 Line.Write(Alias.Hidden);

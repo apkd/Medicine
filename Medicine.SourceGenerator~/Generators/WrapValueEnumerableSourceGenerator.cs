@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using static ActiveProprocessorSymbolNames;
 using static Constants;
 using static Microsoft.CodeAnalysis.SpeculativeBindingOption;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
@@ -61,8 +62,21 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
         public string? ElementTypeFQN;
         public string? GetEnumeratorNamespace;
         public bool IsPublic;
+        public ActiveProprocessorSymbolNames Symbols;
         public ImmutableArray<byte> MethodTextChecksumForCache;
     }
+
+    static readonly string wrapEnumerableExample = """
+        /// [WrapValueEnumerable]
+        /// TestEnumerable1 Test1
+        ///     => Find
+        ///         .Instances<TrackedObject>()
+        ///         .AsValueEnumerable()
+        ///         .Select(z => z)
+        ///         .Zip(MySingleton.Instance.name);
+        ///  
+        """.Trim()
+        .HtmlEncode();
 
     static GeneratorInput Transform(GeneratorAttributeSyntaxContext context, CancellationToken ct)
     {
@@ -209,6 +223,7 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
             EnumeratorInnerFQN = (getEnumerator.ReturnType as INamedTypeSymbol)!.TypeArguments.First().ToDisplayString(FullyQualifiedFormat),
             ElementTypeFQN = (retExprType as INamedTypeSymbol)!.TypeArguments.Last().ToDisplayString(FullyQualifiedFormat),
             GetEnumeratorNamespace = enumeratorNamespace,
+            Symbols = context.SemanticModel.GetActivePreprocessorSymbols(),
             IsPublic = declSyntax.Modifiers.Any(SyntaxKind.PublicKeyword),
         };
     }
@@ -228,8 +243,22 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
             IncreaseIndent();
         }
 
-        Line.Write("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
+        if (input.Symbols.Has(UNITY_EDITOR))
+        {
+            Line.Write("/// <summary>");
+            ;
+            Line.Write("/// This is a generated wrapper struct to simplify the name of the combined generic");
+            Line.Write("/// <see cref=\"ZLinq.ValueEnumerable{TE, T}\"/> constructed from a ZLINQ query.");
+            Line.Write("/// This makes it easier to define a method that returns the enumerable.");
+            Line.Write("/// </summary>");
+            Line.Write("/// <example>");
+            Line.Write("/// <code>");
+            Line.Write(wrapEnumerableExample);
+            Line.Write("/// </code>");
+            Line.Write("/// </example>");
+        }
 
+        Line.Write("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
         string @public = input.IsPublic ? "public " : "";
         Line.Write($"{@public}readonly struct {input.WrapperName}");
         using (Indent)
