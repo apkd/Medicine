@@ -5,6 +5,8 @@ using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using static System.Runtime.CompilerServices.MethodImplOptions;
+using Object = UnityEngine.Object;
+
 // ReSharper disable UnusedMember.Global
 
 namespace Medicine
@@ -18,12 +20,13 @@ namespace Medicine
         /// Retrieves the active singleton instance.
         /// </summary>
         /// <typeparam name="T"> The type of the singleton object. <br/>
-        /// The target class needs to be marked with <see cref="SingletonAttribute"/>. </typeparam>
+        /// The target class needs to be decorated with [<see cref="SingletonAttribute"/>]. </typeparam>
+        /// <returns> The active singleton instance of the specified type if available; otherwise, null. </returns>
         /// <remarks>
         /// <list type="bullet">
-        /// <item> MonoBehaviours and ScriptableObjects marked with the <see cref="SingletonAttribute"/> will automatically register/unregister themselves
+        /// <item> MonoBehaviours and ScriptableObjects decorated with [<see cref="SingletonAttribute"/>] will automatically register/unregister themselves
         /// as the active singleton instance in OnEnable/OnDisable. </item>
-        /// <item> In edit mode, to provide better compatibility with editor tooling, <see cref="Object.FindObjectsByType(System.Type,FindObjectsSortMode)"/>
+        /// <item> In edit mode, to provide better compatibility with editor tooling, <see cref="UnityEngine.Object.FindObjectsByType(System.Type,FindObjectsSortMode)"/>
         /// is used internally to attempt to locate the object (cached for one editor update). </item>
         /// </list>
         /// </remarks>
@@ -31,6 +34,29 @@ namespace Medicine
         public static T? Singleton<T>()
             where T : class
             => Storage.Singleton<T>.Instance;
+
+        /// <summary>
+        /// Retrieves the active singleton instance.
+        /// </summary>
+        /// <param name="type"> The type of the singleton object.<br/>
+        /// The target class needs to be decorated with [<see cref="SingletonAttribute"/>]. </param>
+        /// <returns> The active singleton instance of the specified type if available; otherwise, null. </returns>
+        /// <remarks><inheritdoc cref="Singleton{T}"/></remarks>
+        [MethodImpl(AggressiveInlining)]
+        public static Object? Singleton(System.Type type)
+            => Storage.Singleton.UntypedAccess.TryGetValue(type, out var getter) ? getter() : null;
+
+        /// <summary>
+        /// Gets an enumerator that allows iteration through all singleton instances marked with
+        /// the [<see cref="SingletonAttribute"/>].
+        /// </summary>
+        /// <remarks>
+        /// Instances are retrieved using a type-based lookup and returned as <see cref="UnityEngine.Object"/> refs.
+        /// Useful for diagnostic or introspection purposes.
+        /// </remarks>
+        [MethodImpl(AggressiveInlining)]
+        public static SingletonInstancesEnumerable AllActiveSingletons()
+            => default;
 
         /// <summary>
         /// Allows you to enumerate all enabled instances of <typeparamref name="T"/>.

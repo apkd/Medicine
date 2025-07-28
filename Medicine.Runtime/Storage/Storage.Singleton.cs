@@ -1,8 +1,13 @@
+#nullable enable
+using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using UnityEngine;
+using UnityEngine.Scripting;
 using static System.ComponentModel.EditorBrowsableState;
+using static System.Runtime.CompilerServices.MethodImplOptions;
 using Object = UnityEngine.Object;
 
 // ReSharper disable UnusedType.Global
@@ -13,19 +18,33 @@ namespace Medicine.Internal
 {
     public static partial class Storage
     {
+        public static class Singleton
+        {
+            internal static readonly Dictionary<Type, Func<Object?>> UntypedAccess = new(capacity: 8);
+        }
+
         [EditorBrowsable(Never)]
         public static class Singleton<T> where T : class
         {
+            static class StaticInit
+            {
+                [Preserve]
+                public static void Init() { }
+
+                static StaticInit()
+                    => Singleton.UntypedAccess.Add(typeof(T), static () => Instance as Object);
+            }
+
 #if UNITY_EDITOR
-            static T instance;
+            static T? instance;
 
             /// <remarks>
             /// Do not access directly!
             /// <p>Use <see cref="Find.Singleton{T}"/> or the generated <c>.Instance</c> property instead.</p>
             /// </remarks>
-            public static T Instance
+            public static T? Instance
             {
-                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                [MethodImpl(AggressiveInlining)]
                 get
                 {
                     if (Utility.EditMode)
@@ -42,8 +61,10 @@ namespace Medicine.Internal
             /// <summary>
             /// Registers the given object as the current active singleton instance of <paramref name="T"/>.
             /// </summary>
-            public static void Register(T instance)
+            public static void Register(T? instance)
             {
+                StaticInit.Init();
+
                 if (instance == null)
                 {
 #if DEBUG
@@ -58,7 +79,7 @@ namespace Medicine.Internal
             /// <summary>
             /// Unregisters the given object as the current active singleton instance of <paramref name="T"/>.
             /// </summary>
-            public static void Unregister(T instance)
+            public static void Unregister(T? instance)
             {
                 if (instance == null)
                 {
@@ -90,7 +111,7 @@ namespace Medicine.Internal
                     => Instance as Object == null ||                        // destroyed
                        Instance is Behaviour { isActiveAndEnabled: false }; // deactivated;
 
-                static T Search()
+                static T? Search()
                 {
                     if (editModeIsScriptableObject)
                         return Find.ObjectsByTypeAll<T>().FirstOrDefault();
@@ -102,7 +123,7 @@ namespace Medicine.Internal
                     return null;
                 }
 
-                [MethodImpl(MethodImplOptions.NoInlining)]
+                [MethodImpl(NoInlining)]
                 internal static void Refresh()
                 {
                     int frameCount = Time.frameCount;
