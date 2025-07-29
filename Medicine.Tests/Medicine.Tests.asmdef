@@ -4,7 +4,10 @@
     "references": [
         "GUID:0da17716f00131847b25e24f8b6e7c58",
         "GUID:c71612acbe346a344abbc0dcfdf4f0bd",
-        "GUID:dd45bb705edc4cf47acd3a4ae20a9e23"
+        "GUID:dd45bb705edc4cf47acd3a4ae20a9e23",
+        "GUID:27619889b8ba8c24980f49ee34dbb44a",
+        "GUID:0acc523941302664db1f4e527237feb3",
+        "GUID:e0cd26848372d4e5c891c569017e11f1"
     ],
     "includePlatforms": [
         "Editor"
@@ -13,20 +16,19 @@
     "allowUnsafeCode": false,
     "overrideReferences": true,
     "precompiledReferences": [
-        "nunit.framework.dll",
-        "ZLinq.dll"
+        "ZLinq.dll",
+        "nunit.framework.dll"
     ],
     "autoReferenced": false,
-    "defineConstraints": [],
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
     "versionDefines": [
         {
             "name": "com.cysharp.zlinq",
             "expression": "",
             "define": "MODULE_ZLINQ"
         }
-    ],
-    "optionalUnityReferences": [
-      "TestAssemblies"
     ],
     "noEngineReferences": false
 }
