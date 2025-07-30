@@ -37,6 +37,7 @@ public static class Utility
             bool NavigateToParent()
                 => (syntax = syntax?.Parent as MemberDeclarationSyntax)?.Kind()
                     is SyntaxKind.NamespaceDeclaration
+                    or SyntaxKind.FileScopedNamespaceDeclaration
                     or SyntaxKind.ClassDeclaration
                     or SyntaxKind.StructDeclaration
                     or SyntaxKind.RecordDeclaration;
@@ -55,7 +56,7 @@ public static class Utility
 
                 string? line = syntax switch
                 {
-                    NamespaceDeclarationSyntax x => $"namespace {x.Name}",
+                    BaseNamespaceDeclarationSyntax x => $"namespace {x.Name}",
                     TypeDeclarationSyntax x      => $"partial {x.Keyword.ValueText} {x.Identifier}{x.TypeParameterList}{colon}{interfaces} {x.ConstraintClauses}",
                     _                            => null,
                 };
