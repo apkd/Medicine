@@ -1,7 +1,6 @@
 #nullable enable
 using System;
 using System.ComponentModel;
-using UnityEngine;
 using static System.ComponentModel.EditorBrowsableState;
 
 // ReSharper disable UnusedType.Global
@@ -23,7 +22,7 @@ namespace Medicine.Internal
         // used to release static native resources (e.g., TransformAccessArray)
         static Action? beforeAssemblyUnload;
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        [UnityEditor.InitializeOnLoadMethod]
         static void OnAssemblyUnload()
         {
             void InvokeBeforeAssemblyUnload()

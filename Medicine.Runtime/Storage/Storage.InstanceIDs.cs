@@ -22,7 +22,12 @@ namespace Medicine.Internal
 #else
                 List = new(initialCapacity: 8, Allocator.Persistent);
 #if UNITY_EDITOR
-                beforeAssemblyUnload += static () => List.Dispose();
+                beforeAssemblyUnload += static () =>
+                {
+                    var safetyHandle = Unity.Collections.LowLevel.Unsafe.NativeListUnsafeUtility.GetAtomicSafetyHandle(ref List);
+                    Unity.Collections.LowLevel.Unsafe.AtomicSafetyHandle.EnforceAllBufferJobsHaveCompleted(safetyHandle);
+                    List.Dispose();
+                };
 #endif
 #endif
                 return List;

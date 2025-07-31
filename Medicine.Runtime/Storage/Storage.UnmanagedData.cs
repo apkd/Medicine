@@ -36,7 +36,12 @@ namespace Medicine.Internal
 #else
                 List = new(initialCapacity: 8, Allocator.Persistent);
 #if UNITY_EDITOR
-                beforeAssemblyUnload += static () => List.Dispose();
+                beforeAssemblyUnload += static () =>
+                {
+                    var safetyHandle = NativeListUnsafeUtility.GetAtomicSafetyHandle(ref List);
+                    AtomicSafetyHandle.EnforceAllBufferJobsHaveCompleted(safetyHandle);
+                    List.Dispose();
+                };
 #endif
 #endif
                 Array = List.AsArray();
