@@ -159,7 +159,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                         Line.Write($"/// <list type=\"bullet\">");
                         Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIndex\"/> property, which is the instance's index into the above arrays </item>");
                         foreach (var (_, dataTypeShort) in unmanagedDataInfo)
-                            Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.{dataTypeShort}\"/> per-instance data accessor </item>");
+                            Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Local{dataTypeShort}\"/> per-instance data accessor </item>");
 
                         Line.Write($"/// </list>");
                     }
@@ -402,7 +402,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                         Line.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
                     }
 
-                    Line.Write($"public ref {dataType} {dataTypeShort}");
+                    Line.Write($"public ref {dataType} Local{dataTypeShort}");
 
                     using (Braces)
                     {
