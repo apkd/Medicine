@@ -1,6 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using static ActiveProprocessorSymbolNames;
+using static ActivePreprocessorSymbolNames;
 using static Constants;
 
 [Generator]
@@ -9,6 +9,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
         var medicineSettings = context.CompilationProvider
+            .Combine(context.ParseOptionsProvider)
             .Select((x, ct) => new MedicineSettings(x));
 
         foreach (var attributeName in new[] { SingletonAttributeMetadataName, TrackAttributeMetadataName })
@@ -24,7 +25,11 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                     )
                     .Where(x => x.Attribute is { Length: > 0 })
                     .Combine(medicineSettings)
-                    .Select((x, ct) => x.Left with { EmitIInstanceIndex = x.Right.AlwaysTrackInstanceIndices }),
+                    .Select((x, ct) => x.Left with
+                    {
+                        EmitIInstanceIndex = x.Right.AlwaysTrackInstanceIndices,
+                        Symbols = x.Right.PreprocessorSymbolNames,
+                    }),
                 WrapGenerateSource<GeneratorInput>(GenerateSource)
             );
         }
@@ -33,7 +38,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
     record struct GeneratorInput : IGeneratorTransformOutput
     {
         public string? SourceGeneratorOutputFilename { get; init; }
-        public string? SourceGeneratorError { get; set; }
+        public string? SourceGeneratorError { get; init; }
         public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
 
         public string? Attribute;
@@ -44,7 +49,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
         public EquatableArray<string> TrackingIdFQNs;
         public string? TypeFQN;
         public string? TypeDisplayName;
-        public ActiveProprocessorSymbolNames Symbols;
+        public ActivePreprocessorSymbolNames Symbols;
         public bool HasIInstanceIndex;
         public bool EmitIInstanceIndex;
         public bool IsSealed;
@@ -97,7 +102,6 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             TypeFQN = classSymbol.GetFQN()!,
             TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
             IsSealed = classSymbol.IsSealed,
-            Symbols = context.SemanticModel.GetActivePreprocessorSymbols(),
             IsComponent = classSymbol.InheritsFrom("global::UnityEngine.Component"),
             InterfacesWithAttribute
                 = classSymbol.Interfaces

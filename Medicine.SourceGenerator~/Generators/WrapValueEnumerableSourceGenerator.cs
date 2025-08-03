@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using static ActiveProprocessorSymbolNames;
+using static ActivePreprocessorSymbolNames;
 using static Constants;
 using static Microsoft.CodeAnalysis.SpeculativeBindingOption;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
@@ -13,25 +13,31 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
 {
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
+        var medicineSettings = context.CompilationProvider
+            .Combine(context.ParseOptionsProvider)
+            .Select((x, ct) => new MedicineSettings(x));
+
         var wrapRequests =
             context
                 .SyntaxProvider
                 .ForAttributeWithMetadataName(
-                    fullyQualifiedMetadataName: Constants.WrapValueEnumerableAttributeMetadataName,
+                    fullyQualifiedMetadataName: WrapValueEnumerableAttributeMetadataName,
                     predicate: static (x, ct) => x is MethodDeclarationSyntax or PropertyDeclarationSyntax,
                     transform: WrapTransform(TransformForCache)
                 )
-                .Select(WrapTransform<CacheInput, GeneratorInput>(Transform));
+                .Select(WrapTransform<CacheInput, GeneratorInput>(Transform))
+                .Combine(medicineSettings)
+                .Select((x, ct) => x.Left with { Symbols = x.Right.PreprocessorSymbolNames });
 
         context.RegisterSourceOutput(wrapRequests, WrapGenerateSource<GeneratorInput>(GenerateSource));
     }
 
     [SuppressMessage("ReSharper", "NotAccessedPositionalProperty.Local")]
-    record struct CacheInput() : IGeneratorTransformOutputWithContext
+    record struct CacheInput : IGeneratorTransformOutputWithContext
     {
         public EquatableIgnore<GeneratorAttributeSyntaxContext> Context { get; set; }
         public string? SourceGeneratorOutputFilename { get; set; }
-        public string? SourceGeneratorError { get; set; }
+        public string? SourceGeneratorError { get; init; }
         public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
 
         // explicitly avoid regenerating code unless this property has changed.
@@ -51,7 +57,7 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
     record struct GeneratorInput : IGeneratorTransformOutput
     {
         public string? SourceGeneratorOutputFilename { get; init; }
-        public string? SourceGeneratorError { get; set; }
+        public string? SourceGeneratorError { get; init; }
         public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
 
         public EquatableArray<string> Declaration;
@@ -62,7 +68,7 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
         public string? ElementTypeFQN;
         public string? GetEnumeratorNamespace;
         public bool IsPublic;
-        public ActiveProprocessorSymbolNames Symbols;
+        public ActivePreprocessorSymbolNames Symbols;
         public ImmutableArray<byte> MethodTextChecksumForCache;
     }
 
@@ -223,7 +229,6 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
             EnumeratorInnerFQN = (getEnumerator.ReturnType as INamedTypeSymbol)!.TypeArguments.First().ToDisplayString(FullyQualifiedFormat),
             ElementTypeFQN = (retExprType as INamedTypeSymbol)!.TypeArguments.Last().ToDisplayString(FullyQualifiedFormat),
             GetEnumeratorNamespace = enumeratorNamespace,
-            Symbols = context.SemanticModel.GetActivePreprocessorSymbols(),
             IsPublic = declSyntax.Modifiers.Any(SyntaxKind.PublicKeyword),
         };
     }

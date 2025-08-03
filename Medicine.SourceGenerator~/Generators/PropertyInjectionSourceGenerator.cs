@@ -2,7 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static System.StringComparison;
-using static ActiveProprocessorSymbolNames;
+using static ActivePreprocessorSymbolNames;
 using static Constants;
 using static InjectionSourceGenerator.ExpressionFlags;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
@@ -46,10 +46,10 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
     record struct GeneratorInput() : IGeneratorTransformOutput
     {
         public string? SourceGeneratorOutputFilename { get; init; }
-        public string? SourceGeneratorError { get; set; }
+        public string? SourceGeneratorError { get; init; }
         public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
 
-        public ActiveProprocessorSymbolNames Symbols;
+        public ActivePreprocessorSymbolNames Symbols;
         public bool IsSealed;
         public bool IsStatic;
         public bool? MakePublic;
@@ -98,6 +98,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
         var medicineSettings = context.CompilationProvider
+            .Combine(context.ParseOptionsProvider)
             .Select((x, ct) => new MedicineSettings(x));
 
         var syntaxProvider = context.SyntaxProvider
@@ -113,7 +114,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             {
                 var (input, settings) = x;
                 input.MakePublic ??= settings.MakePublic;
-                input.Symbols.SetForceDebug(settings.ForceDebug);
+                input.Symbols = settings.PreprocessorSymbolNames;
                 return input;
             }),
             action: WrapGenerateSource<GeneratorInput>(GenerateSource)

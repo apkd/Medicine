@@ -1,6 +1,4 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
@@ -13,7 +11,7 @@ public interface IGeneratorTransformOutputWithContext : IGeneratorTransformOutpu
 public interface IGeneratorTransformOutput
 {
     string? SourceGeneratorOutputFilename { get; }
-    string? SourceGeneratorError { get; set; }
+    string? SourceGeneratorError { get; init; }
     EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
 }
 
@@ -88,8 +86,9 @@ public abstract class BaseSourceGenerator
 
             string? error = input.SourceGeneratorError;
 
+            // we try to provide the output path even in case of errors
             if (error is not { Length: > 0 } && input.SourceGeneratorOutputFilename is not { Length: > 0 })
-                error = "The source generator did not specify an output filename. This is a bug in the source generator.";
+                error = "No output filename specified. This is a bug in the source generator.";
 
             if (error is not { Length: > 0 })
             {
@@ -127,10 +126,10 @@ public abstract class BaseSourceGenerator
             }
         };
 
-    protected static string GetErrorOutputFilename(Location location, string error)
+    static string GetErrorOutputFilename(Location location, string error)
     {
         string filename = Path.GetFileNameWithoutExtension(location.SourceTree!.FilePath);
-        var result = $"{filename}.Exception.{Hash():x8}.g.cs";
+        string result = $"{filename}.Exception.{Hash():x8}.g.cs";
         return result;
 
         int Hash()
@@ -174,7 +173,7 @@ public abstract class BaseSourceGenerator
         }
     }
 
-    protected void InitializeOutputSourceText()
+    void InitializeOutputSourceText()
     {
         indent = 0;
         Text.Clear()
