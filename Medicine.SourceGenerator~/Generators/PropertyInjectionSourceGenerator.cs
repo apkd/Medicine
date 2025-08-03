@@ -50,6 +50,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
 
         public ActivePreprocessorSymbolNames Symbols;
+        public string? InjectMethodName;
         public bool IsSealed;
         public bool IsStatic;
         public bool? MakePublic;
@@ -133,6 +134,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
         var output = new GeneratorInput
         {
+            InjectMethodName = methodDeclaration.Identifier.Text,
             SourceGeneratorOutputFilename = GetOutputFilename(
                 filePath: classDecl.Identifier.ValueText,
                 targetFQN: methodDeclaration.Identifier.ValueText,
@@ -447,6 +449,10 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             );
         }
 
+        string storageSuffix = input.InjectMethodName is "Awake" ? "" : $"For{input.InjectMethodName}";
+        string storagePropName = $"{m}MedicineInternal{storageSuffix}";
+        string storageStructName = $"{m}MedicineInternalBackingStorage{storageSuffix}";
+
         string methodXmlDocId = input.MethodXmlDocId.Value();
         string className = input.ClassName.Value();
 
@@ -655,13 +661,13 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                         {
                             if (input.Symbols.Has(UNITY_EDITOR) && !x.Flags.Has(IsDisposable))
                             {
-                                Line.Write($"{Alias.NoInline} void {m}Expr() => {m}MedicineInternal._{m}{x.PropertyName} = {x.InitExpression};");
+                                Line.Write($"{Alias.NoInline} void {m}Expr() => {storagePropName}._{m}{x.PropertyName} = {x.InitExpression};");
                                 Line.Write($"if ({m}Utility.EditMode)");
                                 using (Indent)
                                     Line.Write($"{m}Expr();"); // in edit mode, always call initializer
                             }
 
-                            Line.Write($"return ref {m}MedicineInternal._{m}{x.PropertyName};");
+                            Line.Write($"return ref {storagePropName}._{m}{x.PropertyName};");
                         }
                     }
                 }
@@ -681,7 +687,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                                     Line.Write($"return {m}Expr();"); // in edit mode, always call initializer
                             }
 
-                            Line.Write($"return {m}MedicineInternal._{m}{x.PropertyName}!;");
+                            Line.Write($"return {storagePropName}._{m}{x.PropertyName}!;");
                         }
 
                         Line.Write($"{Alias.Inline} {@private}set");
@@ -705,7 +711,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                                     Line.Write($"{m}Debug.LogError($\"Missing {typeLabel}: {x.TypeDisplayName} '{x.PropertyName}' in {className} '{{this.name}}'\", this);");
                             }
 
-                            Line.Write($"{m}MedicineInternal._{m}{x.PropertyName} = value;");
+                            Line.Write($"{storagePropName}._{m}{x.PropertyName} = value;");
                         }
                     }
                 }
@@ -726,7 +732,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
         Line.Write(Alias.Hidden);
         Line.Write(Alias.ObsoleteInternal);
-        Line.Write($"partial struct {m}MedicineInternalBackingStorage");
+        Line.Write($"partial struct {storageStructName}");
         using (Braces)
         {
             foreach (var line in deferredLines)
@@ -741,7 +747,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         Linebreak();
         Line.Write(Alias.Hidden);
         Line.Write(Alias.ObsoleteInternal);
-        Line.Write($"{m}MedicineInternalBackingStorage {m}MedicineInternal;");
+        Line.Write($"{storageStructName} {storagePropName};");
 
         if (expressions.Any(x => x.Flags.Any(IsCleanupDestroy | IsCleanupDispose) || x.CleanupExpression is not null))
         {
@@ -762,7 +768,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                         Line.Write($"Destroy({x.PropertyName});");
 
                     if (x.CleanupExpression is not null)
-                        Line.Write($"{m}MedicineInternalBackingStorage._{m}{x.PropertyName}{m}CLEANUP({x.PropertyName}); // {x.CleanupExpression}");
+                        Line.Write($"{storageStructName}._{m}{x.PropertyName}{m}CLEANUP({x.PropertyName}); // {x.CleanupExpression}");
                 }
             }
         }
