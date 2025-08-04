@@ -1,3 +1,4 @@
+#if !MODULE_ZLINQ
 using System.Collections.Generic;
 using Medicine.Internal;
 
@@ -31,3 +32,4 @@ public static class TestZLinqShim
             yield return value;
     }
 }
+#endif

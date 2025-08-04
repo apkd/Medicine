@@ -1,5 +1,7 @@
 #if MODULE_ZLINQ
 using ZLinq;
+#else
+using System.Linq;
 #endif
 using System;
 using Medicine;
