@@ -11,6 +11,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Medicine", "..\..\..\Medici
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Medicine.Tests", "..\..\..\Medicine.Tests.csproj", "{34E0BFB1-AE59-DF7F-DE06-DC66AFCE4309}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Medicine.Tests.EditMode", "..\..\..\Medicine.Tests.EditMode.csproj", "{02082C48-3773-A0F6-D6B3-9A6F8E5292C1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Medicine.Tests.PlayMode", "..\..\..\Medicine.Tests.PlayMode.csproj", "{77E2A57C-3BBB-6E8D-243E-33640B769469}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -33,5 +37,13 @@ Global
 		{34E0BFB1-AE59-DF7F-DE06-DC66AFCE4309}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{34E0BFB1-AE59-DF7F-DE06-DC66AFCE4309}.Release|Any CPU.ActiveCfg = Debug|Any CPU
 		{34E0BFB1-AE59-DF7F-DE06-DC66AFCE4309}.Release|Any CPU.Build.0 = Debug|Any CPU
+		{02082C48-3773-A0F6-D6B3-9A6F8E5292C1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{02082C48-3773-A0F6-D6B3-9A6F8E5292C1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{02082C48-3773-A0F6-D6B3-9A6F8E5292C1}.Release|Any CPU.ActiveCfg = Debug|Any CPU
+		{02082C48-3773-A0F6-D6B3-9A6F8E5292C1}.Release|Any CPU.Build.0 = Debug|Any CPU
+		{77E2A57C-3BBB-6E8D-243E-33640B769469}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{77E2A57C-3BBB-6E8D-243E-33640B769469}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{77E2A57C-3BBB-6E8D-243E-33640B769469}.Release|Any CPU.ActiveCfg = Debug|Any CPU
+		{77E2A57C-3BBB-6E8D-243E-33640B769469}.Release|Any CPU.Build.0 = Debug|Any CPU
 	EndGlobalSection
 EndGlobal

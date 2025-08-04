@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using Medicine.Internal;
 
-static class TestZLinqShim
+public static class TestZLinqShim
 {
     public static IEnumerable<T> AsValueEnumerable<T>(this ComponentsInSceneEnumerable<T> enumerable)
         where T : class

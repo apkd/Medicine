@@ -1,8 +1,10 @@
+#if MODULE_ZLINQ
+using ZLinq;
+#endif
 using System;
 using Medicine;
 using NUnit.Framework;
 using UnityEngine;
-using ZLinq;
 
 public partial class TrackAttributePlayModeTests
 {
