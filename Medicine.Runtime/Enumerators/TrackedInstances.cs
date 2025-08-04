@@ -35,7 +35,15 @@ namespace Medicine.Internal
         public int Count
         {
             [MethodImpl(AggressiveInlining)]
-            get => Storage.Instances<T>.List.Count;
+            get
+            {
+#if UNITY_EDITOR
+                if (Utility.EditMode)
+                    Storage.Instances<T>.EditMode.Refresh();
+#endif
+
+                return Storage.Instances<T>.List.Count;
+            }
         }
 
         [EditorBrowsable(Never)]
