@@ -126,6 +126,19 @@ namespace Medicine
             where T : class
             => ComponentsEnumerable<T>.InSelf(component);
 
+        /// <inheritdoc cref="Scene.GetRootGameObjects()"/>
+        /// <returns>
+        /// A <see cref="PooledList{T}"/> of root-level GameObjects in the given scene.
+        /// This list must be disposed of after use.
+        /// </returns>
+        [MustDisposeResource]
+        public static PooledList<GameObject> GetRootGameObjectsPooledList(this Scene scene)
+        {
+            var pooledList = PooledList.Get<GameObject>();
+            scene.GetRootGameObjects(pooledList.List);
+            return pooledList;
+        }
+
 #if MODULE_ZLINQ
         /// <summary>
         /// Enumerates to a <see cref="PooledList{T}"/>, internally based on <see cref="ListPool{T}"/>.
