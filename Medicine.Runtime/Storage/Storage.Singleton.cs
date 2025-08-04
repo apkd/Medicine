@@ -108,8 +108,8 @@ namespace Medicine.Internal
                     => editModeVersion = int.MinValue;
 
                 static bool InstanceBecameInvalid()
-                    => Instance as Object == null ||                        // destroyed
-                       Instance is Behaviour { isActiveAndEnabled: false }; // deactivated;
+                    => instance as Object == null ||                        // destroyed
+                       instance is Behaviour { isActiveAndEnabled: false }; // deactivated;
 
                 static T? Search()
                 {
