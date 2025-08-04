@@ -111,13 +111,15 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
             );
 
         context.RegisterSourceOutput(
-            source: syntaxProvider.Combine(medicineSettings).Select((x, ct) =>
-            {
-                var (input, settings) = x;
-                input.MakePublic ??= settings.MakePublic;
-                input.Symbols = settings.PreprocessorSymbolNames;
-                return input;
-            }),
+            source: syntaxProvider.Combine(medicineSettings)
+                .Select((x, ct) =>
+                    {
+                        var (input, settings) = x;
+                        input.MakePublic ??= settings.MakePublic;
+                        input.Symbols = settings.PreprocessorSymbolNames;
+                        return input;
+                    }
+                ),
             action: WrapGenerateSource<GeneratorInput>(GenerateSource)
         );
     }
@@ -140,12 +142,9 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                 targetFQN: methodDeclaration.Identifier.ValueText,
                 label: InjectAttributeName
             ),
-            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(classDecl),
+            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(classDecl, context.SemanticModel, ct),
             MethodTextCheckSumForCache = methodDeclaration.GetText().GetChecksum().AsArray(),
         };
-
-        if (context.SemanticModel.GetDeclaredSymbol(classDecl, ct) is not { TypeKind: TypeKind.Class } classSymbol)
-            return output;
 
         if (context.TargetNode.SyntaxTree.GetRoot(ct) is CompilationUnitSyntax compilationUnit)
         {
@@ -244,7 +243,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                             return false;
                         }
 
-                        bool MatchOptionWithExpression(ref ReadOnlySpan<char> expression, out string argument, ReadOnlySpan<char> pattern)
+                        bool MatchOptionWithDelegateArg(ref ReadOnlySpan<char> expression, out string argument, ReadOnlySpan<char> pattern)
                         {
                             argument = "";
 
@@ -295,24 +294,51 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                             return true;
                         }
 
-                        bool IsStaticPropertyAccess(ExpressionSyntax expression, string classAttribute, string propertyName)
-                            => expression is MemberAccessExpressionSyntax
+                        var right = assignment.Right;
+
+                        bool IsStaticPropertyAccess(string classAttribute, string propertyName)
+                            => right is MemberAccessExpressionSyntax
                                {
-                                   Expression: IdentifierNameSyntax classIdentifier,
+                                   Expression: { } classIdentifier,
                                    Name.Identifier.ValueText: { Length: > 0 } propertyNameIdentifierText,
                                }
                                && propertyNameIdentifierText == propertyName
-                               && context.SemanticModel.GetSymbolInfo(classIdentifier, ct).Symbol is ITypeSymbol classTypeSymbol
-                               && classTypeSymbol.HasAttribute(classAttribute);
+                               && context.SemanticModel.GetSymbolInfo(classIdentifier, ct).Symbol is ITypeSymbol accessedClassTypeSymbol
+                               && accessedClassTypeSymbol.HasAttribute(classAttribute)
+                               || right is IdentifierNameSyntax
+                               {
+                                   Identifier.ValueText: { Length: > 0 } simpleIdentifierText,
+                               }
+                               && simpleIdentifierText == propertyName
+                               && context.SemanticModel.GetDeclaredSymbol(classDecl, ct) is { } classSymbol
+                               && classSymbol.HasAttribute(classAttribute);
+
+                        bool IsFindMethodCall(string methodName)
+                            => right is InvocationExpressionSyntax
+                               {
+                                   Expression: MemberAccessExpressionSyntax
+                                   {
+                                       Expression: { } findClassIdentifier,
+                                       Name.Identifier.ValueText: var identifierText,
+                                   },
+                               }
+                               && context.SemanticModel.GetSymbolInfo(findClassIdentifier, ct).Symbol is ITypeSymbol medicineFindTypeSymbol
+                               && medicineFindTypeSymbol.GetFQN() is MedicineFindClassFQN
+                               && identifierText == methodName;
 
                         string? cleanupExpression = null;
 
                         while (true)
                         {
                             if (MatchOption(ref expression, IsOptional, ".Optional()".AsSpan()))
-                                continue;
+                            {
+                                if (right is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Expression: { } inner, Name.Identifier.ValueText: "Optional" } })
+                                    right = inner;
 
-                            if (MatchOptionWithExpression(ref expression, out string cleanup, "Cleanup".AsSpan()))
+                                continue;
+                            }
+
+                            if (MatchOptionWithDelegateArg(ref expression, out string cleanup, "Cleanup".AsSpan()))
                             {
                                 cleanupExpression = cleanup;
                                 continue;
@@ -321,14 +347,20 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                             break;
                         }
 
-                        bool isSingleton = IsStaticPropertyAccess(assignment.Right, SingletonAttributeFQN, "Instance");
-                        bool isTracked = IsStaticPropertyAccess(assignment.Right, TrackAttributeFQN, "Instances");
+                        bool isSingleton =
+                            IsStaticPropertyAccess(SingletonAttributeFQN, "Instance") ||
+                            IsFindMethodCall("Singleton");
+
+                        bool isTracked =
+                            IsStaticPropertyAccess(TrackAttributeFQN, "Instances") ||
+                            IsFindMethodCall("Instances");
+
                         flags.Set(IsSingleton, isSingleton);
                         flags.Set(IsTracked, isTracked);
 
                         if (isSingleton || isTracked)
                         {
-                            if (assignment.Right is MemberAccessExpressionSyntax memberAccessExpressionSyntax)
+                            if (right is MemberAccessExpressionSyntax memberAccessExpressionSyntax)
                                 if (context.SemanticModel.GetSymbolInfo(memberAccessExpressionSyntax.Expression, ct).Symbol is ITypeSymbol accessedExpressionSymbol)
                                     typeSymbol = typeSymbolForDisplayName = accessedExpressionSymbol;
                         }
@@ -342,35 +374,52 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
                         if (isSingleton)
                         {
-                            var first = assignment.Right
-                                .DescendantNodesAndSelf()
-                                .FirstOrDefault(n =>
-                                    n is MemberAccessExpressionSyntax
-                                    {
-                                        Expression: IdentifierNameSyntax singletonClassIdentifier,
-                                        Name.Identifier.ValueText: "Instance",
-                                    }
-                                );
-
-                            if (first is MemberAccessExpressionSyntax memberAccessExpressionSyntax)
-                                if (context.SemanticModel.GetTypeInfo(memberAccessExpressionSyntax.Expression, ct).Type is { } symbol)
-                                    typeSymbol = symbol;
+                            if (right is IdentifierNameSyntax { Identifier.ValueText: "Instance" })
+                            {
+                                if (context.SemanticModel.GetDeclaredSymbol(classDecl, ct) is ITypeSymbol classSymbol)
+                                    typeSymbol = classSymbol;
+                            }
+                            else
+                            {
+                                if (right is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Instance" } memberAccess)
+                                    if (context.SemanticModel.GetTypeInfo(memberAccess.Expression, ct).Type is { } symbol)
+                                        typeSymbol = symbol;
+                            }
                         }
                         else if (isTracked)
                         {
-                            var first = assignment.Right
-                                .DescendantNodesAndSelf()
-                                .FirstOrDefault(n =>
-                                    n is MemberAccessExpressionSyntax
+                            if (right is InvocationExpressionSyntax
+                                {
+                                    Expression: MemberAccessExpressionSyntax
                                     {
-                                        Expression: IdentifierNameSyntax singletonClassIdentifier,
-                                        Name.Identifier.ValueText: "Instances",
-                                    }
-                                );
-
-                            if (first is MemberAccessExpressionSyntax memberAccessExpressionSyntax)
-                                if (context.SemanticModel.GetTypeInfo(memberAccessExpressionSyntax.Expression, ct).Type is { } symbol)
+                                        Name: GenericNameSyntax { TypeArgumentList.Arguments: [var arg] },
+                                    },
+                                })
+                            {
+                                if (context.SemanticModel.GetTypeInfo(arg, ct).Type is { } symbol)
                                     typeSymbol = symbol;
+                            }
+                            else if (right is IdentifierNameSyntax { Identifier.ValueText: "Instances" })
+                            {
+                                if (context.SemanticModel.GetDeclaredSymbol(classDecl, ct) is ITypeSymbol classSymbol)
+                                    typeSymbol = classSymbol;
+                            }
+                            else
+                            {
+                                var first = right
+                                    .DescendantNodesAndSelf()
+                                    .FirstOrDefault(n =>
+                                        n is MemberAccessExpressionSyntax
+                                        {
+                                            Expression: IdentifierNameSyntax,
+                                            Name.Identifier.ValueText: "Instances",
+                                        }
+                                    );
+
+                                if (first is MemberAccessExpressionSyntax memberAccessExpressionSyntax)
+                                    if (context.SemanticModel.GetTypeInfo(memberAccessExpressionSyntax.Expression, ct).Type is { } symbol)
+                                        typeSymbol = symbol;
+                            }
                         }
 
                         string typeDisplayName
@@ -378,14 +427,14 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
 
                         string? typeFQN
                             = typeSymbol
-                                .GetSafeSymbolName(context.SemanticModel, assignment.Right.SpanStart) is { Length : > 0 } name
+                                .GetSafeSymbolName(context.SemanticModel, right.SpanStart) is { Length : > 0 } name
                                 ? name.TrimEnd('?')
                                 : null;
 
                         flags.Set(
                             NeedsNullCheck,
                             value: typeSymbol?.IsReferenceType is true &&
-                                   // assignment.Right is not BaseObjectCreationExpressionSyntax &&
+                                   // right is not BaseObjectCreationExpressionSyntax &&
                                    typeSymbol is not IArrayTypeSymbol &&
                                    !flags.Has(IsOptional) &&
                                    !flags.Has(IsTransient) &&
@@ -407,7 +456,9 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                             flag: IsOptional,
                             value: flags.Has(IsOptional) &&
                                    !flags.Has(IsArray) &&
-                                   !flags.Has(IsTransient)
+                                   !flags.Has(IsTransient) &&
+                                   !isSingleton &&
+                                   !isTracked
                         );
 
                         flags.Set(IsValueType, typeSymbol?.IsValueType is true);
@@ -575,26 +626,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                 Line.Write($"{access}{@static}{x.TypeFQN}{opt} {x.PropertyName}");
                 using (Braces)
                 {
-                    // always get a fresh singleton instance
-                    if (x.Flags.Has(NeedsNullCheck))
-                    {
-                        // check that the singleton exists and if not, log error
-                        Line.Write("get");
-                        using (Braces)
-                        {
-                            Line.Write($"var instance = {x.TypeFQN}.Instance;");
-                            Line.Write($"if (!{m}Utility.IsNativeObjectAlive(instance))");
-                            using (Indent)
-                                Line.Write($"{m}Debug.LogError($\"No registered singleton instance: {x.TypeDisplayName}\");");
-
-                            Line.Write($"return instance{exc};");
-                        }
-                    }
-                    else
-                    {
-                        // just return
-                        Line.Write($"{Alias.Inline} get => {x.TypeFQN}.Instance;");
-                    }
+                    Line.Write($"{Alias.Inline} get => {x.TypeFQN}.Instance!;");
 
                     // discard the assign - only need this for type resolution
                     Line.Write($"{Alias.Inline} set {{ }}");
@@ -717,7 +749,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
                 }
 
                 // backing field
-                Defer($"internal {@static}{x.TypeFQN}{nul} _{m}{x.PropertyName};");
+                Defer($"internal {x.TypeFQN}{nul} _{m}{x.PropertyName};");
                 DeferLinebreak();
 
                 if (x.CleanupExpression is not null)
@@ -747,7 +779,7 @@ public sealed class InjectionSourceGenerator : BaseSourceGenerator, IIncremental
         Linebreak();
         Line.Write(Alias.Hidden);
         Line.Write(Alias.ObsoleteInternal);
-        Line.Write($"{storageStructName} {storagePropName};");
+        Line.Write($"{@static} {storageStructName} {storagePropName};");
 
         if (expressions.Any(x => x.Flags.Any(IsCleanupDestroy | IsCleanupDispose) || x.CleanupExpression is not null))
         {

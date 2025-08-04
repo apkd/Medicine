@@ -30,7 +30,11 @@ public static class Utility
         editor.InsertAfter(usings.Last(), usingDirective);
     }
 
-    public static EquatableArray<string> DeconstructTypeDeclaration(MemberDeclarationSyntax memberDeclarationSyntax, string? extraInterfaces = null)
+    public static EquatableArray<string> DeconstructTypeDeclaration(
+        MemberDeclarationSyntax memberDeclarationSyntax,
+        SemanticModel semanticModel,
+        CancellationToken ct,
+        string? extraInterfaces = null)
     {
         IEnumerable<string> Walk(MemberDeclarationSyntax? syntax)
         {
@@ -54,11 +58,14 @@ public static class Utility
                     ? extraInterfaces ?? ""
                     : "";
 
+                // string FormatConstraintClauses(SyntaxList<TypeParameterConstraintClauseSyntax> constraintClauses)
+                //     => string.Join(" ", constraintClauses.Select(x => x.WithFullyQualitiedReferences(semanticModel, ct)));
+
                 string? line = syntax switch
                 {
                     BaseNamespaceDeclarationSyntax x => $"namespace {x.Name}",
-                    TypeDeclarationSyntax x      => $"partial {x.Keyword.ValueText} {x.Identifier}{x.TypeParameterList}{colon}{interfaces} {x.ConstraintClauses}",
-                    _                            => null,
+                    TypeDeclarationSyntax x          => $"partial {x.Keyword.ValueText} {x.Identifier}{x.TypeParameterList}{colon}{interfaces}",
+                    _                                => null,
                 };
 
                 if (line is not null)

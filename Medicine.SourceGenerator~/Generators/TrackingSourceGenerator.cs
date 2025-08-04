@@ -26,10 +26,12 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                     .Where(x => x.Attribute is { Length: > 0 })
                     .Combine(medicineSettings)
                     .Select((x, ct) => x.Left with
-                    {
-                        EmitIInstanceIndex = x.Right.AlwaysTrackInstanceIndices,
-                        Symbols = x.Right.PreprocessorSymbolNames,
-                    }),
+                        {
+                            HasIInstanceIndex = x.Left.HasIInstanceIndex || x.Right.AlwaysTrackInstanceIndices,
+                            EmitIInstanceIndex = x.Left.EmitIInstanceIndex || x.Right.AlwaysTrackInstanceIndices,
+                            Symbols = x.Right.PreprocessorSymbolNames,
+                        }
+                    ),
                 WrapGenerateSource<GeneratorInput>(GenerateSource)
             );
         }
@@ -55,6 +57,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
         public bool IsSealed;
         public bool HasBaseDeclarationsWithAttribute;
         public bool IsComponent;
+        public bool IsGenericType;
     }
 
     static GeneratorInput TransformSyntaxContext(
@@ -87,7 +90,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
         return new()
         {
             SourceGeneratorOutputFilename = GetOutputFilename(typeDeclaration.SyntaxTree.FilePath, typeDeclaration.Identifier.ValueText, attributeName),
-            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration),
+            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration, context.SemanticModel, ct),
             Attribute = attributeName,
             AttributeArguments = attributeArguments,
             UnmanagedDataFQNs = classSymbol.Interfaces
@@ -99,9 +102,11 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 .Select(x => x.TypeArguments.FirstOrDefault().GetFQN()!)
                 .ToArray(),
             HasIInstanceIndex = classSymbol.HasInterface(IInstanceIndexInterfaceFQN),
+            EmitIInstanceIndex = classSymbol.HasInterface(IInstanceIndexInterfaceFQN) && !classSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false),
             TypeFQN = classSymbol.GetFQN()!,
-            TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+            TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode(),
             IsSealed = classSymbol.IsSealed,
+            IsGenericType = classSymbol.IsGenericType,
             IsComponent = classSymbol.InheritsFrom("global::UnityEngine.Component"),
             InterfacesWithAttribute
                 = classSymbol.Interfaces
@@ -127,7 +132,6 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
         if (input.Attribute is TrackAttributeMetadataName)
         {
-            input.EmitIInstanceIndex &= !input.HasIInstanceIndex;
             input.HasIInstanceIndex |= input.EmitIInstanceIndex;
         }
         else
@@ -303,17 +307,32 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 {
                     Line.Append($"return {m}Storage.TransformAccess<{input.TypeFQN}>.Transforms;");
                     Linebreak();
-                    if (input.Symbols.Has(UNITY_EDITOR))
-                        Line.Append("[global::UnityEditor.InitializeOnLoadMethod]");
 
-                    Line.Append("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
-                    Line.Append($"static void {m}Init()");
+                    if (!input.IsGenericType)
+                    {
+                        if (input.Symbols.Has(UNITY_EDITOR))
+                            Line.Append("[global::UnityEditor.InitializeOnLoadMethod]");
 
-                    using (Indent)
-                        Line.Append($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize")
-                            .Append($"({input.AttributeArguments.InitialCapacity}, {input.AttributeArguments.DesiredJobCount});");
+                        Line.Append("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
+                        Line.Append($"static void {m}Init()");
+
+                        using (Indent)
+                            Line.Append($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize")
+                                .Append($"({input.AttributeArguments.InitialCapacity}, {input.AttributeArguments.DesiredJobCount});");
+                    }
                 }
             }
+
+            Linebreak();
+        }
+
+        if (input is { IsGenericType: true, AttributeArguments.TrackTransforms: true })
+        {
+            Line.Append($"public static void InitializeTransformAccessArray()");
+
+            using (Indent)
+                Line.Append($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize")
+                    .Append($"({input.AttributeArguments.InitialCapacity}, {input.AttributeArguments.DesiredJobCount});");
 
             Linebreak();
         }
@@ -379,8 +398,9 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                         Line.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
                         Line.Write($"/// </remarks>");
                         Line.Write($"/// <codegen>Generated because of the following implemented interface: <c>IUnmanagedData&lt;{dataTypeShort}&gt;</c></codegen>");
-                        Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataTypeShort}Array");
                     }
+
+                    Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataTypeShort}Array");
 
                     using (Braces)
                         Line.Write($"{Alias.Inline} get => ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.Array;");
@@ -550,5 +570,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             DecreaseIndent();
             Line.Write('}');
         }
+
+        Linebreak();
     }
 }

@@ -221,7 +221,7 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
 
         return output with
         {
-            Declaration = Utility.DeconstructTypeDeclaration(declSyntax),
+            Declaration = Utility.DeconstructTypeDeclaration(declSyntax, context.SemanticModel, ct),
             WrapperName = wrapperName,
             MethodTextChecksumForCache = context.TargetNode.GetText().GetChecksum(),
             EnumerableFQN = retExprType.ToDisplayString(FullyQualifiedFormat),

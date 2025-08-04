@@ -36,7 +36,7 @@ public sealed class InstanceIndexAnalyzer : DiagnosticAnalyzer
         if (type.TypeKind != TypeKind.Class)
             return;
 
-        if (type.HasInterface(IInstanceIndexInterfaceFQN) && !type.HasAttribute(TrackAttributeFQN))
+        if (type.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false) && !type.HasAttribute(TrackAttributeFQN))
         {
             context.ReportDiagnostic(
                 Diagnostic.Create(

@@ -36,6 +36,8 @@ static class Constants
     public const string IInstanceIndexInterfaceName = "IInstanceIndex";
     public const string IInstanceIndexInterfaceFQN = $"{NamespaceWithGlobal}.{IInstanceIndexInterfaceName}";
 
+    public const string MedicineFindClassFQN = "global::Medicine.Find";
+
     public static class Alias
     {
         // cannot alias to any shortened name because Rider fails to recognize the attribute
@@ -47,7 +49,7 @@ static class Constants
         public const string UsingInline = $"using {m}Inline = global::System.Runtime.CompilerServices.MethodImplAttribute;";
         public const string UsingUtility = $"using {m}Utility = global::Medicine.Internal.Utility;";
         public const string UsingStorage = $"using {m}Storage = global::Medicine.Internal.Storage;";
-        public const string UsingFind = $"using {m}Find = global::Medicine.Find;";
+        public const string UsingFind = $"using {m}Find = {MedicineFindClassFQN};";
         public const string UsingDebug = $"using {m}Debug = global::UnityEngine.Debug;";
     }
 }

@@ -112,6 +112,7 @@ public abstract class BaseSourceGenerator
             }
 
             // handle errors/exceptions
+            try
             {
                 context.ReportDiagnostic(
                     Diagnostic.Create(
@@ -123,6 +124,16 @@ public abstract class BaseSourceGenerator
 
                 string filename = input.SourceGeneratorOutputFilename ?? GetErrorOutputFilename(input.SourceGeneratorErrorLocation, error);
                 AddOutputSourceTextToCompilation(filename, context);
+            }
+            catch (Exception exception)
+            {
+                context.ReportDiagnostic(
+                    Diagnostic.Create(
+                        ExceptionDiagnosticDescriptor,
+                        Location.None,
+                        $"{exception}"
+                    )
+                );
             }
         };
 

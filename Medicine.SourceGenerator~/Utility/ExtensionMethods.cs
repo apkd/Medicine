@@ -9,7 +9,6 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static System.StringComparison;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 
-
 [EditorBrowsable(EditorBrowsableState.Never)]
 [SuppressMessage("ReSharper", "MemberCanBePrivate.Global")]
 public static partial class ExtensionMethods
@@ -97,7 +96,7 @@ public static partial class ExtensionMethods
                 // fully qualify other names
                 SimpleNameSyntax nameSyntax
                     => SyntaxFactory.IdentifierName(
-                        semanticModel.GetSymbolInfo(original, ct).Symbol?.ToDisplayString(FullyQualifiedFormat) ?? nameSyntax.Identifier.ValueText
+                        semanticModel.GetSymbolInfo(original, ct).Symbol?.GetFQN() ?? nameSyntax.Identifier.ValueText
                     ),
 
                 _ => rewritten,
@@ -116,8 +115,14 @@ public static partial class ExtensionMethods
         }
     }
 
-    public static bool IsDefined(this SemanticModel semanticModel, string symbolName)
-        => semanticModel.SyntaxTree.Options.PreprocessorSymbolNames.Contains(symbolName);
+    public static SyntaxNode WithFullyQualitiedReferences(this SyntaxNode node, SemanticModel semanticModel, CancellationToken ct)
+        => node.ReplaceNodes(
+            nodes: node.DescendantNodesAndSelf(),
+            computeReplacementNode: (original, rewritten)
+                => rewritten is SimpleNameSyntax && semanticModel.GetSymbolInfo(original, ct).Symbol?.GetFQN() is { } qualifiedName
+                    ? SyntaxFactory.IdentifierName(qualifiedName)
+                    : rewritten
+        );
 
     public static IEnumerable<ITypeSymbol> GetBaseTypes(this ITypeSymbol? self)
         => self != null ? self.SelectRecursive(x => x.BaseType) : [];
@@ -143,8 +148,8 @@ public static partial class ExtensionMethods
     public static AttributeSyntax? GetAttribute(this MemberDeclarationSyntax? self, Func<string, bool> predicate)
         => self?.AttributeLists.SelectMany(x => x.Attributes).FirstOrDefault(x => predicate(x.Name.ToString()));
 
-    public static bool HasInterface(this ITypeSymbol? self, string interfaceFullyQualifiedName)
-        => self?.AllInterfaces.Any(x => x.Is(interfaceFullyQualifiedName)) is true;
+    public static bool HasInterface(this ITypeSymbol? self, string interfaceFullyQualifiedName, bool checkAllInterfaces = true)
+        => (checkAllInterfaces ? self?.AllInterfaces : self?.Interfaces)?.Any(x => x.Is(interfaceFullyQualifiedName)) is true;
 
     public static AttributeConstructorArgumentsDict GetAttributeConstructorArguments(this AttributeData? attributeData)
         => new(attributeData);
