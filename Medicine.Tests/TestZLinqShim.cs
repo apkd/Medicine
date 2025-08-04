@@ -3,6 +3,13 @@ using Medicine.Internal;
 
 public static class TestZLinqShim
 {
+    public static IEnumerable<T> AsValueEnumerable<T>(this T[] enumerable)
+        where T : class
+    {
+        foreach (var value in enumerable)
+            yield return value;
+    }
+
     public static IEnumerable<T> AsValueEnumerable<T>(this ComponentsInSceneEnumerable<T> enumerable)
         where T : class
     {
