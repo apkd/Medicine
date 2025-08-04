@@ -3,13 +3,12 @@ using ZLinq;
 #endif
 using System;
 using NUnit.Framework;
-using UnityEngine;
-using UnityEngine.SceneManagement;
 using System.Collections.Generic;
 using System.Linq;
 using Medicine;
+using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.Animations;
-using Object = UnityEngine.Object;
 
 public sealed class MedicineExtensionsTests
 {
@@ -17,16 +16,11 @@ public sealed class MedicineExtensionsTests
 
     [SetUp]
     public void Setup()
-    {
-        scene = SceneManager.GetActiveScene();
-    }
+        => scene = SceneManager.GetActiveScene();
 
     [TearDown]
     public void Cleanup()
-    {
-        foreach (var gameObject in scene.GetRootGameObjects())
-            Object.DestroyImmediate(gameObject);
-    }
+        => TestUtility.DestroyAllGameObjects();
 
     static T[] SpawnGameObjectsWith<T>(int count, bool nested = false) where T : Component
     {
