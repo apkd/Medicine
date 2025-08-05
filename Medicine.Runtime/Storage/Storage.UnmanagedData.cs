@@ -67,7 +67,7 @@ namespace Medicine.Internal
                     Debug.LogException(ex);
                 }
 #else
-                instance.Initialize(out var state);
+                instance.Initialize(out state);
 #endif
                 List.Add(state);
                 Array = List.AsArray();
