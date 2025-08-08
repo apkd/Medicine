@@ -182,8 +182,6 @@ public sealed class VersionMigrationFixProvider : CodeFixProvider
             editor.ReplaceNode(originalMethod, methodDecl);
         }
 
-        // No need to rewrite property references for direct access
-
         editor.RemoveNode(property);
         if (!classDecl.Modifiers.Any(SyntaxKind.PartialKeyword))
             editor.SetModifiers(classDecl, DeclarationModifiers.From(classSymbol).WithPartial(true));

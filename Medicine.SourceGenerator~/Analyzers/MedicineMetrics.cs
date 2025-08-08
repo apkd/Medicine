@@ -21,17 +21,51 @@ public enum Stat
     FullCompilationTimeMs,
 }
 
+/// <summary>
+/// Implements source generator performance metrics.
+/// This is useful for making sure that incremental generator caching works correctly.
+/// </summary>
+/// <example>
+/// Collection is disabled by default.
+/// To enable, declare an enum like this in your project:
+/// <code>enum ᵐMedicineStats { }</code>
+/// The measured stats will be displayed in a diagnostic message that should pop-up
+/// when you mouse-over this declaration.
+/// </example>
+/// <remarks>
+/// You can use the "Reset stats" quick fix to reset the collected stats, so when you
+/// trigger compilation by a code change, only the stats that you're interested in are shown.
+/// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class MedicineMetrics : DiagnosticAnalyzer
 {
+    // ReSharper disable once MemberCanBePrivate.Global
     public struct StatsReporter
     {
         static readonly Stopwatch stopwatch = new();
 
         public void Report(string? filename, Stat stat, float value)
         {
-            if (filename is not null)
-                Stats[(stat, filename)] = value;
+            if (filename is null)
+                return;
+
+            switch (stat)
+            {
+                case Stat.TransformTimeMs when !shouldResetTransformTime.ContainsKey(filename):
+                    stats.AddOrUpdate((stat, filename), value, (key, previous) => previous + value);
+                    break;
+                case Stat.TransformTimeMs:
+                    shouldResetTransformTime.TryRemove(filename, out _);
+                    goto default;
+                case Stat.SourceGenerationTimeMs:
+                    shouldResetTransformTime.TryAdd(filename, true);
+                    goto default;
+                case Stat.LinesOfCodeGenerated:
+                case Stat.FullCompilationTimeMs:
+                default:
+                    stats[(stat, filename)] = value;
+                    break;
+            }
         }
 
         public void ReportStartCompilation()
@@ -49,9 +83,10 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
         = new();
 #endif
 
-    static readonly ConcurrentDictionary<(Stat Stat, string Filename), float> Stats = new();
+    static readonly ConcurrentDictionary<(Stat Stat, string Filename), float> stats = new();
+    static readonly ConcurrentDictionary<string, bool> shouldResetTransformTime = new();
 
-    public static readonly DiagnosticDescriptor MedicineStatsDiagnosticDescriptor = new(
+    static readonly DiagnosticDescriptor diagnosticDescriptor = new(
         id: nameof(MedicineMetrics),
         title: "Medicine Metrics",
         messageFormat: "'{0}'",
@@ -61,7 +96,7 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
     );
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics
-        => ImmutableArray.Create(MedicineStatsDiagnosticDescriptor);
+        => ImmutableArray.Create(diagnosticDescriptor);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -70,7 +105,8 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
         context.RegisterSyntaxNodeAction(
-            ctx =>
+            syntaxKinds: SyntaxKind.EnumDeclaration,
+            action: ctx =>
             {
                 var prop = (EnumDeclarationSyntax)ctx.Node;
 
@@ -82,13 +118,13 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
                 Reporter = new();
 
                 var summedStats
-                    = Stats
+                    = stats
                         .ToLookup(x => x.Key.Stat, x => x.Value)
                         .ToDictionary(x => x.Key, x => x.Sum());
 
                 string PerFile(Stat stat, string unit = "ms", string format = "0.00")
                 {
-                    var values = Stats
+                    var values = stats
                         .Where(x => x.Key.Stat == stat && x.Value > 0)
                         .OrderByDescending(x => x.Value)
                         .Select(x => $"{x.Key.Filename}: {x.Value.ToString(format)}{unit}")
@@ -115,8 +151,8 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
                      - Total source generation time: {Total(Stat.SourceGenerationTimeMs):0.00}ms {PerFile(Stat.SourceGenerationTimeMs)}
                      """;
 
-                ctx.ReportDiagnostic(Diagnostic.Create(MedicineStatsDiagnosticDescriptor, prop.GetLocation(), statsString));
-            }, SyntaxKind.EnumDeclaration
+                ctx.ReportDiagnostic(Diagnostic.Create(diagnosticDescriptor, prop.GetLocation(), statsString));
+            }
         );
     }
 
@@ -129,8 +165,8 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
                 CodeAction.Create(
                     "Reset stats", token =>
                     {
-                        foreach (var key in Stats.Keys.ToArray())
-                            Stats[key] = 0;
+                        foreach (var key in stats.Keys.ToArray())
+                            stats[key] = 0;
 
                         return Task.FromResult(context.Document);
                     }, nameof(MedicineMetrics)
@@ -144,6 +180,6 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
             => null;
 
         public override ImmutableArray<string> FixableDiagnosticIds
-            => ImmutableArray.Create(MedicineStatsDiagnosticDescriptor.Id);
+            => ImmutableArray.Create(diagnosticDescriptor.Id);
     }
 }

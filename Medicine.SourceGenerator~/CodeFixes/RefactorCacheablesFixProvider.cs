@@ -274,6 +274,4 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
 
         return $"{name}s";
     }
-
-    // Removed initializer utility methods as they are no longer needed with direct property assignments
 }

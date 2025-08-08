@@ -7,8 +7,8 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Editing;
 
 [Shared]
-[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(ComponentEnumerationCodeFixProvider))]
-public sealed class ComponentEnumerationCodeFixProvider : CodeFixProvider
+[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(ComponentEnumerationFixProvider))]
+public sealed class ComponentEnumerationFixProvider : CodeFixProvider
 {
     public override ImmutableArray<string> FixableDiagnosticIds =>
         ImmutableArray.Create(ComponentEnumerationAnalyzer.MED010.Id);

@@ -4,24 +4,23 @@ using static ActivePreprocessorSymbolNames;
 using static Constants;
 
 [Generator]
-public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalGenerator
+public sealed class TrackingSourceGenerator : IIncrementalGenerator
 {
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
         var medicineSettings = context.CompilationProvider
             .Combine(context.ParseOptionsProvider)
-            .Select((x, ct) => new MedicineSettings(x));
+            .Select((x, ct) => new MedicineSettings(x, ct));
 
         foreach (var attributeName in new[] { SingletonAttributeMetadataName, TrackAttributeMetadataName })
         {
-            context.RegisterImplementationSourceOutput(
+            context.RegisterImplementationSourceOutputEx(
                 context.SyntaxProvider
-                    .ForAttributeWithMetadataName(
+                    .ForAttributeWithMetadataNameEx(
                         fullyQualifiedMetadataName: attributeName,
                         predicate: static (node, _) => node is ClassDeclarationSyntax,
-                        transform: WrapTransform((attributeSyntaxContext, ct)
+                        transform: (attributeSyntaxContext, ct)
                             => TransformSyntaxContext(attributeSyntaxContext, ct, attributeName, $"global::Medicine.{attributeName}")
-                        )
                     )
                     .Where(x => x.Attribute is { Length: > 0 })
                     .Combine(medicineSettings)
@@ -32,7 +31,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                             Symbols = x.Right.PreprocessorSymbolNames,
                         }
                     ),
-                WrapGenerateSource<GeneratorInput>(GenerateSource)
+                GenerateSource
             );
         }
     }
@@ -41,7 +40,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
+        public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
 
         public string? Attribute;
         public (bool TrackInstanceIDs, bool TrackTransforms, int InitialCapacity, int DesiredJobCount, bool Manual) AttributeArguments;
@@ -77,7 +76,7 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
             return default;
 
         var attributeArguments = attributeData
-            .GetAttributeConstructorArguments()
+            .GetAttributeConstructorArguments(ct)
             .Select(x => (
                     TrackInstanceIDs: x.Get("instanceIdArray", false),
                     TrackTransforms: x.Get("transformAccessArray", false) && classSymbol.InheritsFrom("global::UnityEngine.MonoBehaviour"),
@@ -89,7 +88,12 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
         return new()
         {
-            SourceGeneratorOutputFilename = GetOutputFilename(typeDeclaration.SyntaxTree.FilePath, typeDeclaration.Identifier.ValueText, attributeName),
+            SourceGeneratorOutputFilename = Utility.GetOutputFilename(
+                filePath: typeDeclaration.SyntaxTree.FilePath,
+                targetFQN: typeDeclaration.Identifier.ValueText,
+                label: attributeName,
+                includeFilename: false
+            ),
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration, context.SemanticModel, ct),
             Attribute = attributeName,
             AttributeArguments = attributeArguments,
@@ -122,13 +126,13 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
         };
     }
 
-    void GenerateSource(SourceProductionContext context, GeneratorInput input)
+    static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
-        Line.Write("#pragma warning disable CS8321 // Local function is declared but never used");
-        Line.Write("#pragma warning disable CS0618 // Type or member is obsolete");
-        Line.Write(Alias.UsingStorage);
-        Line.Write(Alias.UsingInline);
-        Linebreak();
+        src.Line.Write("#pragma warning disable CS8321 // Local function is declared but never used");
+        src.Line.Write("#pragma warning disable CS0618 // Type or member is obsolete");
+        src.Line.Write(Alias.UsingStorage);
+        src.Line.Write(Alias.UsingInline);
+        src.Linebreak();
 
         if (input.Attribute is TrackAttributeMetadataName)
         {
@@ -156,48 +160,48 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
                 if (input.Attribute is TrackAttributeMetadataName)
                 {
                     string active = input.IsComponent ? "(enabled) instances of this component" : "instances of this class";
-                    Line.Write("/// <remarks>");
-                    Line.Write($"/// Active {active} are tracked, and contain additional generated static properties:");
-                    Line.Write($"/// <list type=\"bullet\">");
+                    src.Line.Write("/// <remarks>");
+                    src.Line.Write($"/// Active {active} are tracked, and contain additional generated static properties:");
+                    src.Line.Write($"/// <list type=\"bullet\">");
                     WriteGeneratedArraysComment();
-                    Line.Write($"/// </list>");
+                    src.Line.Write($"/// </list>");
                     if (input.HasIInstanceIndex)
                     {
-                        Line.Write($"/// And the following additional instance properties:");
-                        Line.Write($"/// <list type=\"bullet\">");
-                        Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIndex\"/> property, which is the instance's index into the above arrays </item>");
+                        src.Line.Write($"/// And the following additional instance properties:");
+                        src.Line.Write($"/// <list type=\"bullet\">");
+                        src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIndex\"/> property, which is the instance's index into the above arrays </item>");
                         foreach (var (_, dataTypeShort) in unmanagedDataInfo)
-                            Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Local{dataTypeShort}\"/> per-instance data accessor </item>");
+                            src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Local{dataTypeShort}\"/> per-instance data accessor </item>");
 
-                        Line.Write($"/// </list>");
+                        src.Line.Write($"/// </list>");
                     }
 
-                    Line.Write("/// </remarks>");
+                    src.Line.Write("/// </remarks>");
                 }
                 else if (input.Attribute is SingletonAttributeMetadataName)
                 {
-                    Line.Write("/// <remarks>");
-                    Line.Write($"/// This is a singleton class. The current instance of the singleton can be accessed via the");
-                    Line.Write($"/// generated <see cref=\"{input.TypeDisplayName}.Instance\"/> static property.");
-                    Line.Write("/// </remarks>");
+                    src.Line.Write("/// <remarks>");
+                    src.Line.Write($"/// This is a singleton class. The current instance of the singleton can be accessed via the");
+                    src.Line.Write($"/// generated <see cref=\"{input.TypeDisplayName}.Instance\"/> static property.");
+                    src.Line.Write("/// </remarks>");
                 }
             }
 
-            Line.Write(declarations[i]);
+            src.Line.Write(declarations[i]);
             if (i == lastDeclaration && input.EmitIInstanceIndex)
-                Text.Append($" : {IInstanceIndexInterfaceFQN}");
+                src.Write($" : {IInstanceIndexInterfaceFQN}");
 
-            Line.Write('{');
-            IncreaseIndent();
+            src.Line.Write('{');
+            src.IncreaseIndent();
         }
 
         void EmitRegistrationMethod(string methodName, params string?[] methodCalls)
         {
             if (!input.AttributeArguments.Manual)
             {
-                Line.Write(Alias.Hidden);
-                Line.Write(Alias.ObsoleteInternal);
-                Line.Write($"{@protected}{@new}void {methodName}()");
+                src.Line.Write(Alias.Hidden);
+                src.Line.Write(Alias.ObsoleteInternal);
+                src.Line.Write($"{@protected}{@new}void {methodName}()");
             }
             else
             {
@@ -208,257 +212,260 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
                 if (input.Symbols.Has(UNITY_EDITOR))
                 {
-                    Line.Write($"/// <summary>");
-                    Line.Write($"/// Manually {(register ? "registers" : "unregisters")} this instance {(register ? "in" : "from")} the <c>{input.Attribute}</c> storage.");
-                    Line.Write($"/// </summary>");
-                    Line.Write($"/// <remarks>");
-                    Line.Write($"/// You <b>must ensure</b> that the instance always registers and unregisters itself symmetrically.");
-                    Line.Write($"/// This is usually achieved by hooking into reliable object lifecycle methods, such as <c>OnEnable</c>+<c>OnDisable</c>,");
-                    Line.Write($"/// or <c>Awake</c>+<c>OnDestroy</c>. Make sure the registration methods are never stopped by an earlier exception.");
-                    Line.Write($"/// </remarks>");
+                    src.Line.Write($"/// <summary>");
+                    src.Line.Write($"/// Manually {(register ? "registers" : "unregisters")} this instance {(register ? "in" : "from")} the <c>{input.Attribute}</c> storage.");
+                    src.Line.Write($"/// </summary>");
+                    src.Line.Write($"/// <remarks>");
+                    src.Line.Write($"/// You <b>must ensure</b> that the instance always registers and unregisters itself symmetrically.");
+                    src.Line.Write($"/// This is usually achieved by hooking into reliable object lifecycle methods, such as <c>OnEnable</c>+<c>OnDisable</c>,");
+                    src.Line.Write($"/// or <c>Awake</c>+<c>OnDestroy</c>. Make sure the registration methods are never stopped by an earlier exception.");
+                    src.Line.Write($"/// </remarks>");
                 }
 
-                Line.Write($"{@protected}{@new}void {methodName}()");
+                src.Line.Write($"{@protected}{@new}void {methodName}()");
             }
 
-            using (Braces)
+            using (src.Braces)
             {
                 if (input.HasBaseDeclarationsWithAttribute)
-                    Line.Write($"base.{methodName}();");
+                    src.Line.Write($"base.{methodName}();");
 
                 foreach (var methodCall in methodCalls)
                     if (methodCall is not null)
-                        Line.Write(methodCall).Write(';');
+                        src.Line.Write(methodCall).Write(';');
             }
 
-            Linebreak();
+            src.Linebreak();
         }
 
         void WriteGeneratedArraysComment()
         {
-            Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Instances\"/> tracked instance list </item>");
+            src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Instances\"/> tracked instance list </item>");
 
             if (input.AttributeArguments.TrackInstanceIDs)
-                Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIDs\"/> instance ID array </item>");
+                src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIDs\"/> instance ID array </item>");
 
             if (input.AttributeArguments.TrackTransforms)
-                Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.TransformAccessArray\"/> transform array </item>");
+                src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.TransformAccessArray\"/> transform array </item>");
 
             foreach (var (_, dataTypeShort) in unmanagedDataInfo)
-                Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/> data array </item>");
+                src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/> data array </item>");
         }
 
         if (input.HasIInstanceIndex)
         {
             if (input.Attribute is SingletonAttributeMetadataName)
             {
-                Line.Write($"#error The IInstanceIndex interface is invalid for singleton type {input.TypeDisplayName}.");
+                src.Line.Write($"#error The IInstanceIndex interface is invalid for singleton type {input.TypeDisplayName}.");
             }
             else
             {
                 if (input.Symbols.Has(UNITY_EDITOR))
                 {
-                    Line.Write($"/// <summary>");
-                    Line.Write($"/// Represents the index of this instance in the following static storage arrays:");
-                    Line.Write($"/// <list type=\"bullet\">");
+                    src.Line.Write($"/// <summary>");
+                    src.Line.Write($"/// Represents the index of this instance in the following static storage arrays:");
+                    src.Line.Write($"/// <list type=\"bullet\">");
                     WriteGeneratedArraysComment();
-                    Line.Write($"/// </list>");
-                    Line.Write($"/// </summary>");
-                    Line.Write($"/// <remarks>");
-                    Line.Write($"/// This property is automatically updated.");
-                    Line.Write($"/// Note that the instance index will change during the lifetime of the instance - never store it.");
-                    Line.Write($"/// <br/><br/>");
-                    Line.Write($"/// A value of -1 indicates that the instance is not currently active/registered.");
-                    Line.Write($"/// </remarks>");
+                    src.Line.Write($"/// </list>");
+                    src.Line.Write($"/// </summary>");
+                    src.Line.Write($"/// <remarks>");
+                    src.Line.Write($"/// This property is automatically updated.");
+                    src.Line.Write($"/// Note that the instance index will change during the lifetime of the instance - never store it.");
+                    src.Line.Write($"/// <br/><br/>");
+                    src.Line.Write($"/// A value of -1 indicates that the instance is not currently active/registered.");
+                    src.Line.Write($"/// </remarks>");
                 }
             }
 
-            Line.Write($"public int InstanceIndex => {m}MedicineInternalInstanceIndex;");
-            Linebreak();
+            src.Line.Write($"public int InstanceIndex => {m}MedicineInternalInstanceIndex;");
+            src.Linebreak();
 
-            Line.Write($"int {IInstanceIndexInterfaceFQN}.InstanceIndex");
-            using (Braces)
+            src.Line.Write($"int {IInstanceIndexInterfaceFQN}.InstanceIndex");
+            using (src.Braces)
             {
-                Line.Write($"{Alias.Inline} get => {m}MedicineInternalInstanceIndex;");
-                Line.Write($"{Alias.Inline} set => {m}MedicineInternalInstanceIndex = value;");
+                src.Line.Write($"{Alias.Inline} get => {m}MedicineInternalInstanceIndex;");
+                src.Line.Write($"{Alias.Inline} set => {m}MedicineInternalInstanceIndex = value;");
             }
 
-            Linebreak();
+            src.Linebreak();
 
-            Line.Write(Alias.Hidden);
-            Line.Write($"int {m}MedicineInternalInstanceIndex = -1;");
-            Linebreak();
+            src.Line.Write(Alias.Hidden);
+            src.Line.Write($"int {m}MedicineInternalInstanceIndex = -1;");
+            src.Linebreak();
         }
 
         if (input.AttributeArguments.TrackTransforms)
         {
             if (input.Symbols.Has(UNITY_EDITOR))
             {
-                Line.Write($"/// <summary>");
-                Line.Write($"/// Allows job access to the transforms of the tracked {input.TypeDisplayName} instances.");
-                Line.Write($"/// </summary>");
+                src.Line.Write($"/// <summary>");
+                src.Line.Write($"/// Allows job access to the transforms of the tracked {input.TypeDisplayName} instances.");
+                src.Line.Write($"/// </summary>");
             }
 
-            Line.Write($"{@new}public static global::UnityEngine.Jobs.TransformAccessArray TransformAccessArray");
-            using (Braces)
+            src.Line.Write($"{@new}public static global::UnityEngine.Jobs.TransformAccessArray TransformAccessArray");
+            using (src.Braces)
             {
-                Line.Append(Alias.Inline).Append(" get");
-                using (Braces)
+                src.Line.Write(Alias.Inline).Write(" get");
+                using (src.Braces)
                 {
-                    Line.Append($"return {m}Storage.TransformAccess<{input.TypeFQN}>.Transforms;");
-                    Linebreak();
+                    src.Line.Write($"return {m}Storage.TransformAccess<{input.TypeFQN}>.Transforms;");
+                    src.Linebreak();
 
                     if (!input.IsGenericType)
                     {
                         if (input.Symbols.Has(UNITY_EDITOR))
-                            Line.Append("[global::UnityEditor.InitializeOnLoadMethod]");
+                            src.Line.Write("[global::UnityEditor.InitializeOnLoadMethod]");
 
-                        Line.Append("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
-                        Line.Append($"static void {m}Init()");
+                        src.Line.Write("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
+                        src.Line.Write($"static void {m}Init()");
 
-                        using (Indent)
-                            Line.Append($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize")
-                                .Append($"({input.AttributeArguments.InitialCapacity}, {input.AttributeArguments.DesiredJobCount});");
+                        using (src.Indent)
+                            src.Line.Write($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize")
+                                .Write($"({input.AttributeArguments.InitialCapacity}, {input.AttributeArguments.DesiredJobCount});");
                     }
                 }
             }
 
-            Linebreak();
+            src.Linebreak();
         }
 
         if (input is { IsGenericType: true, AttributeArguments.TrackTransforms: true })
         {
-            Line.Append($"public static void InitializeTransformAccessArray()");
+            src.Line.Write($"public static void InitializeTransformAccessArray()");
 
-            using (Indent)
-                Line.Append($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize")
-                    .Append($"({input.AttributeArguments.InitialCapacity}, {input.AttributeArguments.DesiredJobCount});");
+            using (src.Indent)
+            {
+                src.Line
+                    .Write($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize")
+                    .Write($"({input.AttributeArguments.InitialCapacity}, {input.AttributeArguments.DesiredJobCount});");
+            }
 
-            Linebreak();
+            src.Linebreak();
         }
 
         if (input.AttributeArguments.TrackInstanceIDs)
         {
             if (input.Symbols.Has(UNITY_EDITOR))
             {
-                Line.Write($"/// <summary>");
-                Line.Write($"/// Gets an array of instance IDs for the tracked type's enabled instances.");
-                Line.Write($"/// </summary>");
-                Line.Write($"/// <seealso href=\"https://docs.unity3d.com/ScriptReference/Resources.InstanceIDToObjectList.html\">Resources.InstanceIDToObjectList</seealso>");
-                Line.Write($"/// <remarks>");
-                Line.Write($"/// The instance IDs can be used to refer to tracked objects in unmanaged contexts, e.g.,");
-                Line.Write($"/// jobs and Burst-compiled functions.");
-                Line.Write($"/// <list type=\"bullet\">");
-                Line.Write($"/// <item>Requires the <c>[Track(instanceIDs: true)]</c> attribute parameter to be set.</item>");
-                Line.Write($"/// <item>The order of instance IDs will correspond to the order of tracked transforms.</item>");
-                Line.Write($"/// </list>");
-                Line.Write($"/// </remarks>");
+                src.Line.Write($"/// <summary>");
+                src.Line.Write($"/// Gets an array of instance IDs for the tracked type's enabled instances.");
+                src.Line.Write($"/// </summary>");
+                src.Line.Write($"/// <seealso href=\"https://docs.unity3d.com/ScriptReference/Resources.InstanceIDToObjectList.html\">Resources.InstanceIDToObjectList</seealso>");
+                src.Line.Write($"/// <remarks>");
+                src.Line.Write($"/// The instance IDs can be used to refer to tracked objects in unmanaged contexts, e.g.,");
+                src.Line.Write($"/// jobs and Burst-compiled functions.");
+                src.Line.Write($"/// <list type=\"bullet\">");
+                src.Line.Write($"/// <item>Requires the <c>[Track(instanceIDs: true)]</c> attribute parameter to be set.</item>");
+                src.Line.Write($"/// <item>The order of instance IDs will correspond to the order of tracked transforms.</item>");
+                src.Line.Write($"/// </list>");
+                src.Line.Write($"/// </remarks>");
             }
 
-            Line.Write($"{@new}public static global::Unity.Collections.NativeArray<int> InstanceIDs");
-            using (Braces)
-                Line.Write(Alias.Inline).Write($" get => {m}Storage.InstanceIDs<{input.TypeFQN}>.List.AsArray();");
+            src.Line.Write($"{@new}public static global::Unity.Collections.NativeArray<int> InstanceIDs");
+            using (src.Braces)
+                src.Line.Write(Alias.Inline).Write($" get => {m}Storage.InstanceIDs<{input.TypeFQN}>.List.AsArray();");
 
-            Linebreak();
+            src.Linebreak();
         }
 
         if (input.UnmanagedDataFQNs.Length > 0)
         {
             if (input.Symbols.Has(UNITY_EDITOR))
             {
-                Line.Write($"/// <summary>");
-                Line.Write($"/// Allows job access to the unmanaged data arrays of the tracked {input.TypeDisplayName} instances");
-                Line.Write($"/// of this component type.");
-                Line.Write($"/// </summary>");
-                Line.Write($"/// <remarks>");
-                Line.Write($"/// The unmanaged data is stored in a <see cref=\"global::Unity.Collections.NativeArray{{T}}\"/>, where each element");
-                Line.Write($"/// corresponds to the tracked instance with the appropriate <see cref=\"Medicine.IInstanceIndex\">instance index</see>.");
-                Line.Write($"/// </remarks>");
+                src.Line.Write($"/// <summary>");
+                src.Line.Write($"/// Allows job access to the unmanaged data arrays of the tracked {input.TypeDisplayName} instances");
+                src.Line.Write($"/// of this component type.");
+                src.Line.Write($"/// </summary>");
+                src.Line.Write($"/// <remarks>");
+                src.Line.Write($"/// The unmanaged data is stored in a <see cref=\"global::Unity.Collections.NativeArray{{T}}\"/>, where each element");
+                src.Line.Write($"/// corresponds to the tracked instance with the appropriate <see cref=\"Medicine.IInstanceIndex\">instance index</see>.");
+                src.Line.Write($"/// </remarks>");
                 string s = input.UnmanagedDataFQNs.Length > 1 ? "s" : "";
                 string origin = unmanagedDataInfo.Select(x => $"<c>IUnmanagedData&lt;{x.dataTypeShort}&gt;</c>").Join(", ");
-                Line.Write($"/// <codegen>Generated because of the implemented interface{s}: {origin}</codegen>");
+                src.Line.Write($"/// <codegen>Generated because of the implemented interface{s}: {origin}</codegen>");
             }
 
-            Line.Write($"public static class Unmanaged");
-            using (Braces)
+            src.Line.Write($"public static class Unmanaged");
+            using (src.Braces)
             {
                 foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
                 {
-                    Linebreak();
+                    src.Linebreak();
                     if (input.Symbols.Has(UNITY_EDITOR))
                     {
-                        Line.Write($"/// <summary>");
-                        Line.Write($"/// Gets an array of <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instances.");
-                        Line.Write($"/// You can use this array in jobs or Burst-compiled functions.");
-                        Line.Write($"/// </summary>");
-                        Line.Write($"/// <remarks>");
-                        Line.Write($"/// Each element in the native array corresponds to the tracked instance with the appropriate instance index.");
-                        Line.Write($"/// Implementing the <see cref=\"Medicine.IInstanceIndex\"/> interface will generate a property that lets each");
-                        Line.Write($"/// instance access its own data. Otherwise, you can access the data statically via this array, and");
-                        Line.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
-                        Line.Write($"/// </remarks>");
-                        Line.Write($"/// <codegen>Generated because of the following implemented interface: <c>IUnmanagedData&lt;{dataTypeShort}&gt;</c></codegen>");
+                        src.Line.Write($"/// <summary>");
+                        src.Line.Write($"/// Gets an array of <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instances.");
+                        src.Line.Write($"/// You can use this array in jobs or Burst-compiled functions.");
+                        src.Line.Write($"/// </summary>");
+                        src.Line.Write($"/// <remarks>");
+                        src.Line.Write($"/// Each element in the native array corresponds to the tracked instance with the appropriate instance index.");
+                        src.Line.Write($"/// Implementing the <see cref=\"Medicine.IInstanceIndex\"/> interface will generate a property that lets each");
+                        src.Line.Write($"/// instance access its own data. Otherwise, you can access the data statically via this array, and");
+                        src.Line.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
+                        src.Line.Write($"/// </remarks>");
+                        src.Line.Write($"/// <codegen>Generated because of the following implemented interface: <c>IUnmanagedData&lt;{dataTypeShort}&gt;</c></codegen>");
                     }
 
-                    Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataTypeShort}Array");
+                    src.Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataTypeShort}Array");
 
-                    using (Braces)
-                        Line.Write($"{Alias.Inline} get => ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.Array;");
+                    using (src.Braces)
+                        src.Line.Write($"{Alias.Inline} get => ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.Array;");
                 }
             }
 
             if (input.HasIInstanceIndex)
             {
-                Linebreak();
+                src.Linebreak();
                 foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
                 {
-                    Linebreak();
+                    src.Linebreak();
                     if (input.Symbols.Has(UNITY_EDITOR))
                     {
-                        Line.Write($"/// <summary>");
-                        Line.Write($"/// Gets a reference to the <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instance.");
-                        Line.Write($"/// You can use this reference in jobs or Burst-compiled functions.");
-                        Line.Write($"/// </summary>");
-                        Line.Write($"/// <remarks>");
-                        Line.Write($"/// The reference corresponds to the tracked instance with the appropriate instance index.");
-                        Line.Write($"/// Implementing the <see cref=\"Medicine.IInstanceIndex\"/> interface will generate a property that lets each");
-                        Line.Write($"/// instance access its own data. Otherwise, you can access the data statically via this array, and");
-                        Line.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
+                        src.Line.Write($"/// <summary>");
+                        src.Line.Write($"/// Gets a reference to the <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instance.");
+                        src.Line.Write($"/// You can use this reference in jobs or Burst-compiled functions.");
+                        src.Line.Write($"/// </summary>");
+                        src.Line.Write($"/// <remarks>");
+                        src.Line.Write($"/// The reference corresponds to the tracked instance with the appropriate instance index.");
+                        src.Line.Write($"/// Implementing the <see cref=\"Medicine.IInstanceIndex\"/> interface will generate a property that lets each");
+                        src.Line.Write($"/// instance access its own data. Otherwise, you can access the data statically via this array, and");
+                        src.Line.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
                     }
 
-                    Line.Write($"public ref {dataType} Local{dataTypeShort}");
+                    src.Line.Write($"public ref {dataType} Local{dataTypeShort}");
 
-                    using (Braces)
+                    using (src.Braces)
                     {
-                        Line.Write($"{Alias.Inline} get");
-                        using (Indent)
-                            Line.Write($"=> ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.ElementAtRefRW({m}MedicineInternalInstanceIndex);");
+                        src.Line.Write($"{Alias.Inline} get");
+                        using (src.Indent)
+                            src.Line.Write($"=> ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.ElementAtRefRW({m}MedicineInternalInstanceIndex);");
                     }
                 }
             }
 
-            Linebreak();
+            src.Linebreak();
         }
 
         if (input.TrackingIdFQNs is { Length: > 0 })
         {
             foreach (var idType in input.TrackingIdFQNs)
             {
-                Line.Write(Alias.Inline);
-                Line.Write($"public static {input.TypeFQN}? FindByID({idType} id)");
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public static {input.TypeFQN}? FindByID({idType} id)");
 
-                using (Indent)
-                    Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Map.TryGetValue(id, out var result) ? result : null;");
+                using (src.Indent)
+                    src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Map.TryGetValue(id, out var result) ? result : null;");
 
-                Linebreak();
+                src.Linebreak();
 
-                Line.Write(Alias.Inline);
-                Line.Write($"public static bool TryFindByID({idType} id, out {input.TypeFQN} result)");
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public static bool TryFindByID({idType} id, out {input.TypeFQN} result)");
 
-                using (Indent)
-                    Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Map.TryGetValue(id, out result);");
+                using (src.Indent)
+                    src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Map.TryGetValue(id, out result);");
 
-                Linebreak();
+                src.Linebreak();
             }
         }
 
@@ -466,69 +473,69 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
         {
             if (input.Symbols.Has(UNITY_EDITOR))
             {
-                Line.Write($"/// <summary>");
-                Line.Write($"/// Retrieves the active <see cref=\"{input.TypeDisplayName}\"/> singleton instance.");
-                Line.Write($"/// </summary>");
-                Line.Write($"/// <remarks>");
-                Line.Write($"/// <list type=\"bullet\">");
-                Line.Write($"/// <item> This property <b>might return null</b> if the singleton instance has not been registered yet");
-                Line.Write($"/// (or has been disabled/destroyed). </item>");
-                Line.Write($"/// <item> MonoBehaviours and ScriptableObjects marked with the <see cref=\"SingletonAttribute\"/> will");
-                Line.Write($"/// automatically register/unregister themselves as the active singleton instance in OnEnable/OnDisable. </item>");
-                Line.Write($"/// <item> In edit mode, to provide better compatibility with editor tooling, <c>FindObjectsOfType</c>");
-                Line.Write($"/// is used internally to attempt to locate the object (cached for one editor update). </item>");
-                Line.Write($"/// </list>");
-                Line.Write($"/// </remarks>");
+                src.Line.Write($"/// <summary>");
+                src.Line.Write($"/// Retrieves the active <see cref=\"{input.TypeDisplayName}\"/> singleton instance.");
+                src.Line.Write($"/// </summary>");
+                src.Line.Write($"/// <remarks>");
+                src.Line.Write($"/// <list type=\"bullet\">");
+                src.Line.Write($"/// <item> This property <b>might return null</b> if the singleton instance has not been registered yet");
+                src.Line.Write($"/// (or has been disabled/destroyed). </item>");
+                src.Line.Write($"/// <item> MonoBehaviours and ScriptableObjects marked with the <see cref=\"SingletonAttribute\"/> will");
+                src.Line.Write($"/// automatically register/unregister themselves as the active singleton instance in OnEnable/OnDisable. </item>");
+                src.Line.Write($"/// <item> In edit mode, to provide better compatibility with editor tooling, <c>FindObjectsOfType</c>");
+                src.Line.Write($"/// is used internally to attempt to locate the object (cached for one editor update). </item>");
+                src.Line.Write($"/// </list>");
+                src.Line.Write($"/// </remarks>");
             }
 
-            Line.Write($"public static {input.TypeFQN}? Instance");
+            src.Line.Write($"public static {input.TypeFQN}? Instance");
 
-            using (Braces)
+            using (src.Braces)
             {
-                Line.Write(Alias.Inline);
-                Line.Write($"get => {m}Storage.Singleton<{input.TypeFQN}>.Instance;");
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"get => {m}Storage.Singleton<{input.TypeFQN}>.Instance;");
             }
 
-            Linebreak();
+            src.Linebreak();
             EmitRegistrationMethod("OnEnableINTERNAL", $"{m}Storage.Singleton<{input.TypeFQN}>.Register(this)");
             EmitRegistrationMethod("OnDisableINTERNAL", $"{m}Storage.Singleton<{input.TypeFQN}>.Unregister(this)");
 
             if (input.Symbols.Has(UNITY_EDITOR))
             {
-                Linebreak();
-                Line.Write(Alias.Hidden);
-                Line.Write(Alias.ObsoleteInternal);
-                Line.Write($"int {m}MedicineInvalidateInstanceToken = {m}Storage.Singleton<{input.TypeFQN}>.EditMode.Invalidate();");
+                src.Linebreak();
+                src.Line.Write(Alias.Hidden);
+                src.Line.Write(Alias.ObsoleteInternal);
+                src.Line.Write($"int {m}MedicineInvalidateInstanceToken = {m}Storage.Singleton<{input.TypeFQN}>.EditMode.Invalidate();");
             }
         }
         else if (input.Attribute is TrackAttributeMetadataName)
         {
             if (input.Symbols.Has(UNITY_EDITOR))
             {
-                Line.Write($"/// <summary>");
-                Line.Write($"/// Allows enumeration of all enabled instances of <see cref=\"{input.TypeDisplayName?.HtmlEncode()}\"/>.");
-                Line.Write($"/// </summary>");
-                Line.Write($"/// <remarks>");
-                Line.Write($"/// <list type=\"bullet\">");
-                Line.Write($"/// <item> MonoBehaviours and ScriptableObjects marked with the <see cref=\"TrackAttribute\"/> will automatically register/unregister themselves");
-                Line.Write($"/// in the active instance list in OnEnable/OnDisable. </item>");
-                Line.Write($"/// <item> This property can return null if the singleton instance doesn't exist or hasn't executed OnEnabled yet. </item>");
-                Line.Write($"/// <item> In edit mode, to provide better compatibility with editor tooling, <see cref=\"Object.FindObjectsByType(System.Type,UnityEngine.FindObjectsSortMode)\"/>");
-                Line.Write($"/// is used internally to find object instances (cached for one editor update). </item>");
-                Line.Write($"/// <item> You can use <c>foreach</c> to iterate over the instances. </item>");
-                Line.Write($"/// <item> If you’re enabling/disabling instances while enumerating, you need to use <c>{input.TypeDisplayName}.Instances.Copied()</c>. </item>");
-                Line.Write($"/// <item> The returned struct is compatible with <a href=\"https://github.com/Cysharp/ZLinq\">ZLINQ</a>. </item>");
-                Line.Write($"/// </list>");
-                Line.Write($"/// </remarks>");
+                src.Line.Write($"/// <summary>");
+                src.Line.Write($"/// Allows enumeration of all enabled instances of <see cref=\"{input.TypeDisplayName?.HtmlEncode()}\"/>.");
+                src.Line.Write($"/// </summary>");
+                src.Line.Write($"/// <remarks>");
+                src.Line.Write($"/// <list type=\"bullet\">");
+                src.Line.Write($"/// <item> MonoBehaviours and ScriptableObjects marked with the <see cref=\"TrackAttribute\"/> will automatically register/unregister themselves");
+                src.Line.Write($"/// in the active instance list in OnEnable/OnDisable. </item>");
+                src.Line.Write($"/// <item> This property can return null if the singleton instance doesn't exist or hasn't executed OnEnabled yet. </item>");
+                src.Line.Write($"/// <item> In edit mode, to provide better compatibility with editor tooling, <see cref=\"Object.FindObjectsByType(System.Type,UnityEngine.FindObjectsSortMode)\"/>");
+                src.Line.Write($"/// is used internally to find object instances (cached for one editor update). </item>");
+                src.Line.Write($"/// <item> You can use <c>foreach</c> to iterate over the instances. </item>");
+                src.Line.Write($"/// <item> If you’re enabling/disabling instances while enumerating, you need to use <c>{input.TypeDisplayName}.Instances.Copied()</c>. </item>");
+                src.Line.Write($"/// <item> The returned struct is compatible with <a href=\"https://github.com/Cysharp/ZLinq\">ZLINQ</a>. </item>");
+                src.Line.Write($"/// </list>");
+                src.Line.Write($"/// </remarks>");
             }
 
-            Line.Write($"public static global::Medicine.Internal.TrackedInstances<{input.TypeFQN}> Instances");
-            using (Braces)
+            src.Line.Write($"public static global::Medicine.Internal.TrackedInstances<{input.TypeFQN}> Instances");
+            using (src.Braces)
             {
-                Line.Write($"{Alias.Inline} get => default;");
+                src.Line.Write($"{Alias.Inline} get => default;");
             }
 
-            Linebreak();
+            src.Linebreak();
             string withId = input.AttributeArguments.TrackInstanceIDs ? "WithInstanceID" : "";
 
             EmitRegistrationMethod(
@@ -557,20 +564,20 @@ public sealed class TrackingSourceGenerator : BaseSourceGenerator, IIncrementalG
 
             if (input.Symbols.Has(UNITY_EDITOR))
             {
-                Linebreak();
-                Line.Write(Alias.Hidden);
-                Line.Write(Alias.ObsoleteInternal);
-                Line.Write($"int {m}MedicineInvalidateInstanceToken = {m}Storage.Instances<{input.TypeFQN}>.EditMode.Invalidate();");
+                src.Linebreak();
+                src.Line.Write(Alias.Hidden);
+                src.Line.Write(Alias.ObsoleteInternal);
+                src.Line.Write($"int {m}MedicineInvalidateInstanceToken = {m}Storage.Instances<{input.TypeFQN}>.EditMode.Invalidate();");
             }
         }
 
-        TrimEndWhitespace();
+        src.TrimEndWhitespace();
         foreach (var _ in declarations)
         {
-            DecreaseIndent();
-            Line.Write('}');
+            src.DecreaseIndent();
+            src.Line.Write('}');
         }
 
-        Linebreak();
+        src.Linebreak();
     }
 }

@@ -152,9 +152,21 @@ namespace Medicine
     public sealed class DisallowReadonlyAttribute : Attribute { }
 
     /// <summary>
-    /// Tags the assembly for generation of a Constants class, containing various
-    /// project constants extracted from the TagManager.asset file.
+    /// Marks the assembly for generation of a <see cref="Medicine.Constants"/> class,
+    /// containing various project constants extracted from the TagManager.asset file,
+    /// such as layers and tags.
     /// </summary>
+    /// <example>
+    /// To enable this feature, put the attribute at the top of a file in your assembly:
+    /// <code>[assembly: Medicine.GenerateUnityConstants]</code>
+    /// Then you can reference the generated class, e.g.
+    /// <code>
+    /// using Medicine;
+    /// ...
+    /// gameObject.layer = Constants.Layers.Ground;
+    /// bool hasTag = Constants.Tags.
+    /// </code>
+    /// </example>
     [AttributeUsage(Assembly)]
     public sealed class GenerateUnityConstantsAttribute : Attribute { }
 

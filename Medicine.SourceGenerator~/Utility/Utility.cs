@@ -7,6 +7,66 @@ using Microsoft.CodeAnalysis.Editing;
 
 public static class Utility
 {
+    public static readonly DiagnosticDescriptor ExceptionDiagnosticDescriptor = new(
+        id: "MED911",
+        title: "Exception",
+        messageFormat: "Exception: {0}",
+        category: "Exception",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
+    public static string GetErrorOutputFilename(Location? location, string error)
+    {
+        string filename = Path.GetFileNameWithoutExtension(location?.SourceTree?.FilePath) ?? "Unknown";
+        string result = $"{filename}.Exception.{Hash():x8}.g.cs";
+        return result;
+
+        int Hash()
+        {
+            unchecked
+            {
+                int hash = 23;
+
+                foreach (char c in error)
+                    hash = hash * 31 + c;
+
+                foreach (char c in filename)
+                    hash = hash * 31 + c;
+
+                return hash;
+            }
+        }
+    }
+
+    public static string GetOutputFilename(string filePath, string targetFQN, string label, bool includeFilename = true)
+    {
+        string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(filePath);
+        string typename = new string(targetFQN.Select(x => char.IsLetterOrDigit(x) ? x : '_').ToArray());
+
+        var result = includeFilename
+            ? $"{fileNameWithoutExtension}.{typename}.{label}.{Hash():x8}.g.cs"
+            : $"{typename}.{label}.{Hash():x8}.g.cs";;
+
+        return result;
+
+        int Hash()
+        {
+            unchecked
+            {
+                int hash = 23;
+
+                foreach (char c in fileNameWithoutExtension)
+                    hash = hash * 31 + c;
+
+                foreach (char c in targetFQN)
+                    hash = hash * 31 + c;
+
+                return hash;
+            }
+        }
+    }
+
     public static unsafe string MakeString(this ReadOnlySpan<char> chars)
     {
         var ptr = (char*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(chars));
@@ -30,11 +90,15 @@ public static class Utility
         editor.InsertAfter(usings.Last(), usingDirective);
     }
 
+    /// <summary>
+    /// Deconstructs a type declaration and retrieves its namespace and parent type hierarchy.
+    /// </summary>
     public static EquatableArray<string> DeconstructTypeDeclaration(
         MemberDeclarationSyntax memberDeclarationSyntax,
         SemanticModel semanticModel,
         CancellationToken ct,
-        string? extraInterfaces = null)
+        string? extraInterfaces = null
+    )
     {
         IEnumerable<string> Walk(MemberDeclarationSyntax? syntax)
         {

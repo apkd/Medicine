@@ -25,7 +25,10 @@ static class Constants
     public const string WrapValueEnumerableAttributeMetadataName = $"{Namespace}.{WrapValueEnumerableAttributeName}";
     public const string WrapValueEnumerableAttributeFQN = $"{NamespaceWithGlobal}.{WrapValueEnumerableAttributeName}";
 
-    public const string GenerateConstantsAttributeFQN = $"{NamespaceWithGlobal}.GenerateUnityConstantsAttribute";
+    public const string GenerateConstantsAttributeNameShort = "GenerateUnityConstants";
+    public const string GenerateConstantsAttributeName = $"{GenerateConstantsAttributeNameShort}Attribute";
+    public const string GenerateConstantsAttributeMetadataName = $"{Namespace}.{GenerateConstantsAttributeName}";
+    public const string GenerateConstantsAttributeFQN = $"{NamespaceWithGlobal}.{GenerateConstantsAttributeName}";
 
     public const string UnmanagedDataInterfaceName = "IUnmanagedData";
     public const string UnmanagedDataInterfaceFQN = $"{NamespaceWithGlobal}.{UnmanagedDataInterfaceName}";

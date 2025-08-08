@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -13,15 +12,6 @@ using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 [SuppressMessage("ReSharper", "MemberCanBePrivate.Global")]
 public static partial class ExtensionMethods
 {
-    public static StringBuilder Write(this StringBuilder self, [InterpolatedStringHandlerArgument(nameof(self))] StringBuilderInterpolatedString value)
-        => self;
-
-    public static StringBuilder Write(this StringBuilder self, string? text)
-        => self.Append(text);
-
-    public static StringBuilder Write(this StringBuilder self, char character)
-        => self.Append(character);
-
     public static string Join(this IEnumerable<string> self, string separator)
         => string.Join(separator, self);
 
@@ -151,96 +141,8 @@ public static partial class ExtensionMethods
     public static bool HasInterface(this ITypeSymbol? self, string interfaceFullyQualifiedName, bool checkAllInterfaces = true)
         => (checkAllInterfaces ? self?.AllInterfaces : self?.Interfaces)?.Any(x => x.Is(interfaceFullyQualifiedName)) is true;
 
-    public static AttributeConstructorArgumentsDict GetAttributeConstructorArguments(this AttributeData? attributeData)
-        => new(attributeData);
-}
-
-public readonly struct AttributeConstructorArgumentsDict
-{
-    readonly Dictionary<string, object> values = new(StringComparer.Ordinal);
-
-    public AttributeConstructorArgumentsDict(AttributeData? attributeData, CancellationToken ct = default)
-    {
-        try
-        {
-            if (attributeData is null)
-                return;
-
-            var ctor = attributeData.AttributeConstructor ?? throw new("Attribute constructor is null");
-            var ctorParams = ctor.Parameters;
-            var ctorArgs = attributeData.ConstructorArguments;
-
-            // keep only the constructor parameters that the caller actually wrote
-            var explicitOrdinals = GetExplicitConstructorOrdinals(attributeData, ct);
-
-            foreach (int ordinal in explicitOrdinals)
-                if (ctorArgs[ordinal].Value is { } arg)
-                    values[ctorParams[ordinal].Name] = arg;
-
-            // foreach (var namedArg in attributeData.NamedArguments)
-            //     if (namedArg.Value.Value is { } value)
-            //         values[namedArg.Key] = value;
-        }
-        catch (Exception)
-        {
-            // ignored
-        }
-    }
-
-    static IEnumerable<int> GetExplicitConstructorOrdinals(AttributeData attributeData, CancellationToken ct)
-    {
-        var ordinals = new HashSet<int>();
-        try
-        {
-            var parameterSymbols = attributeData.AttributeConstructor!.Parameters;
-
-            if (attributeData.ApplicationSyntaxReference?.GetSyntax(ct) is not AttributeSyntax { ArgumentList: { } argumentList })
-                return ordinals; // metadata-only attribute → syntax unavailable
-
-            int positionalIndex = 0;
-            foreach (var arg in argumentList.Arguments)
-            {
-                // if (arg.NameEquals != null)
-                //     continue;
-
-                if (arg.NameColon != null) // paramName: expr
-                {
-                    var name = arg.NameColon.Name.Identifier.ValueText;
-                    ordinals.Add(parameterSymbols.First(p => p.Name == name).Ordinal);
-                }
-                else // pure positional
-                {
-                    ordinals.Add(positionalIndex);
-                    positionalIndex++;
-                }
-            }
-        }
-        catch (Exception)
-        {
-            // ignored
-        }
-
-        return ordinals;
-    }
-
-    public T? Get<T>(string name, T? defaultValue)
-    {
-        if (values.TryGetValue(name, out var value))
-            if (value is not null)
-                return (T)value;
-
-        return defaultValue;
-    }
-
-    public T? Get<T>(string name, T? defaultValue) where T : struct
-    {
-        if (values.TryGetValue(name, out var value))
-            if (value is T typedValue)
-                return typedValue;
-
-        return defaultValue;
-    }
-
-    public T Select<T>(Func<AttributeConstructorArgumentsDict, T> selector)
-        => selector(this);
+    public static Location? GetLocation(this SyntaxReference? syntaxReference)
+        => syntaxReference is { SyntaxTree: { } tree, Span: { } span }
+            ? Location.Create(tree, span)
+            : null;
 }

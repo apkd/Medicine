@@ -1,9 +1,10 @@
-#nullable enable
-
 using Microsoft.CodeAnalysis;
 using static ActivePreprocessorSymbolNames;
 
-[System.Flags]
+/// <summary>
+/// Represents the active preprocessor symbols defined in the current compilation.
+/// </summary>
+[Flags]
 public enum ActivePreprocessorSymbolNames
 {
     UNITY_EDITOR = 1 << 0,

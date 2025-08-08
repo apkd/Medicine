@@ -9,36 +9,37 @@ using static Microsoft.CodeAnalysis.SpeculativeBindingOption;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 
 [Generator]
-sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncrementalGenerator
+sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 {
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
         var medicineSettings = context.CompilationProvider
             .Combine(context.ParseOptionsProvider)
-            .Select((x, ct) => new MedicineSettings(x));
+            .Select((x, ct) => new MedicineSettings(x, ct));
 
         var wrapRequests =
             context
                 .SyntaxProvider
-                .ForAttributeWithMetadataName(
+                .ForAttributeWithMetadataNameEx(
                     fullyQualifiedMetadataName: WrapValueEnumerableAttributeMetadataName,
                     predicate: static (x, ct) => x is MethodDeclarationSyntax or PropertyDeclarationSyntax,
-                    transform: WrapTransform(TransformForCache)
+                    transform: TransformForCache
                 )
-                .Select(WrapTransform<CacheInput, GeneratorInput>(Transform))
+                .SelectEx(Transform)
                 .Combine(medicineSettings)
                 .Select((x, ct) => x.Left with { Symbols = x.Right.PreprocessorSymbolNames });
 
-        context.RegisterSourceOutput(wrapRequests, WrapGenerateSource<GeneratorInput>(GenerateSource));
+        context.RegisterSourceOutputEx(wrapRequests, GenerateSource);
     }
 
     [SuppressMessage("ReSharper", "NotAccessedPositionalProperty.Local")]
-    record struct CacheInput : IGeneratorTransformOutputWithContext
+    record struct CacheInput : IGeneratorTransformOutput
     {
-        public EquatableIgnore<GeneratorAttributeSyntaxContext> Context { get; set; }
+        public EquatableIgnore<GeneratorAttributeSyntaxContext> Context { get; init; }
+
         public string? SourceGeneratorOutputFilename { get; set; }
         public string? SourceGeneratorError { get; init; }
-        public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
+        public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
 
         // explicitly avoid regenerating code unless this property has changed.
         // - this generator is fairly slow and can potentially depend on a lot of unpredictable context
@@ -58,7 +59,7 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public EquatableIgnore<Location> SourceGeneratorErrorLocation { get; set; }
+        public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
 
         public EquatableArray<string> Declaration;
         public string? WrapperName;
@@ -73,19 +74,20 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
     }
 
     static readonly string wrapEnumerableExample = """
-        /// [WrapValueEnumerable]
-        /// TestEnumerable1 Test1
-        ///     => Find
-        ///         .Instances<TrackedObject>()
-        ///         .AsValueEnumerable()
-        ///         .Select(z => z)
-        ///         .Zip(MySingleton.Instance.name);
-        ///  
+            /// [WrapValueEnumerable]
+            /// TestEnumerable1 Test1
+            ///     => Find
+            ///         .Instances<TrackedObject>()
+            ///         .AsValueEnumerable()
+            ///         .Select(z => z)
+            ///         .Zip(MySingleton.Instance.name);
+            ///  
         """.Trim()
         .HtmlEncode();
 
-    static GeneratorInput Transform(GeneratorAttributeSyntaxContext context, CancellationToken ct)
+    static GeneratorInput Transform(CacheInput cacheInput, CancellationToken ct)
     {
+        var context = cacheInput.Context.Value;
         ITypeSymbol wrapperType;
         string wrapperName;
         MemberDeclarationSyntax declSyntax;
@@ -149,7 +151,7 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
             return new() { SourceGeneratorError = $"Unexpected symbol type." };
         }
 
-        var outputFilename = GetOutputFilename(declSyntax.SyntaxTree.FilePath, wrapperName, context.TargetSymbol.GetFQN()!);
+        var outputFilename = Utility.GetOutputFilename(declSyntax.SyntaxTree.FilePath, wrapperName, context.TargetSymbol.GetFQN()!);
         var retExpr = GetSymbolRetExpr(context.TargetSymbol);
 
         var output = new GeneratorInput
@@ -233,92 +235,89 @@ sealed class WrapValueEnumerableSourceGenerator : BaseSourceGenerator, IIncremen
         };
     }
 
-    void GenerateSource(SourceProductionContext context, GeneratorInput input)
+    static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
         if (input.GetEnumeratorNamespace is not null)
         {
-            Line.Write($"using {input.GetEnumeratorNamespace};");
-            Linebreak();
+            src.Line.Write($"using {input.GetEnumeratorNamespace};");
+            src.Linebreak();
         }
 
         foreach (var x in input.Declaration.AsSpan())
         {
-            Line.Write(x);
-            Line.Write('{');
-            IncreaseIndent();
+            src.Line.Write(x);
+            src.Line.Write('{');
+            src.IncreaseIndent();
         }
 
         if (input.Symbols.Has(UNITY_EDITOR))
         {
-            Line.Write("/// <summary>");
-            ;
-            Line.Write("/// This is a generated wrapper struct to simplify the name of the combined generic");
-            Line.Write("/// <see cref=\"ZLinq.ValueEnumerable{TE, T}\"/> constructed from a ZLINQ query.");
-            Line.Write("/// This makes it easier to define a method that returns the enumerable.");
-            Line.Write("/// </summary>");
-            Line.Write("/// <example>");
-            Line.Write("/// <code>");
-            Line.Write(wrapEnumerableExample);
-            Line.Write("/// </code>");
-            Line.Write("/// </example>");
+            src.Line.Write("/// <summary>");
+            src.Line.Write("/// This is a generated wrapper struct to simplify the name of the combined generic");
+            src.Line.Write("/// <see cref=\"ZLinq.ValueEnumerable{TE, T}\"/> constructed from a ZLINQ query.");
+            src.Line.Write("/// This makes it easier to define a method that returns the enumerable.");
+            src.Line.Write("/// </summary>");
+            src.Line.Write("/// <example>");
+            src.Line.Write("/// <code>");
+            src.Line.Write(wrapEnumerableExample);
+            src.Line.Write("/// </code>");
+            src.Line.Write("/// </example>");
         }
 
-        Line.Write("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
+        src.Line.Write("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
         string @public = input.IsPublic ? "public " : "";
-        Line.Write($"{@public}readonly struct {input.WrapperName}");
-        using (Indent)
+        src.Line.Write($"{@public}readonly struct {input.WrapperName}");
+        using (src.Indent)
         {
-            Line.Write($": global::ZLinq.IValueEnumerable<");
-            using (Indent)
+            src.Line.Write($": global::ZLinq.IValueEnumerable<");
+            using (src.Indent)
             {
-                Line.Write($"{new LongGenericTypeName(this, input.EnumeratorInnerFQN)},");
-                Line.Write($"{input.ElementTypeFQN}>");
+                src.Line.Write($"{input.EnumeratorInnerFQN:SplitGenericTypeName},");
+                src.Line.Write($"{input.ElementTypeFQN}>");
             }
         }
 
-        using (Braces)
+        using (src.Braces)
         {
-            Line.Write("public");
-            using (Indent)
+            src.Line.Write("public");
+            using (src.Indent)
             {
-                Line.Write($"{new LongGenericTypeName(this, input.EnumerableFQN)} Enumerable {{ get; init; }}");
+                src.Line.Write($"{input.EnumerableFQN:SplitGenericTypeName} Enumerable {{ get; init; }}");
             }
 
-            Linebreak();
-            Line.Write("public");
-            using (Indent)
+            src.Linebreak();
+            src.Line.Write("public");
+            using (src.Indent)
             {
-                Line.Write($"static implicit operator {input.WrapperName}(");
-                using (Indent)
+                src.Line.Write($"static implicit operator {input.WrapperName}(");
+                using (src.Indent)
                 {
-                    Line.Write($"{new LongGenericTypeName(this, input.EnumerableFQN)} enumerable)")
+                    src.Line.Write($"{input.EnumerableFQN:SplitGenericTypeName} enumerable)")
                         .Write(" => new() { Enumerable = enumerable };");
                 }
             }
 
-            Linebreak();
+            src.Linebreak();
 
-            Line.Write("public");
-            using (Indent)
+            src.Line.Write("public");
+            using (src.Indent)
             {
-                Line.Write($"{new LongGenericTypeName(this, input.EnumeratorFQN)} GetEnumerator()")
-                    .Write(" => Enumerable.GetEnumerator();");
+                src.Line.Write($"{input.EnumeratorFQN:SplitGenericTypeName} GetEnumerator() => Enumerable.GetEnumerator();");
             }
 
-            Linebreak();
+            src.Linebreak();
 
-            Line.Write("public");
-            using (Indent)
+            src.Line.Write("public");
+            using (src.Indent)
             {
-                Line.Write($"{new LongGenericTypeName(this, input.EnumerableFQN)} AsValueEnumerable()")
-                    .Write(" => Enumerable;");
+                src.Line.Write($"{input.EnumerableFQN:SplitGenericTypeName} AsValueEnumerable() => Enumerable;");
             }
         }
 
         foreach (var x in input.Declaration.AsSpan())
         {
-            DecreaseIndent();
-            Line.Write('}');
+            src.DecreaseIndent();
+            src.Line.Write('}');
         }
     }
 
