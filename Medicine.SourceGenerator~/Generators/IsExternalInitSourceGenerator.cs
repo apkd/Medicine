@@ -36,8 +36,7 @@ public sealed class IsExternalInitSourceGenerator : IIncrementalGenerator
         context.RegisterSourceOutput(
             source: context
                 .CompilationProvider
-                .Select((compilation, _) => new EquatableIgnore<Compilation>(compilation))
-                .Select((x, _) => x.Value.Assembly.GetTypeByMetadataName(isExternalInitFQN) != null),
+                .Select((compilation, _) => compilation.Assembly.GetTypeByMetadataName(isExternalInitFQN) != null),
             action: (sourceContext, isExternalInitDefined) =>
             {
                 if (isExternalInitDefined)
