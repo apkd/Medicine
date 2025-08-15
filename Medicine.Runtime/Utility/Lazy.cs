@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Runtime.CompilerServices;
 using Unity.Collections.LowLevel.Unsafe;
@@ -89,7 +90,7 @@ namespace Medicine
     public struct LazyVal<T> where T : struct
     {
         T obj;
-        Func<T> init;
+        Func<T>? init;
 
         /// <param name="lazy">The delegate used to lazily initialize the struct value.</param>
         public LazyVal(Func<T> lazy)
