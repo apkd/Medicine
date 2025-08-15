@@ -1,4 +1,4 @@
-#if UNITY_OLDER_THAN_2022_3_45f1 || (UNITY_2023_1_OR_NEWER && !UNITY_2023_3_OR_NEWER)
+#if UNITY_OLDER_THAN_2022_3_45f1 || (UNITY_2023_1_OR_NEWER && !UNITY_6000_0_OR_NEWER)
 using System;
 using static System.AttributeTargets;
 
