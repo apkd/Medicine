@@ -16,7 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      IMAGE_TAG: ghcr.io/${{ github.repository }}/unity-ci:${{ github.sha }}-${{ matrix.UNITY_VERSION }}
       IMAGE_OPT: oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
       PROJECT: /MedicineCI
     strategy:
@@ -34,6 +33,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare image tag and package name
+        run: |
+          REPO='${{ github.repository }}'
+          REPO_LC=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
+          REPO_NAME='${{ github.event.repository.name }}'
+          REPO_NAME_LC=$(echo "$REPO_NAME" | tr '[:upper:]' '[:lower:]')
+          echo "REPO_LC=$REPO_LC" >> "$GITHUB_ENV"
+          echo "REPO_NAME_LC=$REPO_NAME_LC" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=ghcr.io/$REPO_LC/unity-ci:${{ github.sha }}-${{ matrix.UNITY_VERSION }}" >> "$GITHUB_ENV"
 
       - uses: docker/build-push-action@v6
         env:
@@ -61,7 +70,7 @@ jobs:
       - uses: actions/delete-package-versions@v5
         with:
           owner: ${{ github.repository_owner }}
-          package-name: ${{ github.event.repository.name }}/unity-ci
+          package-name: ${{ env.REPO_NAME_LC }}/unity-ci
           package-type: container
           delete-only-untagged-versions: false
           min-versions-to-keep: 32
