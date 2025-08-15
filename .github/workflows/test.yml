@@ -1,4 +1,4 @@
-name: Test
+name: Tests
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      IMAGE_OPT: oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
+      IMAGE_OPT: oci-mediatypes=true,compression=zstd,compression-level=20,force-compression=true
       PROJECT: /MedicineCI
     strategy:
       fail-fast: false
@@ -60,7 +60,7 @@ jobs:
           outputs: |
             type=docker
           cache-from: type=registry,ref=${{ env.CACHE_REF }}
-          cache-to: type=registry,ref=${{ env.CACHE_REF }},mode=max
+          cache-to: type=registry,ref=${{ env.CACHE_REF }},mode=min
 
       - name: Prepare secrets and license dir
         run: |
