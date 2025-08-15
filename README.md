@@ -1,5 +1,6 @@
-Medicine ***v3***
+Medicine ***v3*** 
 =================
+[![Test](https://github.com/apkd/Medicine/actions/workflows/test.yml/badge.svg?branch=master&event=push)](https://github.com/apkd/Medicine/actions/workflows/test.yml)
 
 ### ***Medicine*** is a collection of tools for working with components in Unity.
 
@@ -88,8 +89,9 @@ How to install
 --------------
 Compatibility: ***Unity 2022.3 or newer***
 
-Open "Add package from git URL" in the Unity Package Manager and paste the repository URL:
-##### `https://github.com/apkd/Medicine.git`
+Open "Add package from git URL" in the Unity Package Manager and paste the repository URL.
+To install from the `release` branch (only bumped when all automated tests pass):
+##### `https://github.com/apkd/Medicine.git#release`
 
 Optional dependencies:
 - [ZLinq](https://github.com/Cysharp/ZLinq)
