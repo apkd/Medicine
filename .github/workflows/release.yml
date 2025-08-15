@@ -1,0 +1,302 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_level:
+        description: "Version increment level"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: minor
+  workflow_run:
+    workflows: ["Test"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    if: >
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    env:
+      PACKAGE_JSON: package.json
+
+    steps:
+      - name: Resolve target
+        id: target
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            echo "ref=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "sha=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.sha || steps.target.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Establish baseline
+        id: base
+        shell: bash
+        run: |
+          if [[ -n "${{ steps.target.outputs.sha }}" ]]; then
+            echo "sha=${{ steps.target.outputs.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "ref=${{ steps.target.outputs.ref }}" >> "$GITHUB_OUTPUT"
+
+      - name: Cancel if branch advanced
+        id: guard
+        shell: bash
+        run: |
+          ref="${{ steps.base.outputs.ref }}"
+          git fetch origin "$ref" --quiet
+          remote_sha="$(git rev-parse "origin/$ref")"
+          base_sha="${{ steps.base.outputs.sha }}"
+          if [[ "$remote_sha" != "$base_sha" ]]; then
+            echo "::notice::Remote branch '$ref' advanced from $base_sha to $remote_sha; cancelling release."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skipping release due to new commits
+        if: steps.guard.outputs.changed == 'true'
+        shell: bash
+        run: |
+          {
+            echo "### Release skipped"
+            echo
+            echo "The branch has advanced after the workflow was started."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Get previous tag
+        if: steps.guard.outputs.changed == 'false'
+        id: prev
+        shell: bash
+        run: |
+          prev_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          echo "tag=$prev_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Read bump level
+        if: steps.guard.outputs.changed == 'false'
+        id: bump
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "level=${{ inputs.bump_level }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "level=patch" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Selected bump level: ${{ steps.bump.outputs.level }}"
+
+      - name: Bump package.json
+        if: steps.guard.outputs.changed == 'false'
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$PACKAGE_JSON" ]; then
+            echo "Package file not found at: $PACKAGE_JSON"
+            exit 1
+          fi
+
+          current="$(jq -r '.version' "$PACKAGE_JSON")"
+          if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version '$current' is not SemVer (x.y.z)"
+            exit 1
+          fi
+
+          IFS='.' read -r major minor patch <<<"$current"
+
+          level="${{ steps.bump.outputs.level }}"
+          case "$level" in
+            major)
+              major=$((major+1)); minor=0; patch=0
+              ;;
+            minor)
+              minor=$((minor+1)); patch=0
+              ;;
+            patch)
+              patch=$((patch+1))
+              ;;
+            *)
+              echo "Unsupported bump level: '$level' (expected: major|minor|patch)"
+              exit 1
+              ;;
+          esac
+
+          new="$major.$minor.$patch"
+
+          if [[ "$new" == "$current" ]]; then
+            echo "Version unchanged; nothing to do."
+            exit 0
+          fi
+
+          tmp="$PACKAGE_JSON.tmp"
+          jq --arg v "$new" '.version=$v' "$PACKAGE_JSON" > "$tmp"
+          mv "$tmp" "$PACKAGE_JSON"
+
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and tag
+        if: steps.guard.outputs.changed == 'false' && steps.ver.outputs.new != ''
+        id: push
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "pushed=false" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$PACKAGE_JSON"
+          git commit -m "Medicine ${{ steps.ver.outputs.new }} [release] [skip ci]"
+
+          ref="${{ steps.base.outputs.ref }}"
+          base_sha="${{ steps.base.outputs.sha }}"
+          git fetch origin "$ref" --quiet
+          remote_sha="$(git rev-parse "origin/$ref")"
+
+          if [[ "$remote_sha" != "$base_sha" ]]; then
+            echo "::notice::Remote branch '$ref' advanced to $remote_sha; cancelling release."
+            exit 0
+          fi
+
+          if ! git push origin "HEAD:${{ steps.target.outputs.ref }}"; then
+            echo "::notice::Non-fast-forward push rejected; cancelling release."
+            exit 0
+          fi
+
+          git tag "v${{ steps.ver.outputs.new }}"
+          git push origin "v${{ steps.ver.outputs.new }}"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        if: steps.ver.outputs.new != '' && steps.push.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.ver.outputs.new }}"
+          prev_tag="${{ steps.prev.outputs.tag }}"
+          ref="${{ steps.target.outputs.ref }}"
+
+          upper="${{ steps.target.outputs.sha }}"
+          if [[ -z "$upper" ]]; then
+            upper="$(git rev-parse HEAD)"
+          fi
+
+          declare -A since=()
+          if [[ -n "${prev_tag:-}" && "$prev_tag" != "$tag" ]]; then
+            while read -r s; do
+              [[ -n "$s" ]] && since["$s"]=1
+            done < <(git rev-list "${prev_tag}..$upper")
+          fi
+
+          notes="release-notes.md"
+          {
+            echo "#### The latest changes that went into this release:"
+            echo
+            echo '| Author | Release | Commit | SHA |'
+            echo '|---|---|---|---|'
+          } > "$notes"
+
+          limit=10
+          count=0
+
+          mapfile -t rel_tags < <(git for-each-ref --sort=creatordate --format='%(refname:short)' refs/tags | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+
+          git log -n 20 "$upper" --pretty=format:%H%x09%s%x09%an%x09%ae | \
+          while IFS=$'\t' read -r sha msg author email; do
+            lc_author="$(printf '%s' "$author" | tr '[:upper:]' '[:lower:]')"
+            lc_email="$(printf '%s' "$email" | tr '[:upper:]' '[:lower:]')"
+            if [[ "$lc_author" == "github-actions[bot]" || "$lc_email" == "41898282+github-actions[bot]@users.noreply.github.com" ]]; then
+              continue
+            fi
+
+            short="${sha:0:7}"
+            msg="${msg//|/\\|}"
+
+            new_prefix=""
+            if [[ -n "${since[$sha]:-}" ]]; then
+              new_prefix="✨ "
+            fi
+
+            info="$(gh api repos/$GITHUB_REPOSITORY/commits/$sha --jq '{email: .commit.author.email, login: (.author.login // .committer.login)}')"
+            login="$(jq -r '.login // empty' <<<"$info")"
+
+            if [[ -n "$login" && "$login" != "null" ]]; then
+              avatar="https://wsrv.nl/?url=github.com/${login}.png&w=48&h=48&mask=circle&fit=cover&maxage=1w"
+            else
+              email_lookup="$(jq -r '.email // empty' <<<"$info" | tr '[:upper:]' '[:lower:]')"
+              if [[ -n "$email_lookup" ]]; then
+                hash="$(printf '%s' "$email_lookup" | md5sum | awk '{print $1}')"
+                base="www.gravatar.com/avatar/$hash?d=identicon"
+              else
+                base="www.gravatar.com/avatar/?d=mp"
+              fi
+              avatar="https://wsrv.nl/?url=${base}&w=48&h=48&mask=circle&fit=cover&maxage=1w"
+            fi
+
+            author_text="$author"
+            author_text="${author_text//|/\\|}"
+
+            if [[ -n "$login" && "$login" != "null" ]]; then
+              author_cell="<a href=\"https://github.com/$login\"><img src=\"$avatar\" width=\"24\" height=\"24\" /></a> @$login"
+            else
+              author_cell="<img src=\"$avatar\" width=\"24\" height=\"24\" /> $author_text"
+            fi
+
+            version="-"
+            for t in "${rel_tags[@]}"; do
+              tcommit="$(git rev-list -n 1 "$t")"
+              if git merge-base --is-ancestor "$sha" "$tcommit"; then
+                version="$t"
+                break
+              fi
+            done
+            version="${new_prefix}${version}"
+
+            printf '| %s | %s | %s | `%s` |\n' "$author_cell" "$version" "$msg" "$short" >> "$notes"
+
+            count=$((count+1))
+            if [[ $count -ge $limit ]]; then
+              break
+            fi
+          done
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; skipping."
+          else
+            gh release create "$tag" --title "$tag" --notes-file "$notes" --target "$ref"
+          fi
+
+          {
+            echo "## $tag"
+            echo
+            cat "$notes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update latest branch
+        if: steps.ver.outputs.new != '' && steps.push.outputs.pushed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push -f origin HEAD:refs/heads/release

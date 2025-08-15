@@ -1,0 +1,108 @@
+name: Test
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  packages: write
+
+jobs:
+  unity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE_TAG: ghcr.io/${{ github.repository }}/unity-ci:${{ github.sha }}-${{ matrix.UNITY_VERSION }}
+      IMAGE_OPT: oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
+      PROJECT: /MedicineCI
+    strategy:
+      fail-fast: false
+      matrix:
+        UNITY_VERSION: [2022.2.21f1, 2022.3.62f1, 2023.2.20f1, 6000.0.55f1, 6000.1.16f1, 6000.2.0f1, 6000.3.0a3]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_SUMMARY: false
+        with:
+          context: .
+          file: ./.github/workflows/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_TAG }}
+          build-args: |
+            UNITY_VERSION=${{ matrix.UNITY_VERSION }}
+            PROJECT=${{ env.PROJECT }}
+          secrets: |
+            unity_serial=${{ secrets.UNITY_SERIAL }}
+            unity_user=${{ secrets.UNITY_USER }}
+            unity_password=${{ secrets.UNITY_PASSWORD }}
+          outputs: |
+            type=registry,${{ env.IMAGE_OPT }}
+            type=docker
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE_TAG }}
+          cache-to: |
+            type=inline
+
+      - uses: actions/delete-package-versions@v5
+        with:
+          owner: ${{ github.repository_owner }}
+          package-name: ${{ github.event.repository.name }}/unity-ci
+          package-type: container
+          delete-only-untagged-versions: false
+          min-versions-to-keep: 32
+
+      - name: Prepare secrets and license dir
+        run: |
+          echo "::add-mask::${{ secrets.UNITY_SERIAL }}"
+          echo "::add-mask::${{ secrets.UNITY_USER }}"
+          masked="${{ secrets.UNITY_SERIAL }}"
+          masked="${masked%????}XXXX"
+          echo "::add-mask::$masked"
+          echo "LIC_DIR=$RUNNER_TEMP/unity-lic" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/unity-lic"
+          mkdir -p "$RUNNER_TEMP/unity-secrets"
+          install -m 600 /dev/null "$RUNNER_TEMP/unity-secrets/unity_serial"
+          install -m 600 /dev/null "$RUNNER_TEMP/unity-secrets/unity_user"
+          install -m 600 /dev/null "$RUNNER_TEMP/unity-secrets/unity_password"
+          printf '%s' '${{ secrets.UNITY_SERIAL }}' > "$RUNNER_TEMP/unity-secrets/unity_serial"
+          printf '%s' '${{ secrets.UNITY_USER }}' > "$RUNNER_TEMP/unity-secrets/unity_user"
+          printf '%s' '${{ secrets.UNITY_PASSWORD }}' > "$RUNNER_TEMP/unity-secrets/unity_password"
+
+      - name: Run tests
+        run: |
+          size_bytes=$(docker image inspect "${{ env.IMAGE_TAG }}" --format='{{.Size}}')
+          size_mib=$(awk -v b="$size_bytes" 'BEGIN{printf "%.2f", b/1024/1024}')
+          echo "Docker image size: ${size_mib} MiB"
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:$PROJECT/Packages/Medicine/" \
+            -v "$RUNNER_TEMP/test-results:$PROJECT/test-results" \
+            -v "$LIC_DIR:/root/.local/share/unity3d" \
+            -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
+            -w $PROJECT \
+            "${{ env.IMAGE_TAG }}" \
+            unity-editor \
+              -projectPath $PROJECT \
+              -executeMethod CI.RunTests
+
+      - uses: dorny/test-reporter@v2
+        if: ${{ !cancelled() }}
+        with:
+          name: Unity Test Results
+          reporter: dotnet-nunit
+          path: "${{ runner.temp }}/test-results/*tests.xml"
+          fail-on-error: false

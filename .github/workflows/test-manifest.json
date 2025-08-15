@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "pl.apkd.medicine": "https://github.com/apkd/Medicine.git",
+    "com.unity.test-framework": "1.4.6",
+    "com.unity.modules.physics": "1.0.0"
+  },
+  "testables": [
+    "pl.apkd.medicine"
+  ]
+}
