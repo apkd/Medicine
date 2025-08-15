@@ -2,8 +2,7 @@
   "name": "pl.apkd.medicine",
   "displayName": "Medicine",
   "version": "3.0.0",
-  "unity": "2020.1",
-  "unityRelease": "0b11",
+  "unity": "2022.3",
   "dependencies": {
     "com.unity.collections": "0.9.0-preview.6"
   },
