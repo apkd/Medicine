@@ -21,7 +21,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        UNITY_VERSION: [2022.3.62f1, 2023.2.20f1, 2023.3.0b10, 6000.0.55f1, 6000.1.16f1, 6000.2.0f1, 6000.3.0a3]
+        UNITY_VERSION: [
+          # 2022.3 -- AFAIK 12f is the earliest version with functioning incremental source generators
+          2022.3.12f1, 2022.3.62f1,
+          # 2023.2
+          2023.2.0f1, 2023.2.20f1,
+          # 6.0
+          6000.0.0f1, 6000.0.55f1,
+          # 6.1
+          6000.1.0f1, 6000.1.16f1,
+          # 6.2
+          6000.2.0f1,
+          # 6.3
+          6000.3.0a3,
+        ]
 
     steps:
       - uses: actions/checkout@v4
@@ -81,9 +94,11 @@ jobs:
 
       - name: Run tests
         run: |
+          set -euo pipefail
           size_bytes=$(docker image inspect "${{ env.IMAGE_TAG }}" --format='{{.Size}}')
           size_mib=$(awk -v b="$size_bytes" 'BEGIN{printf "%.2f", b/1024/1024}')
           echo "Docker image size: ${size_mib} MiB"
+
           docker run --rm \
             -v "$GITHUB_WORKSPACE:$PROJECT/Packages/Medicine/" \
             -v "$RUNNER_TEMP/test-results:$PROJECT/test-results" \
