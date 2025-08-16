@@ -3,6 +3,7 @@
   "displayName": "Medicine",
   "version": "3.0.1",
   "unity": "2022.3",
+  "unityRelease": "12f1",
   "dependencies": {
     "com.unity.collections": "0.9.0-preview.6"
   },
