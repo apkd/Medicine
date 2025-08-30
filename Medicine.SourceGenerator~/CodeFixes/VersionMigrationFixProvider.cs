@@ -177,7 +177,11 @@ public sealed class VersionMigrationFixProvider : CodeFixProvider
                     .WithAdditionalAnnotations(Formatter.Annotation);
             }
 
-            methodDecl = methodDecl.WithBody(methodDecl.Body?.AddStatements((StatementSyntax)propAssign));
+
+            methodDecl = methodDecl.WithBody(methodDecl.Body is null ?
+                                                 SyntaxFactory.Block((StatementSyntax)propAssign) :
+                                                 SyntaxFactory.Block(methodDecl.Body.Statements
+                                                                               .Prepend((StatementSyntax)propAssign)));
 
             editor.ReplaceNode(originalMethod, methodDecl);
         }
