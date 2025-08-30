@@ -12,6 +12,7 @@ on:
           - major
         default: minor
   workflow_run:
+    branches: [master]
     workflows: ["Tests"]
     types: [completed]
 
@@ -154,6 +155,7 @@ jobs:
           jq --arg v "$new" '.version=$v' "$PACKAGE_JSON" > "$tmp"
           mv "$tmp" "$PACKAGE_JSON"
 
+          echo "old=$current" >> "$GITHUB_OUTPUT"
           echo "new=$new" >> "$GITHUB_OUTPUT"
 
       - name: Commit and tag
@@ -208,9 +210,25 @@ jobs:
 
           notes="release-notes.md"
           {
-            echo "# v${{ steps.ver.outputs.new }}"
-            echo "This is an automatic rolling release."
-            echo "#### The latest changes that went into this release:"
+            echo "This is a rolling release - it is automatically updated to the latest release tag."
+            echo "Release tags are created automatically when pushed commits pass all tests."
+  
+            echo "Installation"
+            echo "--------------"
+            echo "Compatibility: ***Unity 2022.3.12f1 or newer***"
+            echo ""
+            echo "Recommended method:"
+            echo "- Window ⟶ Package Manager ⟶ `+` ⟶ "Install package from git URL"  
+            echo "- Paste the URL (the `release` branch which points at last the commit with all tests passing)"
+            echo "```"x`
+            echo "--------------------------------------------"
+            echo ""
+            echo "https://github.com/apkd/Medicine.git#release"
+            echo ""
+            echo "--------------------------------------------"
+            echo "```"
+            echo "Latest changes"
+            echo "--------------"
             echo
             echo '| Author | Release | Commit | SHA |'
             echo '|---|---|---|---|'
@@ -222,7 +240,6 @@ jobs:
           mapfile -t rel_tags < <(git for-each-ref --sort=creatordate --format='%(refname:short)' refs/tags | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
 
           git log -n 24 "$upper" --pretty=format:%H%x09%s%x09%an%x09%ae | \
-          while IFS=$'\t' read -r sha msg author email; do
             lc_author="$(printf '%s' "$author" | tr '[:upper:]' '[:lower:]')"
             lc_email="$(printf '%s' "$email" | tr '[:upper:]' '[:lower:]')"
             if [[ "$lc_author" == "github-actions[bot]" || "$lc_email" == "41898282+github-actions[bot]@users.noreply.github.com" ]]; then
@@ -230,6 +247,7 @@ jobs:
             fi
 
             short="${sha:0:7}"
+            link=$'<a href="https://github.com/${{ github.repository }}/commit/$sha">$short</a>'
             msg="${msg//|/\\|}"
 
             new_prefix=""
@@ -272,21 +290,25 @@ jobs:
             done
             version="${new_prefix}${version}"
 
-            printf '| %s | %s | %s | `%s` |\n' "$author_cell" "$version" "$msg" "$short" >> "$notes"
+            printf '| %s | %s | %s | `%s` |\n' "$author_cell" "$version" "$msg" "$shortlink" >> "$notes"
 
             count=$((count+1))
             if [[ $count -ge $limit ]]; then
               break
             fi
           done
-
+          
+          printf '| | | View [diff](github.com/${{ github.repository }}/compare/v${{ steps.ver.outputs.old }}...latest)), [all recent commits](https://github.com/${{ github.repository }}/commits/master/) | |' >> "$notes"
+          printf '' >> "$notes"
+          printf '' >> "$notes"
+          
           git tag -fa "$tag" "$upper" -m "Latest rolling release"
           git push -f origin "refs/tags/$tag"
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release edit "$tag" --notes-file "$notes" --title "$tag" --latest
+            gh release edit "$tag" --notes-file "$notes" --title "v${{ steps.ver.outputs.new }}" --latest
           else
-            gh release create "$tag" --title "$tag" --notes-file "$notes" --target "$upper" --latest
+            gh release create "$tag" --title "v${{ steps.ver.outputs.new }}" --notes-file "$notes" --target "$upper" --latest
           fi
 
           {
