@@ -199,7 +199,7 @@ jobs:
           set -euo pipefail
           tag="latest"
           upper="${{ steps.push.outputs.sha }}"
-
+          
           declare -A since=()
           prev_tag="${{ steps.prev.outputs.tag }}"
           if [[ -n "${prev_tag:-}" ]]; then
@@ -207,57 +207,57 @@ jobs:
               [[ -n "$s" ]] && since["$s"]=1
             done < <(git rev-list "${prev_tag}..$upper")
           fi
-
+          
           notes="release-notes.md"
-          {
-            echo "This is a rolling release - it is automatically updated to the latest release tag."
-            echo "Release tags are created automatically when pushed commits pass all tests."
-  
-            echo "Installation"
-            echo "--------------"
-            echo "Compatibility: ***Unity 2022.3.12f1 or newer***"
-            echo ""
-            echo "Recommended method:"
-            echo "- Window ⟶ Package Manager ⟶ `+` ⟶ "Install package from git URL"  
-            echo "- Paste the URL (the `release` branch which points at last the commit with all tests passing)"
-            echo "```"x`
-            echo "--------------------------------------------"
-            echo ""
-            echo "https://github.com/apkd/Medicine.git#release"
-            echo ""
-            echo "--------------------------------------------"
-            echo "```"
-            echo "Latest changes"
-            echo "--------------"
-            echo
-            echo '| Author | Release | Commit | SHA |'
-            echo '|---|---|---|---|'
-          } > "$notes"
+          date_utc="$(date -u '+%d-%m-%Y')"
+          
+          cat > "$notes" <<'MD'
 
+          This is a rolling release. Whenever all tests pass, it is automatically updated
+          to point to the latest release tag.
+          
+          Installation
+          --------------
+          Compatibility: ***Unity 2022.3.12f1 or newer***
+          
+          Recommended method:
+          - Window ⟶ Package Manager ⟶ `+` ⟶ "Install package from git URL"  
+          - Paste the URL (the `release` branch which points at the latest commit with all tests passing)
+          ```
+          --------------------------------------------
+          https://github.com/apkd/Medicine.git#release
+          --------------------------------------------
+          ```
+          Latest changes
+          --------------
+          | Author | Release | Commit | SHA |
+          |---|---|---|---|
+          MD
+          
           limit=12
           count=0
-
+          
           mapfile -t rel_tags < <(git for-each-ref --sort=creatordate --format='%(refname:short)' refs/tags | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
-
-          git log -n 24 "$upper" --pretty=format:%H%x09%s%x09%an%x09%ae | \
+          
+          git log -n 24 "$upper" --pretty=format:%H%x09%s%x09%an%x09%ae | while IFS=$'\t' read -r sha msg author email; do
             lc_author="$(printf '%s' "$author" | tr '[:upper:]' '[:lower:]')"
             lc_email="$(printf '%s' "$email" | tr '[:upper:]' '[:lower:]')"
             if [[ "$lc_author" == "github-actions[bot]" || "$lc_email" == "41898282+github-actions[bot]@users.noreply.github.com" ]]; then
               continue
             fi
-
+          
             short="${sha:0:7}"
-            link=$'<a href="https://github.com/${{ github.repository }}/commit/$sha">$short</a>'
+            shortlink="[$short](https://github.com/${{ github.repository }}/commit/$sha)"
             msg="${msg//|/\\|}"
-
+          
             new_prefix=""
             if [[ -n "${since[$sha]:-}" ]]; then
               new_prefix="✨ "
             fi
-
+          
             info="$(gh api repos/$GITHUB_REPOSITORY/commits/$sha --jq '{email: .commit.author.email, login: (.author.login // .committer.login)}')"
             login="$(jq -r '.login // empty' <<<"$info")"
-
+          
             if [[ -n "$login" && "$login" != "null" ]]; then
               avatar="https://wsrv.nl/?url=github.com/${login}.png&w=48&h=48&mask=circle&fit=cover&maxage=1w"
             else
@@ -270,16 +270,16 @@ jobs:
               fi
               avatar="https://wsrv.nl/?url=${base}&w=48&h=48&mask=circle&fit=cover&maxage=1w"
             fi
-
+          
             author_text="$author"
             author_text="${author_text//|/\\|}"
-
+          
             if [[ -n "$login" && "$login" != "null" ]]; then
               author_cell="<a href=\"https://github.com/$login\"><img src=\"$avatar\" width=\"24\" height=\"24\" /></a> @$login"
             else
               author_cell="<img src=\"$avatar\" width=\"24\" height=\"24\" /> $author_text"
             fi
-
+          
             version="-"
             for t in "${rel_tags[@]}"; do
               tcommit="$(git rev-list -n 1 "$t")"
@@ -289,30 +289,29 @@ jobs:
               fi
             done
             version="${new_prefix}${version}"
-
-            printf '| %s | %s | %s | `%s` |\n' "$author_cell" "$version" "$msg" "$shortlink" >> "$notes"
-
+          
+            printf '| %s | %s | %s | %s |\n' "$author_cell" "$version" "$msg" "$shortlink" >> "$notes"
+          
             count=$((count+1))
             if [[ $count -ge $limit ]]; then
               break
             fi
           done
           
-          printf '| | | View [diff](github.com/${{ github.repository }}/compare/v${{ steps.ver.outputs.old }}...latest)), [all recent commits](https://github.com/${{ github.repository }}/commits/master/) | |' >> "$notes"
-          printf '' >> "$notes"
-          printf '' >> "$notes"
+          printf '| | | [View diff](https://github.com/%s/compare/v%s...latest) | |\n' "$GITHUB_REPOSITORY" "${{ steps.ver.outputs.old }}" >> "$notes"
+          printf '| | | [More recent commits](https://github.com/%s/commits/master/) | |\n' "$GITHUB_REPOSITORY" >> "$notes"
           
           git tag -fa "$tag" "$upper" -m "Latest rolling release"
           git push -f origin "refs/tags/$tag"
-
+          
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release edit "$tag" --notes-file "$notes" --title "v${{ steps.ver.outputs.new }}" --latest
+            gh release edit "$tag" --notes-file "$notes" --title "v${{ steps.ver.outputs.new }} ($date_utc)" --latest
           else
-            gh release create "$tag" --title "v${{ steps.ver.outputs.new }}" --notes-file "$notes" --target "$upper" --latest
+            gh release create "$tag" --title "v${{ steps.ver.outputs.new }} ($date_utc)" --notes-file "$notes" --target "$upper" --latest
           fi
-
+          
           {
-            echo "## $tag"
+            echo "## ${{ steps.ver.outputs.new }}"
             echo
             cat "$notes"
           } >> "$GITHUB_STEP_SUMMARY"
