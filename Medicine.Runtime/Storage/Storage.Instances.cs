@@ -143,6 +143,11 @@ namespace Medicine.Internal
             {
                 int index = Unregister(instance);
 
+#if DEBUG
+                if (!InstanceIDs<T>.List.IsCreated)
+                    return index; // possible right before domain reload
+#endif
+
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                 var safety = NativeListUnsafeUtility.GetAtomicSafetyHandle(ref InstanceIDs<T>.List);
                 AtomicSafetyHandle.EnforceAllBufferJobsHaveCompleted(safety);

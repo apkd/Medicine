@@ -89,6 +89,9 @@ namespace Medicine.Internal
 #if DEBUG
                 try
                 {
+                    if (!List.IsCreated)
+                        return; // possible right before domain reload
+
                     instance.Cleanup(ref List.ElementAt(elementIndex));
                 }
                 catch (System.Exception ex)
