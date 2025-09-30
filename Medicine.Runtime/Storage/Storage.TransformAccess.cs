@@ -33,6 +33,10 @@ namespace Medicine.Internal
 
             public static void Unregister(int transformIndex)
             {
+#if DEBUG
+                if (!Transforms.isCreated)
+                    return; // possible right before domain reload
+#endif
                 if (transformIndex >= 0)
                     Transforms.RemoveAtSwapBack(transformIndex);
             }
