@@ -20,7 +20,7 @@ public sealed class TrackingSourceGenerator : IIncrementalGenerator
                         fullyQualifiedMetadataName: attributeName,
                         predicate: static (node, _) => node is ClassDeclarationSyntax,
                         transform: (attributeSyntaxContext, ct)
-                            => TransformSyntaxContext(attributeSyntaxContext, ct, attributeName, $"global::Medicine.{attributeName}")
+                            => TransformSyntaxContext(attributeSyntaxContext, ct, attributeName, $"global::{attributeName}")
                     )
                     .Where(x => x.Attribute is { Length: > 0 })
                     .Combine(medicineSettings)
@@ -201,7 +201,6 @@ public sealed class TrackingSourceGenerator : IIncrementalGenerator
             {
                 src.Line.Write(Alias.Hidden);
                 src.Line.Write(Alias.ObsoleteInternal);
-                src.Line.Write($"{@protected}{@new}void {methodName}()");
             }
             else
             {
@@ -221,9 +220,9 @@ public sealed class TrackingSourceGenerator : IIncrementalGenerator
                     src.Line.Write($"/// or <c>Awake</c>+<c>OnDestroy</c>. Make sure the registration methods are never stopped by an earlier exception.");
                     src.Line.Write($"/// </remarks>");
                 }
-
-                src.Line.Write($"{@protected}{@new}void {methodName}()");
             }
+
+            src.Line.Write($"{@protected}{@new}void {methodName}()");
 
             using (src.Braces)
             {
