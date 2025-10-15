@@ -41,6 +41,7 @@ namespace Medicine.Internal
                     var safetyHandle = NativeListUnsafeUtility.GetAtomicSafetyHandle(ref List);
                     AtomicSafetyHandle.EnforceAllBufferJobsHaveCompleted(safetyHandle);
                     List.Dispose();
+                    Array = default;
                 };
 #endif
 #endif
