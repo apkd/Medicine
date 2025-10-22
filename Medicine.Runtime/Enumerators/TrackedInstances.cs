@@ -287,7 +287,7 @@ namespace Medicine.Internal
             bool IValueEnumerator<T>.TryCopyTo(Span<T> destination, Index offset)
             {
 #if MODULE_ZLINQ && !DEBUG
-                if (ZLinq.Internal.EnumeratorHelper.TryGetSlice<T>(array, offset, destination.Length, out var slice))
+                if (ZLinq.Internal.EnumeratorHelper.TryGetSlice<T>(array.AsSpan(0, n), offset, destination.Length, out var slice))
                 {
                     slice.CopyTo(destination);
                     return true;
@@ -387,7 +387,7 @@ namespace Medicine.Internal
             bool IValueEnumerator<T>.TryCopyTo(Span<T> destination, Index offset)
             {
 #if MODULE_ZLINQ && !DEBUG
-                if (ZLinq.Internal.EnumeratorHelper.TryGetSlice<T>(array, offset, destination.Length, out var slice))
+                if (ZLinq.Internal.EnumeratorHelper.TryGetSlice<T>(array.AsSpan(0, n), offset, destination.Length, out var slice))
                 {
                     slice.CopyTo(destination);
                     return true;
