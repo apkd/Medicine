@@ -52,6 +52,25 @@ public sealed class MedicineExtensionsTests
     }
 
     [Test]
+    public void EnumerateComponentsInScene_MixedTypes()
+    {
+        SpawnGameObjectsWith<BoxCollider>(count: 8, nested: true);
+        SpawnGameObjectsWith<PositionConstraint>(count: 8, nested: true);
+        SpawnGameObjectsWith<Light>(count: 8, nested: true);
+        SpawnGameObjectsWith<Rigidbody>(count: 8, nested: true);
+
+        foreach (var go in scene.GetRootGameObjects())
+        {
+            go.EnumerateComponentsInChildren<BoxCollider>().AsValueEnumerable().ToArray();
+            go.EnumerateComponentsInChildren<PositionConstraint>().AsValueEnumerable().ToArray();
+            go.EnumerateComponentsInChildren<Light>().AsValueEnumerable().ToArray();
+            go.EnumerateComponentsInChildren<Rigidbody>().AsValueEnumerable().ToArray();
+            go.EnumerateComponentsInChildren<Transform>().AsValueEnumerable().ToArray();
+            go.EnumerateComponentsInChildren<IConstraint>().AsValueEnumerable().ToArray();
+        }
+    }
+
+    [Test]
     public void EnumerateComponentsInScene_WithInterfaceType()
     {
         var spawned = SpawnGameObjectsWith<PositionConstraint>(count: 8, nested: true);
