@@ -60,6 +60,10 @@ namespace Medicine.Internal
             => list.AsInternalsView().Array.AsSpan(0, list.Count);
 
         [MethodImpl(AggressiveInlining)]
+        static unsafe void* AsPointer<T>(ref T value)
+            => UnsafeUtility.AddressOf(ref UnsafeUtility.As<T, byte>(ref value));
+
+        [MethodImpl(AggressiveInlining)]
         internal static unsafe Span<T> AsSpanUnsafe<T>(this T[]? array, int start = 0, int length = int.MinValue)
         {
             if (array is null)
@@ -74,8 +78,7 @@ namespace Medicine.Internal
             if ((uint)length > (uint)(array.Length - start))
                 throw new ArgumentOutOfRangeException(nameof(length));
 #endif
-
-            return new(Unsafe.AsPointer(ref array[start]), length);
+            return new(AsPointer(ref array[start]), length);
         }
 
         internal static void InvokeDispose<T>(this T disposable)
