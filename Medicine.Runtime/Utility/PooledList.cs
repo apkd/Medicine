@@ -45,7 +45,7 @@ namespace Medicine
             => List.Count;
 
         public Span<T> Span
-            => List.AsInternalsView().Array.AsSpan(0, List.Count);
+            => List.AsSpanUnsafe();
 
         public List<T>.Enumerator GetEnumerator()
             => List.GetEnumerator();

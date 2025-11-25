@@ -167,7 +167,7 @@ namespace Medicine
                 var array = listView.Array;
                 listView.Count = count;
 
-                if (enumerator.TryCopyTo(array.AsSpan(0, count), 0))
+                if (enumerator.TryCopyTo(array.AsSpanUnsafe(0, count), 0))
                     return pooledList;
 
                 var i = 0;

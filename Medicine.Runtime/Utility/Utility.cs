@@ -54,6 +54,30 @@ namespace Medicine.Internal
         internal static ListView<T> AsInternalsView<T>(this List<T> list)
             => UnsafeUtility.As<List<T>, ListView<T>>(ref list);
 
+
+        [MethodImpl(AggressiveInlining)]
+        internal static Span<T> AsSpanUnsafe<T>(this List<T> list)
+            => list.AsInternalsView().Array.AsSpan(0, list.Count);
+
+        [MethodImpl(AggressiveInlining)]
+        internal static unsafe Span<T> AsSpanUnsafe<T>(this T[]? array, int start = 0, int length = int.MinValue)
+        {
+            if (array is null)
+                return default;
+            if (length is 0)
+                return default;
+            if (length is int.MinValue)
+                length = array.Length - start;
+#if DEBUG
+            if (start < 0 || (uint)start > (uint)array.Length)
+                throw new ArgumentOutOfRangeException(nameof(start));
+            if ((uint)length > (uint)(array.Length - start))
+                throw new ArgumentOutOfRangeException(nameof(length));
+#endif
+
+            return new(Unsafe.AsPointer(ref array[start]), length);
+        }
+
         internal static void InvokeDispose<T>(this T disposable)
             where T : struct, IDisposable
             => disposable.Dispose();

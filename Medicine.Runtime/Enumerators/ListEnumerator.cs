@@ -88,7 +88,7 @@ namespace Medicine.Internal
         public bool TryGetSpan(out ReadOnlySpan<T> span)
         {
 #if MODULE_ZLINQ
-            span = array.AsSpan(start: 0, length: n);
+            span = array.AsSpanUnsafe(start: 0, length: n);
             return true;
 #else
             span = default;
@@ -99,7 +99,7 @@ namespace Medicine.Internal
         public bool TryCopyTo(Span<T> destination, Index offset)
         {
 #if MODULE_ZLINQ
-            if (EnumeratorHelper.TryGetSlice<T>(array.AsSpan(start: 0, length: n), offset, destination.Length, out var slice))
+            if (EnumeratorHelper.TryGetSlice<T>(array.AsSpanUnsafe(start: 0, length: n), offset, destination.Length, out var slice))
             {
                 slice.CopyTo(destination);
                 return true;
