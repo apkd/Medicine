@@ -55,7 +55,6 @@ namespace Medicine.Internal
         internal static ListView<T> AsInternalsView<T>(this List<T> list)
             => UnsafeUtility.As<List<T>, ListView<T>>(ref list);
 
-
         [MethodImpl(AggressiveInlining)]
         internal static Span<T> AsSpanUnsafe<T>(this List<T> list)
             => list.AsInternalsView().Array.AsSpanUnsafe(0, list.Count);
@@ -63,21 +62,24 @@ namespace Medicine.Internal
         [MethodImpl(AggressiveInlining)]
         internal static Span<T> AsSpanUnsafe<T>(this T[]? array, int start = 0, int length = int.MinValue)
         {
-            if (array is not { Length: > 0})
+            if (array is not { Length: > 0 })
                 return default;
+
             if (length is 0)
                 return default;
+
             if (length is int.MinValue)
                 length = array.Length - start;
 #if DEBUG
             if (start < 0 || (uint)start > (uint)array.Length)
                 throw new ArgumentOutOfRangeException(nameof(start));
+
             if ((uint)length > (uint)(array.Length - start))
                 throw new ArgumentOutOfRangeException(nameof(length));
 #endif
 
             ref var first = ref UnsafeUtility.As<T[], ArrayData<T>>(ref array).Elements;
-            return MemoryMarshal.CreateSpan(ref first, array.Length)[start..length];
+            return MemoryMarshal.CreateSpan(ref first, array.Length)[start..(start + length)];
         }
 
         [UsedImplicitly, StructLayout(LayoutKind.Sequential)]

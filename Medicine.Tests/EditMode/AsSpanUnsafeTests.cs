@@ -2,8 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Medicine.Internal;
 
@@ -15,7 +13,7 @@ public sealed class AsSpanUnsafeTests
     {
         var list = new List<int>();
         var span = list.AsSpanUnsafe();
-        Assert.That(Unsafe.IsNullRef(ref MemoryMarshal.GetReference(span)), Is.True);
+        Assert.That(span == default, Is.True);
     }
 
     [Test]
@@ -24,13 +22,12 @@ public sealed class AsSpanUnsafeTests
         var list = new List<int> { 1, 2, 3 };
         var span = list.AsSpanUnsafe();
 
-        Assert.That(Unsafe.IsNullRef(ref MemoryMarshal.GetReference(span)), Is.False);
+        Assert.That(span == default, Is.False);
 
-        ref var first = ref MemoryMarshal.GetReference(span);
-        Assert.That(first, Is.EqualTo(1));
+        Assert.That(span[0], Is.EqualTo(1));
 
         // write to second element
-        Unsafe.Add(ref first, 1) = 42;
+        span[1] = 42;
         Assert.That(list[1], Is.EqualTo(42));
     }
 
@@ -39,7 +36,7 @@ public sealed class AsSpanUnsafeTests
     {
         int[]? array = null;
         var span = array!.AsSpanUnsafe();
-        Assert.That(Unsafe.IsNullRef(ref MemoryMarshal.GetReference(span)), Is.True);
+        Assert.That(span == default, Is.True);
     }
 
     [Test]
@@ -47,7 +44,7 @@ public sealed class AsSpanUnsafeTests
     {
         var array = Array.Empty<int>();
         var span = array.AsSpanUnsafe();
-        Assert.That(Unsafe.IsNullRef(ref MemoryMarshal.GetReference(span)), Is.True);
+        Assert.That(span == default, Is.True);
     }
 
     [Test]
@@ -55,7 +52,7 @@ public sealed class AsSpanUnsafeTests
     {
         var array = new[] { 10, 20, 30 };
         var span = array.AsSpanUnsafe(0, 0);
-        Assert.That(Unsafe.IsNullRef(ref MemoryMarshal.GetReference(span)), Is.True);
+        Assert.That(span == default, Is.True);
     }
 
     [Test]
@@ -64,8 +61,8 @@ public sealed class AsSpanUnsafeTests
         var array = new[] { 5, 6, 7, 8 };
         var span = array.AsSpanUnsafe(1);
 
-        Assert.That(Unsafe.IsNullRef(ref MemoryMarshal.GetReference(span)), Is.False);
-        ref var first = ref MemoryMarshal.GetReference(span);
+        Assert.That(span == default, Is.False);
+        ref var first = ref span[0];
         Assert.That(first, Is.EqualTo(6));
     }
 
@@ -76,11 +73,10 @@ public sealed class AsSpanUnsafeTests
         var span = array.AsSpanUnsafe(1, 2);
 
         // Intended contract: span covers [start, start + length)
-        ref var first = ref MemoryMarshal.GetReference(span);
-        Assert.That(first, Is.EqualTo(2));
-        Assert.That(Unsafe.Add(ref first, 1), Is.EqualTo(3));
+        Assert.That(span[0], Is.EqualTo(2));
+        Assert.That(span[1], Is.EqualTo(3));
 
-        first = 99;
+        span[0] = 99;
         Assert.That(array[1], Is.EqualTo(99));
     }
 
@@ -88,9 +84,8 @@ public sealed class AsSpanUnsafeTests
     public void Array_AsSpanUnsafe_StartAtArrayLength()
     {
         var array = new[] { 1, 2, 3 };
-
-        // Regardless of configuration, using default length at start == Length should result in an invalid slice
-        Assert.Throws<ArgumentOutOfRangeException>(() => array.AsSpanUnsafe(array.Length));
+        var span = array.AsSpanUnsafe(array.Length);
+        Assert.That(span.Length is 0);
     }
 
     [Test]
@@ -120,9 +115,8 @@ public sealed class AsSpanUnsafeTests
     {
         var a = new[] { "a", "b", "c" };
         var span = a.AsSpanUnsafe(1, 2);
-        ref var first = ref MemoryMarshal.GetReference(span);
-        Assert.That(first, Is.EqualTo("b"));
-        Unsafe.Add(ref first, 1) = "z";
+        Assert.That(span[0], Is.EqualTo("b"));
+        span[1] = "z";
         Assert.That(a[2], Is.EqualTo("z"));
     }
 }
