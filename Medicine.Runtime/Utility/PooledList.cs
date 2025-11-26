@@ -141,9 +141,8 @@ namespace Medicine
             if (obj is null)
                 return null;
 
-            var ptr = UnsafeUtility.PinGCObjectAndGetAddress(obj, out ulong gcHandle);
-            UnsafeUtility.AsRef<ObjectHeader>(ptr) = TypeHeaders<T>.Header;
-            UnsafeUtility.ReleaseGCObject(gcHandle);
+            var ptr = UnsafeUtility.As<object, IntPtr>(ref obj);
+            UnsafeUtility.AsRef<ObjectHeader>((void*)ptr) = TypeHeaders<T>.Header;
             return obj as T;
         }
 
