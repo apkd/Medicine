@@ -8,6 +8,8 @@ using static System.ComponentModel.EditorBrowsableState;
 using static JetBrains.Annotations.ImplicitUseTargetFlags;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Medicine.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Medicine.Tests.EditMode")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Medicine.Tests.PlayMode")]
 
 // ReSharper disable MemberHidesStaticFromOuterClass
 // ReSharper disable UnusedType.Global

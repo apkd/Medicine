@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using JetBrains.Annotations;
 using Unity.Collections.LowLevel.Unsafe;
+using UnityEngine;
 using static System.ComponentModel.EditorBrowsableState;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 
@@ -57,12 +58,12 @@ namespace Medicine.Internal
 
         [MethodImpl(AggressiveInlining)]
         internal static Span<T> AsSpanUnsafe<T>(this List<T> list)
-            => list.AsInternalsView().Array.AsSpan(0, list.Count);
+            => list.AsInternalsView().Array.AsSpanUnsafe(0, list.Count);
 
         [MethodImpl(AggressiveInlining)]
         internal static Span<T> AsSpanUnsafe<T>(this T[]? array, int start = 0, int length = int.MinValue)
         {
-            if (array is null)
+            if (array is not { Length: > 0})
                 return default;
             if (length is 0)
                 return default;
@@ -74,7 +75,17 @@ namespace Medicine.Internal
             if ((uint)length > (uint)(array.Length - start))
                 throw new ArgumentOutOfRangeException(nameof(length));
 #endif
-            return MemoryMarshal.CreateSpan(ref array[start], length);
+
+            ref var first = ref UnsafeUtility.As<T[], ArrayData<T>>(ref array).Elements;
+            return MemoryMarshal.CreateSpan(ref first, array.Length)[start..length];
+        }
+
+        [UsedImplicitly, StructLayout(LayoutKind.Sequential)]
+        sealed class ArrayData<T>
+        {
+            public long Length;
+            public long Bounds;
+            public T Elements = default!;
         }
 
         internal static void InvokeDispose<T>(this T disposable)
