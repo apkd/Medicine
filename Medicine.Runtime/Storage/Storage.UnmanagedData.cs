@@ -24,7 +24,10 @@ namespace Medicine.Internal
 
             [MethodImpl(AggressiveInlining)]
             public static unsafe ref TData ElementAtRefRW(int index)
-                => ref UnsafeUtility.ArrayElementAsRef<TData>(Array.GetUnsafePtr(), index);
+            {
+                var ptr = NativeArrayUnsafeUtility.GetUnsafeBufferPointerWithoutChecks(Array);
+                return ref UnsafeUtility.ArrayElementAsRef<TData>(ptr, index);
+            }
 
             /// <summary>
             /// This method is used to statically initialize the static fields on first access.
