@@ -289,4 +289,24 @@ public partial class TrackAttributePlayModeTests
             Assert.That(instance, Is.EqualTo(MBTrackFindByID.FindByID(instance.GetHashCode())));
         }
     }
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    [Track]
+    partial class MBTrackInheritanceBase : MonoBehaviour { }
+
+    [Track]
+    sealed partial class MBTrackInheritanceDerived : MBTrackInheritanceBase { }
+
+    [Test]
+    public void Track_Inheritance()
+    {
+        for (int i = 1; i < 5; ++i)
+        {
+            var go1 = new GameObject(null, typeof(MBTrackInheritanceBase));
+            var go2 = new GameObject(null, typeof(MBTrackInheritanceDerived));
+            Assert.That(MBTrackInheritanceBase.Instances, Has.Count.EqualTo(i * 2));
+            Assert.That(MBTrackInheritanceDerived.Instances, Has.Count.EqualTo(i));
+        }
+    }
 }
