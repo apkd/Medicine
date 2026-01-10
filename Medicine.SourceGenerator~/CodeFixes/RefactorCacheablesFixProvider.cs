@@ -176,12 +176,12 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
             else
             {
                 method = methodToPatch.WithReturnType(methodToPatch.ReturnType);
-            }
 
-            if (existingInjectAttribute is null)
-            {
-                method = (MethodDeclarationSyntax)generator.AddAttributes(method, generator.Attribute("Inject"));
-                editor.EnsureNamespaceIsImported("Medicine");
+                if (existingInjectAttribute is null)
+                {
+                    method = (MethodDeclarationSyntax)generator.AddAttributes(method, generator.Attribute("Inject"));
+                    editor.EnsureNamespaceIsImported("Medicine");
+                }
             }
 
             if (method.Body is null && method.ExpressionBody is not null)
