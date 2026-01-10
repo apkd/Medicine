@@ -46,6 +46,27 @@ sealed class FindObjectsFixProvider : CodeFixProvider
                 _ => false,
             };
 
+
+        static bool IsNonStaticMonoBehaviourContext(
+            InvocationExpressionSyntax inv,
+            SemanticModel model,
+            CancellationToken ct
+        )
+        {
+            static bool InheritsFromMonoBehaviour(INamedTypeSymbol type)
+            {
+                for (var t = type; t is not null; t = t.BaseType)
+                    if (t.Name is "MonoBehaviour")
+                        if (t.ContainingNamespace.ToDisplayString() is "UnityEngine")
+                            return true;
+
+                return false;
+            }
+
+            return model.GetEnclosingSymbol(inv.SpanStart, ct) is { IsStatic: false, ContainingType: { } containingType }
+                   && InheritsFromMonoBehaviour(containingType);
+        }
+
         if (genericNameSyntax is not { TypeArgumentList.Arguments: [{ } typeSyntax] })
             return;
 
@@ -67,15 +88,10 @@ sealed class FindObjectsFixProvider : CodeFixProvider
         {
             var model = await context.Document.GetSemanticModelAsync(context.CancellationToken).ConfigureAwait(false);
 
-            if (model is null)
+            if (model?.GetTypeInfo(typeSyntax).Type is not { } typeSymbol)
                 return;
 
-            var typeSymbol = model.GetTypeInfo(typeSyntax).Type;
-
-            if (typeSymbol is null)
-                return;
-
-            var isTracked = typeSymbol?.HasAttribute(Constants.TrackAttributeFQN) is true;
+            var isTracked = typeSymbol.HasAttribute(Constants.TrackAttributeFQN);
 
             bool IsIncludeInactive()
                 => invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression
@@ -86,7 +102,7 @@ sealed class FindObjectsFixProvider : CodeFixProvider
             {
                 context.RegisterCodeFix(
                     CodeAction.Create(
-                        title: $"Use {typeSymbol?.Name}.Instances",
+                        title: $"Use {typeSymbol.Name}.Instances",
                         createChangedDocument: ct => ReplaceWith_T_PropertyAccess_Async(context.Document, invocation, typeSyntax, "Instances", ct),
                         equivalenceKey: nameof(FindObjectsAnalyzer)
                     ),
@@ -97,18 +113,18 @@ sealed class FindObjectsFixProvider : CodeFixProvider
             {
                 context.RegisterCodeFix(
                     CodeAction.Create(
-                        title: $"Use 'Find.ObjectsByType<{typeSymbol!.Name}>()'",
+                        title: $"Use 'Find.ObjectsByType<{typeSymbol.Name}>()'",
                         createChangedDocument: ct => ReplaceWith_Find_ObjectsByType(context.Document, invocation, typeSyntax, model, ct),
                         equivalenceKey: nameof(FindObjectsAnalyzer)
                     ),
                     diagnostic
                 );
 
-                if (IsDirectlyEnumerated(invocation))
+                if (IsDirectlyEnumerated(invocation) && IsNonStaticMonoBehaviourContext(invocation, model, context.CancellationToken))
                 {
                     context.RegisterCodeFix(
                         CodeAction.Create(
-                            title: $"Use non-allocating enumerator 'Find.ComponentsInScene<{typeSymbol!.Name}>(gameObject.scene)'",
+                            title: $"Use non-allocating enumerator 'Find.ComponentsInScene<{typeSymbol.Name}>(gameObject.scene)'",
                             createChangedDocument: ct => ReplaceWith_Find_ComponentsInScene(context.Document, invocation, IsIncludeInactive(), typeSyntax, ct),
                             equivalenceKey: nameof(FindObjectsAnalyzer)
                         ),
