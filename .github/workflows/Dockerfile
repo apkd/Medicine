@@ -64,14 +64,14 @@ TMPHTML="/tmp/unity_whats_new.html"
 axel -q -o "$TMPHTML" "https://unity.com/releases/editor/whats-new/${UNITY_VERSION}"
 URL="$( \
   tr '\n' ' ' < "$TMPHTML" \
-  | grep -oE "https://download\.unity3d\.com[^\"']+Unity-${UNITY_VERSION}\.tar\.xz" \
+  | grep -oE "https?://(download\.unity3d\.com/download_unity|beta\.unity3d\.com/download)/[^\"']+/LinuxEditorInstaller/Unity-${UNITY_VERSION}\.tar\.xz" \
   | head -n1 \
 )"
 rm -f "$TMPHTML"
 test -n "$URL"
 
 # extract revision
-REV="$(printf '%s' "$URL" | sed -n 's#.*/download_unity/\([^/]\+\)/.*#\1#p')"
+REV="$(printf '%s' "$URL" | sed -nE 's#.*/(download_unity|download)/([^/]+)/.*#\2#p')"
 test -n "$REV"
 echo "Downloading: $URL (revision: $REV)"
 
