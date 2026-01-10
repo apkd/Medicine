@@ -43,7 +43,13 @@ public sealed class ComponentEnumerationFixProvider : CodeFixProvider
             .ConfigureAwait(false);
 
         static SyntaxToken ReplaceMethodName(SyntaxToken oldId)
-            => SyntaxFactory.Identifier(oldId.ValueText.Replace("GetComponents", "EnumerateComponents"));
+        {
+            string newName = oldId.ValueText
+                .Replace("GetComponents", "EnumerateComponents")
+                .Replace("EnumerateComponentsInParent", "EnumerateComponentsInParents");
+
+            return SyntaxFactory.Identifier(newName);
+        }
 
         var newExpr = target.Expression switch
         {
