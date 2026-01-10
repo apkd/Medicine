@@ -153,6 +153,19 @@ namespace Medicine
     [AttributeUsage(Struct)]
     public sealed class DisallowReadonlyAttribute : Attribute { }
 
+    namespace Internal
+    {
+        /// <summary>
+        /// Used by the source generator to mark where the generated property was declared.
+        /// You can use IDE navigation features to jump to the injection site.
+        /// </summary>
+        [AttributeUsage(Property)]
+        public sealed class InjectionDeclaredInAttribute : Attribute
+        {
+            public InjectionDeclaredInAttribute(string method, int line) { }
+        }
+    }
+
     /// <summary>
     /// Marks the assembly for generation of a <see cref="Medicine.Constants"/> class,
     /// containing various project constants extracted from the TagManager.asset file,

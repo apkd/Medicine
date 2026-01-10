@@ -525,6 +525,7 @@ public sealed class InjectionSourceGenerator : IIncrementalGenerator
         src.Line.Write(Alias.UsingFind);
         src.Line.Write(Alias.UsingStorage);
         src.Line.Write(Alias.UsingDebug);
+        src.Line.Write(Alias.UsingDeclaredIn);
 
         string access = input switch
         {
@@ -557,9 +558,8 @@ public sealed class InjectionSourceGenerator : IIncrementalGenerator
 
             void AppendInjectionDeclaredIn()
             {
-                src.Line.Write($"/// <injected>");
-                src.Line.Write($"/// Injection declared on line {x.Location.Value.GetLineSpan().StartLinePosition.Line + 1} in <see cref=\"{methodXmlDocId}\"/>.");
-                src.Line.Write($"/// </injected>");
+                int line = x.Location.Value.GetLineSpan().StartLinePosition.Line + 1;
+                src.Line.Write($"[{m}DeclaredIn(method: nameof({input.InjectMethodName}), line: {line})] ");
             }
 
             void OpenListAndAppendOptionalDescription(string nullIf)
