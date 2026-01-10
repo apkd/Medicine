@@ -119,9 +119,9 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
             invocationExpr.WithoutTrivia()
         );
 
-        AttributeData? GetInjectAttribute(MethodDeclarationSyntax method)
+        AttributeData? GetInjectAttribute(SyntaxNode declSyntax)
         {
-            if (semanticModel.GetDeclaredSymbol(method, ct) is { } symbol)
+            if (semanticModel.GetDeclaredSymbol(declSyntax, ct) is { } symbol)
                 if (symbol.GetAttributes().FirstOrDefault(x => x.AttributeClass.Is(Constants.InjectAttributeFQN)) is { } attribute)
                     return attribute;
 
@@ -134,6 +134,9 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
             = classDecl.Members
                   .OfType<MethodDeclarationSyntax>()
                   .FirstOrDefault(x => (existingInjectAttribute ??= GetInjectAttribute(x)) is not null) ??
+              classDecl.DescendantNodes()
+                  .OfType<LocalFunctionStatementSyntax>()
+                  .FirstOrDefault(x => (existingInjectAttribute ??= GetInjectAttribute(x)) is not null) as SyntaxNode ??
               classDecl.Members
                   .OfType<MethodDeclarationSyntax>()
                   .FirstOrDefault(x => x.Identifier.Text == "Awake" && !x.ParameterList.Parameters.Any());
@@ -164,39 +167,61 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
         if (!classDecl.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)))
             editor.SetModifiers(classDecl, DeclarationModifiers.From(classSymbol).WithPartial(true));
 
-        MethodDeclarationSyntax GenerateOrPatchMethod()
+        SyntaxNode GenerateOrPatchMethod()
         {
-            MethodDeclarationSyntax method;
+            SyntaxNode method;
 
             if (methodToPatch is null)
             {
-                method = (MethodDeclarationSyntax)generator.MethodDeclaration(name: "Awake");
-                method = (MethodDeclarationSyntax)generator.AddAttributes(method, generator.Attribute("Inject"));
+                method = generator.MethodDeclaration(name: "Awake");
+                method = generator.AddAttributes(method, generator.Attribute("Inject"));
             }
             else
             {
-                method = methodToPatch.WithReturnType(methodToPatch.ReturnType);
+                method = methodToPatch switch
+                {
+                    MethodDeclarationSyntax m => m.WithReturnType(m.ReturnType),
+                    LocalFunctionStatementSyntax l => l.WithReturnType(l.ReturnType),
+                    _ => methodToPatch
+                };
 
                 if (existingInjectAttribute is null)
                 {
-                    method = (MethodDeclarationSyntax)generator.AddAttributes(method, generator.Attribute("Inject"));
+                    method = generator.AddAttributes(method, generator.Attribute("Inject"));
                     editor.EnsureNamespaceIsImported("Medicine");
                 }
             }
 
-            if (method.Body is null && method.ExpressionBody is not null)
+            BlockSyntax? body = method switch
             {
-                method = method.WithBody(
-                        SyntaxFactory.Block(SyntaxFactory.ExpressionStatement(method.ExpressionBody.Expression)))
-                    .WithExpressionBody(null)
-                    .WithSemicolonToken(default)
-                    .WithAdditionalAnnotations(Formatter.Annotation);
+                MethodDeclarationSyntax m => m.Body,
+                LocalFunctionStatementSyntax l => l.Body,
+                _ => null
+            };
+
+            ArrowExpressionClauseSyntax? expressionBody = method switch
+            {
+                MethodDeclarationSyntax m => m.ExpressionBody,
+                LocalFunctionStatementSyntax l => l.ExpressionBody,
+                _ => null
+            };
+
+            if (body is null && expressionBody is not null)
+            {
+                var newBody = SyntaxFactory.Block(SyntaxFactory.ExpressionStatement(expressionBody.Expression));
+                method = method switch
+                {
+                    MethodDeclarationSyntax m => m.WithBody(newBody).WithExpressionBody(null).WithSemicolonToken(default).WithAdditionalAnnotations(Formatter.Annotation),
+                    LocalFunctionStatementSyntax l => l.WithBody(newBody).WithExpressionBody(null).WithSemicolonToken(default).WithAdditionalAnnotations(Formatter.Annotation),
+                    _ => method
+                };
+                body = newBody;
             }
 
-            if (method.Body is null)
+            if (body is null)
                 return method;
 
-            var existingPropertyAssignment = method.Body.Statements
+            var existingPropertyAssignment = body.Statements
                 .OfType<ExpressionStatementSyntax>()
                 .Select(st => st.Expression as AssignmentExpressionSyntax)
                 .FirstOrDefault(a => a is { Right: var right } && SyntaxFactory.AreEquivalent(right, invocationExpr));
@@ -209,7 +234,7 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
                 return method;
             }
 
-            var existingPropertyNames = method.Body.Statements
+            var existingPropertyNames = body.Statements
                 .OfType<ExpressionStatementSyntax>()
                 .Select(st => st.Expression as AssignmentExpressionSyntax)
                 .Where(a => a is not null)
@@ -236,7 +261,13 @@ public class RefactorCacheablesFixProvider : CodeFixProvider
                 propertyAssignmentStatement = generator.ExpressionStatement(propertyAssignmentExpression);
             }
 
-            return method.WithBody(method.Body.AddStatements((StatementSyntax)propertyAssignmentStatement));
+            var patchedBody = body.AddStatements((StatementSyntax)propertyAssignmentStatement);
+            return method switch
+            {
+                MethodDeclarationSyntax m => m.WithBody(patchedBody),
+                LocalFunctionStatementSyntax l => l.WithBody(patchedBody),
+                _ => method
+            };
         }
 
         return editor.GetChangedDocument();
