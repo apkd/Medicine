@@ -61,7 +61,7 @@ mkdir -p "$DEST"
 TARBALL="/tmp/unity.tar.xz"
 BASE="${UNITY_VERSION%f*}"
 TMPHTML="/tmp/unity_whats_new.html"
-axel -q -o "$TMPHTML" "https://unity.com/releases/editor/whats-new/${BASE}"
+axel -q -o "$TMPHTML" "https://unity.com/releases/editor/whats-new/${UNITY_VERSION}"
 URL="$( \
   tr '\n' ' ' < "$TMPHTML" \
   | grep -oE "https://download\.unity3d\.com[^\"']+Unity-${UNITY_VERSION}\.tar\.xz" \
