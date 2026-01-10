@@ -5,7 +5,7 @@ using static Constants;
 // ReSharper disable RedundantStringInterpolation
 
 [Generator]
-public sealed class TrackingSourceGenerator : IIncrementalGenerator
+public sealed class TrackSourceGenerator : IIncrementalGenerator
 {
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {

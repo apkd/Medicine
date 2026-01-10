@@ -4,26 +4,26 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static System.StringComparison;
 using static ActivePreprocessorSymbolNames;
 using static Constants;
-using static InjectionSourceGenerator.ExpressionFlags;
+using static InjectSourceGenerator.ExpressionFlags;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 using CompilationUnitSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.CompilationUnitSyntax;
 using IdentifierNameSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax;
 using MemberAccessExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax;
 
-static class InjectionSourceGeneratorExtensions
+static class InjectSourceGeneratorExtensions
 {
-    public static bool Has(this InjectionSourceGenerator.ExpressionFlags flags, InjectionSourceGenerator.ExpressionFlags value)
+    public static bool Has(this InjectSourceGenerator.ExpressionFlags flags, InjectSourceGenerator.ExpressionFlags value)
         => (flags & value) == value;
 
-    public static bool Any(this InjectionSourceGenerator.ExpressionFlags flags, InjectionSourceGenerator.ExpressionFlags value)
+    public static bool Any(this InjectSourceGenerator.ExpressionFlags flags, InjectSourceGenerator.ExpressionFlags value)
         => (flags & value) > 0;
 
-    public static void Set(this ref InjectionSourceGenerator.ExpressionFlags flags, InjectionSourceGenerator.ExpressionFlags flag, bool value)
+    public static void Set(this ref InjectSourceGenerator.ExpressionFlags flags, InjectSourceGenerator.ExpressionFlags flag, bool value)
         => flags = value ? flags | flag : flags & ~flag;
 }
 
 [Generator]
-public sealed class InjectionSourceGenerator : IIncrementalGenerator
+public sealed class InjectSourceGenerator : IIncrementalGenerator
 {
     static readonly DiagnosticDescriptor MED006 = new(
         id: nameof(MED006),
