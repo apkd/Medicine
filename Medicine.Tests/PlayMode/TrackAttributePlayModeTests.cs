@@ -226,7 +226,7 @@ public partial class TrackAttributePlayModeTests
 
         using (MBTrackInstanceIdArray.Instances.ToPooledList(out var list))
             for (int i = 0, n = list.Count; i < n; ++i)
-                Assert.That(list[i].GetHashCode(), Is.EqualTo(instanceIDs[i]));
+                Assert.That(list[i].GetInstanceID(), Is.EqualTo(instanceIDs[i]));
     }
 
     //////////////////////////////////////////////////////////////////////////////
