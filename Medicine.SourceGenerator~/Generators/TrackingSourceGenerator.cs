@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static ActivePreprocessorSymbolNames;
 using static Constants;
+// ReSharper disable RedundantStringInterpolation
 
 [Generator]
 public sealed class TrackingSourceGenerator : IIncrementalGenerator
@@ -132,6 +133,7 @@ public sealed class TrackingSourceGenerator : IIncrementalGenerator
         src.Line.Write("#pragma warning disable CS0618 // Type or member is obsolete");
         src.Line.Write(Alias.UsingStorage);
         src.Line.Write(Alias.UsingInline);
+        src.Line.Write(Alias.UsingNonSerialized);
         src.Linebreak();
 
         if (input.Attribute is TrackAttributeMetadataName)
@@ -160,7 +162,7 @@ public sealed class TrackingSourceGenerator : IIncrementalGenerator
                 if (input.Attribute is TrackAttributeMetadataName)
                 {
                     string active = input.IsComponent ? "(enabled) instances of this component" : "instances of this class";
-                    src.Line.Write("/// <remarks>");
+                    src.Line.Write($"/// <remarks>");
                     src.Line.Write($"/// Active {active} are tracked, and contain additional generated static properties:");
                     src.Line.Write($"/// <list type=\"bullet\">");
                     WriteGeneratedArraysComment();
@@ -180,10 +182,10 @@ public sealed class TrackingSourceGenerator : IIncrementalGenerator
                 }
                 else if (input.Attribute is SingletonAttributeMetadataName)
                 {
-                    src.Line.Write("/// <remarks>");
+                    src.Line.Write($"/// <remarks>");
                     src.Line.Write($"/// This is a singleton class. The current instance of the singleton can be accessed via the");
                     src.Line.Write($"/// generated <see cref=\"{input.TypeDisplayName}.Instance\"/> static property.");
-                    src.Line.Write("/// </remarks>");
+                    src.Line.Write($"/// </remarks>");
                 }
             }
 
@@ -504,7 +506,7 @@ public sealed class TrackingSourceGenerator : IIncrementalGenerator
                 src.Linebreak();
                 src.Line.Write(Alias.Hidden);
                 src.Line.Write(Alias.ObsoleteInternal);
-                src.Line.Write($"int {m}MedicineInvalidateInstanceToken = {m}Storage.Singleton<{input.TypeFQN}>.EditMode.Invalidate();");
+                src.Line.Write($"[{m}NS] int {m}MedicineInvalidateInstanceToken = {m}Storage.Singleton<{input.TypeFQN}>.EditMode.Invalidate();");
             }
         }
         else if (input.Attribute is TrackAttributeMetadataName)
@@ -566,7 +568,7 @@ public sealed class TrackingSourceGenerator : IIncrementalGenerator
                 src.Linebreak();
                 src.Line.Write(Alias.Hidden);
                 src.Line.Write(Alias.ObsoleteInternal);
-                src.Line.Write($"int {m}MedicineInvalidateInstanceToken = {m}Storage.Instances<{input.TypeFQN}>.EditMode.Invalidate();");
+                src.Line.Write($"[{m}NS] int {m}MedicineInvalidateInstanceToken = {m}Storage.Instances<{input.TypeFQN}>.EditMode.Invalidate();");
             }
         }
 

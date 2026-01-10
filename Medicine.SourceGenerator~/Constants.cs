@@ -55,5 +55,6 @@ static class Constants
         public const string UsingFind = $"using {m}Find = {MedicineFindClassFQN};";
         public const string UsingDebug = $"using {m}Debug = global::UnityEngine.Debug;";
         public const string UsingDeclaredIn = $"using {m}DeclaredIn = global::Medicine.Internal.InjectionDeclaredInAttribute;";
+        public const string UsingNonSerialized = $"using {m}NS = global::System.NonSerializedAttribute;";
     }
 }
