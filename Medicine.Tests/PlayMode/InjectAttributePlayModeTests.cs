@@ -29,6 +29,28 @@ public partial class InjectAttributePlayModeTests
         Assert.That(obj.GetComponent<MBInjectBasic>().Transform, Is.Not.Null);
     }
 
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    sealed partial class MBInjectLocalMethod : MonoBehaviour
+    {
+        void Awake()
+        {
+            [Inject]
+            void Init()
+                => Transform = GetComponent<Transform>();
+
+            Init();
+        }
+    }
+
+    [Test]
+    public void Inject_LocalMethod()
+    {
+        var obj = new GameObject(null, typeof(MBInjectLocalMethod));
+        Assert.That(obj.GetComponent<MBInjectLocalMethod>().Transform, Is.Not.Null);
+    }
+
     //////////////////////////////////////////////////////////////////////////////
 
     sealed partial class MBInjectManual : MonoBehaviour

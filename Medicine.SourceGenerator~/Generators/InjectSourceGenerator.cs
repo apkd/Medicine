@@ -106,7 +106,12 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: InjectAttributeMetadataName,
                 predicate: static (node, _)
-                    => node is MethodDeclarationSyntax syntax && !syntax.Modifiers.Any(SyntaxKind.AbstractKeyword),
+                    => node switch
+                    {
+                        MethodDeclarationSyntax m => !m.Modifiers.Any(SyntaxKind.AbstractKeyword),
+                        LocalFunctionStatementSyntax l => !l.Modifiers.Any(SyntaxKind.AbstractKeyword),
+                        _ => false
+                    },
                 transform: TransformSyntaxContext
             );
 
@@ -126,27 +131,37 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
     static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, CancellationToken ct)
     {
-        if (context.TargetNode is not MethodDeclarationSyntax methodDeclaration)
+        var targetNode = context.TargetNode;
+
+        if (targetNode.FirstAncestorOrSelf<TypeDeclarationSyntax>() is not { } classDecl)
             return default;
 
-        var classDecl = methodDeclaration.FirstAncestorOrSelf<TypeDeclarationSyntax>();
+        if (targetNode.FirstAncestorOrSelf<MethodDeclarationSyntax>() is not { } methodDecl)
+            return default;
 
-        if (classDecl is null)
+        var (injectMethodName, injectMethodModifiers) = targetNode switch
+        {
+            MethodDeclarationSyntax m      => (m.Identifier.Text, m.Modifiers),
+            LocalFunctionStatementSyntax l => (methodDecl.Identifier.Text, l.Modifiers),
+            _                              => (null, default),
+        };
+
+        if (injectMethodName is null)
             return default;
 
         var output = new GeneratorInput
         {
-            InjectMethodName = methodDeclaration.Identifier.Text,
+            InjectMethodName = injectMethodName,
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
                 filePath: classDecl.Identifier.ValueText,
-                targetFQN: methodDeclaration.Identifier.ValueText,
+                targetFQN: injectMethodName,
                 label: InjectAttributeName
             ),
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(classDecl, context.SemanticModel, ct),
-            MethodTextCheckSumForCache = methodDeclaration.GetText().GetChecksum().AsArray(),
+            MethodTextCheckSumForCache = targetNode.GetText().GetChecksum().AsArray(),
         };
 
-        if (context.TargetNode.SyntaxTree.GetRoot(ct) is CompilationUnitSyntax compilationUnit)
+        if (targetNode.SyntaxTree.GetRoot(ct) is CompilationUnitSyntax compilationUnit)
         {
             var list = new List<string>();
 
@@ -158,10 +173,10 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
         output.ClassName = new(() => context.SemanticModel
             .GetDeclaredSymbol(classDecl, ct)
-            ?.ToMinimalDisplayString(context.SemanticModel, methodDeclaration.SpanStart, MinimallyQualifiedFormat) ?? ""
+            ?.ToMinimalDisplayString(context.SemanticModel, targetNode.SpanStart, MinimallyQualifiedFormat) ?? ""
         );
 
-        output.MethodXmlDocId = new(() => context.TargetSymbol.GetDocumentationCommentId() ?? methodDeclaration.Identifier.ValueText);
+        output.MethodXmlDocId = new(() => context.TargetSymbol.GetDocumentationCommentId() ?? injectMethodName);
 
         (output.MakePublic, output.ForceDebug) = context.Attributes.First()
             .GetAttributeConstructorArguments(ct)
@@ -172,12 +187,12 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             );
 
         output.IsSealed = classDecl.Modifiers.Any(SyntaxKind.SealedKeyword);
-        output.IsStatic = methodDeclaration.Modifiers.Any(SyntaxKind.StaticKeyword);
+        output.IsStatic = injectMethodModifiers.Any(SyntaxKind.StaticKeyword);
 
         // defer the expensive calls to the source gen phase
         output.InitExpressionInfoArrayBuilderFunc = new(() =>
-            methodDeclaration
-                .DescendantNodes(x => x is MethodDeclarationSyntax or BlockSyntax or ArrowExpressionClauseSyntax or ExpressionStatementSyntax)
+            targetNode
+                .DescendantNodes(x => x is MethodDeclarationSyntax or LocalFunctionStatementSyntax or BlockSyntax or ArrowExpressionClauseSyntax or ExpressionStatementSyntax or ReturnStatementSyntax)
                 .OfType<AssignmentExpressionSyntax>()
                 .Where(x => x.Left is IdentifierNameSyntax && context.SemanticModel.GetSymbolInfo(x.Left, ct).Symbol is null)
                 .Select(assignment =>
