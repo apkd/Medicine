@@ -222,7 +222,7 @@ jobs:
           
           Recommended method:
           - Window ⟶ Package Manager ⟶ `+` ⟶ "Install package from git URL"  
-          - Paste the URL (the `release` branch which points at the latest commit with all tests passing)
+          - Paste the URL (the `release` branch points at the latest commit that passed all tests)
           ```md
           https://github.com/apkd/Medicine.git#release
           ```
