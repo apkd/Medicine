@@ -159,6 +159,7 @@ namespace Medicine
         /// Used by the source generator to mark where the generated property was declared.
         /// You can use IDE navigation features to jump to the injection site.
         /// </summary>
+        [EditorBrowsable(Never)]
         [AttributeUsage(Property)]
         public sealed class InjectionDeclaredInAttribute : Attribute
         {
