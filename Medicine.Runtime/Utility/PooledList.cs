@@ -75,7 +75,7 @@ namespace Medicine
             // - set MEDICINE_NO_FUNSAFE to disable this optimization and fall back to normal pool usage
             PooledObject<List<T>> disposable;
 #if MEDICINE_NO_FUNSAFE
-            disposable = ListPool<T>.Get(out var list);
+            disposable = ListPool<T>.Get(out list);
 #else
             if (Utility.IsValueType<T>())
             {
