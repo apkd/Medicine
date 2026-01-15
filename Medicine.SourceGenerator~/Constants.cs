@@ -39,6 +39,9 @@ static class Constants
     public const string IInstanceIndexInterfaceName = "IInstanceIndex";
     public const string IInstanceIndexInterfaceFQN = $"{NamespaceWithGlobal}.{IInstanceIndexInterfaceName}";
 
+    public const string IInstanceIndexInternalInterfaceName = "IInstanceIndex";
+    public const string IInstanceIndexInternalInterfaceFQN = $"{NamespaceWithGlobal}.Internal.{IInstanceIndexInternalInterfaceName}";
+
     public const string MedicineFindClassFQN = "global::Medicine.Find";
 
     public static class Alias

@@ -39,7 +39,7 @@ namespace Medicine.Internal
 #endif
                 int index = List.Count;
 
-                if (instance is IInstanceIndex trackIndex)
+                if (instance is IInstanceIndex<T> trackIndex)
                     trackIndex.InstanceIndex = index;
 
                 List.Add(instance);
@@ -82,14 +82,14 @@ namespace Medicine.Internal
 
                 int index = -1;
 
-                if (instance is IInstanceIndex selfTrackIndex)
+                if (instance is IInstanceIndex<T> selfTrackIndex)
                 {
                     // get the stored index - no array search
                     index = selfTrackIndex.InstanceIndex;
 
                     // update swapped instance's index
                     // (we know the other element also implements the interface)
-                    var lastElement = (IInstanceIndex)array[listView.Count - 1];
+                    var lastElement = (IInstanceIndex<T>)array[listView.Count - 1];
                     lastElement.InstanceIndex = index;
 
                     selfTrackIndex.InstanceIndex = -1;

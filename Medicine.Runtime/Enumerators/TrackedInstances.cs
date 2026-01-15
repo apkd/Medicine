@@ -58,8 +58,14 @@ namespace Medicine.Internal
             return new(Storage.Instances<T>.List);
         }
 
+        /// <summary>
+        /// Gives random access to the tracked instances (by storage index).
+        /// Prefer using <c>foreach</c> over this indexer, as it is more efficient.
+        /// </summary>
         public T this[int index]
         {
+            // todo: generic static access to Storage.Instances<T> is expensive
+            // maybe cache it in the TrackedInstances struct?
             [MethodImpl(AggressiveInlining)]
             get => Storage.Instances<T>.List[index];
         }

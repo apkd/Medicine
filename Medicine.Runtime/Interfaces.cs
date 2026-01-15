@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 
 namespace Medicine
 {
@@ -16,6 +17,21 @@ namespace Medicine
         {
             get => -1;
             set => _ = value;
+        }
+    }
+
+    namespace Internal
+    {
+        /// <summary>
+        /// In cases where multiple classes in the inheritance chain implement <see cref="IInstanceIndex"/>,
+        /// it is difficult to access the correct implementation generically.
+        /// This interface is used to disambiguate the <see cref="InstanceIndex"/> implementation.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public interface IInstanceIndex<T>
+        {
+            int InstanceIndex { get; set; }
         }
     }
 

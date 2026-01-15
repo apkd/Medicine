@@ -54,10 +54,8 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         public bool IsSealed;
         public bool IsStatic;
         public bool? MakePublic;
-        public int ForceDebug;
         public EquatableArray<string> NamespaceImports;
         public EquatableArray<string> ContainingTypeDeclaration;
-        public EquatableIgnore<Func<string>> MethodXmlDocId;
         public EquatableIgnore<Func<string>> ClassName;
         public EquatableIgnore<Func<InitExpressionInfo[]>> InitExpressionInfoArrayBuilderFunc = new(() => []);
 
@@ -110,7 +108,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     {
                         MethodDeclarationSyntax m => !m.Modifiers.Any(SyntaxKind.AbstractKeyword),
                         LocalFunctionStatementSyntax l => !l.Modifiers.Any(SyntaxKind.AbstractKeyword),
-                        _ => false
+                        _ => false,
                     },
                 transform: TransformSyntaxContext
             );
@@ -171,25 +169,20 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             output.NamespaceImports = list.ToArray();
         }
 
-        output.ClassName = new(() => context.SemanticModel
-            .GetDeclaredSymbol(classDecl, ct)
-            ?.ToMinimalDisplayString(context.SemanticModel, targetNode.SpanStart, MinimallyQualifiedFormat) ?? ""
-        );
-
-        output.MethodXmlDocId = new(() => context.TargetSymbol.GetDocumentationCommentId() ?? injectMethodName);
-
-        (output.MakePublic, output.ForceDebug) = context.Attributes.First()
+        output.MakePublic = context.Attributes.First()
             .GetAttributeConstructorArguments(ct)
-            .Select(x => (
-                    makePublic: x.Get<bool>("makePublic", null),
-                    forceDebug: x.Get("forceDebug", 0)
-                )
-            );
+            .Select(x => x.Get<bool>("makePublic", null));
 
         output.IsSealed = classDecl.Modifiers.Any(SyntaxKind.SealedKeyword);
         output.IsStatic = injectMethodModifiers.Any(SyntaxKind.StaticKeyword);
 
         // defer the expensive calls to the source gen phase
+
+        output.ClassName = new(() => context.SemanticModel
+            .GetDeclaredSymbol(classDecl, ct)
+            ?.ToMinimalDisplayString(context.SemanticModel, targetNode.SpanStart, MinimallyQualifiedFormat) ?? ""
+        );
+
         output.InitExpressionInfoArrayBuilderFunc = new(() =>
             targetNode
                 .DescendantNodes(x => x is MethodDeclarationSyntax or LocalFunctionStatementSyntax or BlockSyntax or ArrowExpressionClauseSyntax or ExpressionStatementSyntax or ReturnStatementSyntax)
@@ -206,6 +199,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         {
                             if (GetDelegateReturnType(expr) is { } exprType)
                             {
+                                // todo: cache types per-compilation
                                 string lazyExpr = exprType.IsValueType ? "Medicine.LazyVal`1" : "Medicine.LazyRef`1";
                                 typeSymbol = context.SemanticModel.Compilation.GetTypeByMetadataName(lazyExpr)?.Construct(exprType);
                                 typeSymbolForDisplayName = exprType;
@@ -216,6 +210,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         {
                             if (GetDelegateReturnType(assignment.Right) is { } exprType)
                             {
+                                // todo: cache types per-compilation
                                 typeSymbol = context.SemanticModel.Compilation.GetTypeByMetadataName("System.Func`1")?.Construct(exprType);
                                 typeSymbolForDisplayName = exprType;
                                 flags.Set(IsTransient, true);
@@ -519,7 +514,6 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         string storagePropName = $"{m}MedicineInternal{storageSuffix}";
         string storageStructName = $"{m}MedicineInternalBackingStorage{storageSuffix}";
 
-        string methodXmlDocId = input.MethodXmlDocId.Value();
         string className = input.ClassName.Value();
 
         var deferredLines = new List<string>();

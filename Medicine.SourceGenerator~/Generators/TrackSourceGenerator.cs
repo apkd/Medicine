@@ -190,8 +190,15 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             }
 
             src.Line.Write(declarations[i]);
-            if (i == lastDeclaration && input.EmitIInstanceIndex)
-                src.Write($" : {IInstanceIndexInterfaceFQN}");
+
+            if (i == lastDeclaration)
+            {
+                if (input.HasIInstanceIndex)
+                    src.Write($" : {IInstanceIndexInternalInterfaceFQN}<{input.TypeFQN}>");
+
+                if (input.EmitIInstanceIndex)
+                    src.Write($", {IInstanceIndexInterfaceFQN}");
+            }
 
             src.Line.Write('{');
             src.IncreaseIndent();
@@ -282,6 +289,13 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Linebreak();
 
             src.Line.Write($"int {IInstanceIndexInterfaceFQN}.InstanceIndex");
+            using (src.Braces)
+            {
+                src.Line.Write($"{Alias.Inline} get => {m}MedicineInternalInstanceIndex;");
+                src.Line.Write($"{Alias.Inline} set => {m}MedicineInternalInstanceIndex = value;");
+            }
+
+            src.Line.Write($"int {IInstanceIndexInternalInterfaceFQN}<{input.TypeFQN}>.InstanceIndex");
             using (src.Braces)
             {
                 src.Line.Write($"{Alias.Inline} get => {m}MedicineInternalInstanceIndex;");
