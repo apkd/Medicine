@@ -9,8 +9,8 @@ using Microsoft.CodeAnalysis.Diagnostics;
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class LazyAnalyzer : DiagnosticAnalyzer
 {
-    static readonly DiagnosticDescriptor Rule = new(
-        id: "MED016",
+    static readonly DiagnosticDescriptor MED016 = new(
+        id: nameof(MED016),
         title: "Invalid argument for Lazy.From",
         messageFormat: "The argument to Lazy.From needs to be a lambda expression or a method group (matching Func<T>).",
         category: "Usage",
@@ -20,7 +20,7 @@ public sealed class LazyAnalyzer : DiagnosticAnalyzer
     );
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; }
-        = ImmutableArray.Create(Rule);
+        = ImmutableArray.Create(MED016);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -71,7 +71,7 @@ public sealed class LazyAnalyzer : DiagnosticAnalyzer
         if (context.SemanticModel.GetConversion(argExpr, context.CancellationToken).IsMethodGroup)
             return; // allow method groups
 
-        var diagnostic = Diagnostic.Create(Rule, invocation.GetLocation());
+        var diagnostic = Diagnostic.Create(MED016, invocation.GetLocation());
         context.ReportDiagnostic(diagnostic);
     }
 }

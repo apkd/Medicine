@@ -46,7 +46,9 @@ public static class Utility
 
         var result = includeFilename
             ? $"{fileNameWithoutExtension}.{typename}.{label}.{Hash():x8}.g.cs"
-            : $"{typename}.{label}.{Hash():x8}.g.cs";;
+            : $"{typename}.{label}.{Hash():x8}.g.cs";
+
+        ;
 
         return result;
 
@@ -72,6 +74,16 @@ public static class Utility
         var ptr = (char*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(chars));
         return new(ptr, 0, chars.Length);
     }
+
+    public static string AsRefString(this RefKind refKind)
+        => refKind switch
+        {
+            RefKind.None => "",
+            RefKind.Ref  => "ref ",
+            RefKind.Out  => "out ",
+            RefKind.In   => "in ",
+            _            => "??? ",
+        };
 
     public static void EnsureNamespaceIsImported(this DocumentEditor editor, string namespaceName)
     {

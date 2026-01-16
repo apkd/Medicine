@@ -168,6 +168,22 @@ namespace Medicine
     }
 
     /// <summary>
+    /// Marks the struct as the header for a tagged union,
+    /// generating code to support class-like polymorphic methods and properties.
+    /// Supports Burst compilation.
+    /// </summary>
+    [AttributeUsage(Struct)]
+    [EditorBrowsable(Never)] // experimental feature - needs optimizations, analyzers etc
+    public sealed class UnionHeaderAttribute : Attribute { }
+
+    /// <summary>
+    /// Marks the struct as one of the polymorphic structs defined for a <see cref="UnionHeaderAttribute"/>.
+    /// </summary>
+    [AttributeUsage(Struct)]
+    [EditorBrowsable(Never)] // experimental feature - needs optimizations, analyzers etc
+    public sealed class UnionAttribute : Attribute { }
+
+    /// <summary>
     /// Marks the assembly for generation of a <see cref="Medicine.Constants"/> class,
     /// containing various project constants extracted from the TagManager.asset file,
     /// such as layers and tags.

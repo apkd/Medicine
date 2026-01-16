@@ -25,6 +25,14 @@ static class Constants
     public const string WrapValueEnumerableAttributeMetadataName = $"{Namespace}.{WrapValueEnumerableAttributeName}";
     public const string WrapValueEnumerableAttributeFQN = $"{NamespaceWithGlobal}.{WrapValueEnumerableAttributeName}";
 
+    public const string UnionHeaderStructAttributeName = "UnionHeaderAttribute";
+    public const string UnionHeaderStructAttributeMetadataName = $"{Namespace}.{UnionHeaderStructAttributeName}";
+    public const string UnionHeaderStructAttributeFQN = $"{NamespaceWithGlobal}.{UnionHeaderStructAttributeName}";
+
+    public const string UnionStructAttributeName = "UnionAttribute";
+    public const string UnionStructAttributeMetadataName = $"{Namespace}.{UnionStructAttributeName}";
+    public const string UnionStructAttributeFQN = $"{NamespaceWithGlobal}.{UnionStructAttributeName}";
+
     public const string GenerateConstantsAttributeNameShort = "GenerateUnityConstants";
     public const string GenerateConstantsAttributeName = $"{GenerateConstantsAttributeNameShort}Attribute";
     public const string GenerateConstantsAttributeMetadataName = $"{Namespace}.{GenerateConstantsAttributeName}";

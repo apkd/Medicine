@@ -13,8 +13,8 @@ using Microsoft.CodeAnalysis.Diagnostics;
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class DisallowReadonlyFieldAnalyzer : DiagnosticAnalyzer
 {
-    static readonly DiagnosticDescriptor Rule = new(
-        id: "MED015",
+    static readonly DiagnosticDescriptor MED015 = new(
+        id: nameof(MED015),
         title: "Disallowed readonly field",
         messageFormat: "This field must not be readonly to ensure that the stored mutable struct works correctly.",
         category: "Usage",
@@ -23,7 +23,7 @@ public sealed class DisallowReadonlyFieldAnalyzer : DiagnosticAnalyzer
     );
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; }
-        = ImmutableArray.Create(Rule);
+        = ImmutableArray.Create(MED015);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -49,7 +49,7 @@ public sealed class DisallowReadonlyFieldAnalyzer : DiagnosticAnalyzer
                     attributes.Any(x => x is { AttributeClass: { ContainingNamespace.Name: "Medicine", Name: "DisallowReadonlyAttribute" } });
 
         if (hasAttribute)
-            context.ReportDiagnostic(Diagnostic.Create(Rule, fieldDeclaration.GetLocation()));
+            context.ReportDiagnostic(Diagnostic.Create(MED015, fieldDeclaration.GetLocation()));
     }
 
     [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(CodeFix))] [Shared]
@@ -57,7 +57,7 @@ public sealed class DisallowReadonlyFieldAnalyzer : DiagnosticAnalyzer
     public sealed class CodeFix : CodeFixProvider
     {
         public override ImmutableArray<string> FixableDiagnosticIds { get; }
-            = ImmutableArray.Create(Rule.Id);
+            = ImmutableArray.Create(MED015.Id);
 
         public override FixAllProvider GetFixAllProvider()
             => WellKnownFixAllProviders.BatchFixer;

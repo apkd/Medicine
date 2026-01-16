@@ -9,8 +9,8 @@ using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class InstanceIndexAnalyzer : DiagnosticAnalyzer
 {
-    static readonly DiagnosticDescriptor MED006 = new(
-        id: "MED017",
+    static readonly DiagnosticDescriptor MED017 = new(
+        id: nameof(MED017),
         title: "IInstanceIndex requires [Track]",
         messageFormat: "Class '{0}' implements the IInstanceIndex interface but is missing [Track].",
         category: "Medicine",
@@ -20,7 +20,7 @@ public sealed class InstanceIndexAnalyzer : DiagnosticAnalyzer
     );
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; }
-        = ImmutableArray.Create(MED006);
+        = ImmutableArray.Create(MED017);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -40,7 +40,7 @@ public sealed class InstanceIndexAnalyzer : DiagnosticAnalyzer
         {
             context.ReportDiagnostic(
                 Diagnostic.Create(
-                    MED006,
+                    MED017,
                     type.Locations.First(),
                     type.ToDisplayString(MinimallyQualifiedFormat)
                 )
