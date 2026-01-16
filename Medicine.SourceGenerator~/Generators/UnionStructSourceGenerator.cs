@@ -6,7 +6,7 @@ using static Constants;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 
 [Generator]
-public sealed class PolymorphicStructSourceGenerator : IIncrementalGenerator
+public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 {
     record struct InterfaceMemberInput
     {
@@ -142,7 +142,7 @@ public sealed class PolymorphicStructSourceGenerator : IIncrementalGenerator
 
         return new()
         {
-            SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "Polymorphic"),
+            SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "Union"),
             BaseDeclaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
             BaseTypeName = symbol.Name,
             BaseTypeFQN = symbol.ToDisplayString(FullyQualifiedFormat),
@@ -343,8 +343,15 @@ public sealed class PolymorphicStructSourceGenerator : IIncrementalGenerator
             // polymorphic methods/properties
             foreach (var member in input.InterfaceMembers)
             {
+                var parametersEnumerable
+                    = member
+                        .Parameters
+                        .AsArray()
+                        .Zip(member.ParameterRefKinds.AsArray().Cast<RefKind>(), (call, refKind) => (call, refKind))
+                        .Select(x => x.refKind.AsRefString() + x.call);
+
                 string parameters = !member.IsProperty
-                    ? string.Join(", ", member.Parameters.AsArray())
+                    ? string.Join(", ", parametersEnumerable)
                     : "";
 
                 var callParametersEnumerable
@@ -355,11 +362,15 @@ public sealed class PolymorphicStructSourceGenerator : IIncrementalGenerator
                         .Select(x => x.refKind.AsRefString() + x.call.Split(spaceSplitParams)[^1]);
 
                 string callParameters = !member.IsProperty
-                    ? $"({string.Join(", ", callParametersEnumerable)})"
+                    ? string.Join(", ", callParametersEnumerable)
+                    : "";
+
+                string callParametersWithInvoke = !member.IsProperty
+                    ? $"({callParameters})"
                     : "";
 
                 string methodParameters = member is { IsProperty: false, Parameters.Length: > 0 }
-                    ? ", " + parameters
+                    ? $", {parameters}"
                     : "";
 
                 string genericInvokeName = $"{member.Name}_GenericInvoke";
@@ -367,7 +378,7 @@ public sealed class PolymorphicStructSourceGenerator : IIncrementalGenerator
                 // generic helper for explicit interface implementations
                 src.Line.Write($"static {member.ReturnTypeFQN} {genericInvokeName}<T>(this ref T self{methodParameters}) where T : struct, {input.InterfaceFQN}");
                 using (src.Indent)
-                    src.Line.Write($"=> self.{member.Name}{callParameters};");
+                    src.Line.Write($"=> self.{member.Name}{callParametersWithInvoke};");
 
                 src.Linebreak();
 
@@ -388,17 +399,25 @@ public sealed class PolymorphicStructSourceGenerator : IIncrementalGenerator
                                         ? ", "
                                         : "";
 
-                                    string argList = string.Join(", ", member.Parameters.AsArray().Select(p => p.Split(spaceSplitParams)[^1]));
                                     if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
-                                        src.Line.Write($"UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParameters}; return;");
+                                        src.Line.Write($"UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke}; return;");
                                     else
-                                        src.Line.Write($"{genericInvokeName}(ref UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{argList}); return;");
+                                        src.Line.Write($"{genericInvokeName}(ref UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}); return;");
                                 }
                             }
 
                             src.Line.Write("default:");
                             using (src.Indent)
+                            {
+                                var outParameters = member.Parameters
+                                    .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call.Split(spaceSplitParams)[^1], refKind))
+                                    .Where(x => x.refKind is (byte)RefKind.Out);
+
+                                foreach (var (call, _) in outParameters)
+                                    src.Line.Write($"{call} = default;");
+
                                 src.Line.Write($"ThrowUnknownTypeException(self.{input.TypeIDFieldName}); return;");
+                            }
                         }
                     }
                 }
@@ -418,11 +437,10 @@ public sealed class PolymorphicStructSourceGenerator : IIncrementalGenerator
                                         ? ", "
                                         : "";
 
-                                    string argList = string.Join(", ", member.Parameters.AsArray().Select(p => p.Split(spaceSplitParams)[^1]));
                                     if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
-                                        src.Line.Write($"=> UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParameters},");
+                                        src.Line.Write($"=> UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke},");
                                     else
-                                        src.Line.Write($"=> {genericInvokeName}(ref UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{argList}),");
+                                        src.Line.Write($"=> {genericInvokeName}(ref UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}),");
                                 }
                             }
 
