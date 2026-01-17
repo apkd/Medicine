@@ -133,6 +133,13 @@ namespace Medicine
         /// the <see cref="UnityEngine.Jobs.TransformAccessArray"/> is consumed by <see cref="UnityEngine.Jobs.IJobParallelForTransform"/>.
         /// (-1 = selected automatically)
         /// </param>
+        /// <param name="cacheEnabledState">
+        /// Caches the component's enabled state in a separate field.
+        /// This makes it possible to check the component's enabled state without an expensive extern call.
+        /// <br/>
+        /// The generated <c>enabled</c> property effectively hides the built-in <see cref="UnityEngine.Behaviour.enabled"/>
+        /// property, and tries to exactly replicate its behaviour.
+        /// </param>
         /// <param name="manual">
         /// Setting this to <c>true</c> disables automatic tracking - you'll need to invoke <c>RegisterTracked()</c>
         /// and <c>UnregisterTracked()</c> manually.
@@ -142,9 +149,12 @@ namespace Medicine
             bool transformAccessArray = false,
             int transformInitialCapacity = 64,
             int transformDesiredJobCount = -1,
+            bool cacheEnabledState = false,
             bool manual = false
         ) { }
     }
+
+    public sealed class UnmanagedAccessAttribute : Attribute { }
 
     /// <summary>
     /// Can be used to ensure that a mutable struct is not stored in a `readonly` field.

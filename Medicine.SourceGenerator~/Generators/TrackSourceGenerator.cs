@@ -37,6 +37,15 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         }
     }
 
+    readonly record struct TrackAttributeSettings(
+        bool TrackInstanceIDs,
+        bool TrackTransforms,
+        int InitialCapacity,
+        int DesiredJobCount,
+        bool CacheEnabledState,
+        bool Manual
+    );
+
     record struct GeneratorInput : IGeneratorTransformOutput
     {
         public string? SourceGeneratorOutputFilename { get; init; }
@@ -44,7 +53,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
 
         public string? Attribute;
-        public (bool TrackInstanceIDs, bool TrackTransforms, int InitialCapacity, int DesiredJobCount, bool Manual) AttributeArguments;
+        public TrackAttributeSettings AttributeSettings;
         public EquatableArray<string> ContainingTypeDeclaration;
         public EquatableArray<string> InterfacesWithAttribute;
         public EquatableArray<string> UnmanagedDataFQNs;
@@ -78,11 +87,12 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         var attributeArguments = attributeData
             .GetAttributeConstructorArguments(ct)
-            .Select(x => (
+            .Select(x => new TrackAttributeSettings(
                     TrackInstanceIDs: x.Get("instanceIdArray", false),
                     TrackTransforms: x.Get("transformAccessArray", false) && classSymbol.InheritsFrom("global::UnityEngine.MonoBehaviour"),
                     InitialCapacity: x.Get("transformInitialCapacity", 64),
                     DesiredJobCount: x.Get("transformDesiredJobCount", -1),
+                    CacheEnabledState: x.Get("cacheEnabledState", false),
                     Manual: x.Get("manual", false)
                 )
             );
@@ -97,7 +107,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             ),
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration, context.SemanticModel, ct),
             Attribute = attributeName,
-            AttributeArguments = attributeArguments,
+            AttributeSettings = attributeArguments,
             UnmanagedDataFQNs = classSymbol.Interfaces
                 .Where(x => x.FQN?.StartsWith(UnmanagedDataInterfaceFQN) is true)
                 .Select(x => x.TypeArguments.FirstOrDefault()?.FQN ?? "")
@@ -108,7 +118,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 .ToArray(),
             HasIInstanceIndex = classSymbol.HasInterface(IInstanceIndexInterfaceFQN),
             EmitIInstanceIndex = classSymbol.HasInterface(IInstanceIndexInterfaceFQN) && !classSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false),
-            TypeFQN = classSymbol.FQN!,
+            TypeFQN = classSymbol.FQN,
             TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode(),
             IsSealed = classSymbol.IsSealed,
             IsGenericType = classSymbol.IsGenericType,
@@ -117,7 +127,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 = classSymbol.Interfaces
                     .Where(x => x.HasAttribute(attributeFQN))
                     .Where(x => !classSymbol.GetBaseTypes().Any(y => y.Interfaces.Contains(x))) // skip interfaces already registered via base class
-                    .Select(x => x.FQN!)
+                    .Select(x => x.FQN)
                     .Where(x => x != null)
                     .ToArray(),
             HasBaseDeclarationsWithAttribute
@@ -206,7 +216,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         void EmitRegistrationMethod(string methodName, params string?[] methodCalls)
         {
-            if (!input.AttributeArguments.Manual)
+            if (!input.AttributeSettings.Manual)
             {
                 src.Line.Write(Alias.Hidden);
                 src.Line.Write(Alias.ObsoleteInternal);
@@ -250,10 +260,10 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         {
             src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Instances\"/> tracked instance list </item>");
 
-            if (input.AttributeArguments.TrackInstanceIDs)
+            if (input.AttributeSettings.TrackInstanceIDs)
                 src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIDs\"/> instance ID array </item>");
 
-            if (input.AttributeArguments.TrackTransforms)
+            if (input.AttributeSettings.TrackTransforms)
                 src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.TransformAccessArray\"/> transform array </item>");
 
             foreach (var (_, dataTypeShort) in unmanagedDataInfo)
@@ -309,7 +319,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Linebreak();
         }
 
-        if (input.AttributeArguments.TrackTransforms)
+        if (input.AttributeSettings.TrackTransforms)
         {
             if (input.Symbols.Has(UNITY_EDITOR))
             {
@@ -337,7 +347,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
                         using (src.Indent)
                             src.Line.Write($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize")
-                                .Write($"({input.AttributeArguments.InitialCapacity}, {input.AttributeArguments.DesiredJobCount});");
+                                .Write($"({input.AttributeSettings.InitialCapacity}, {input.AttributeSettings.DesiredJobCount});");
                     }
                 }
             }
@@ -345,7 +355,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Linebreak();
         }
 
-        if (input is { IsGenericType: true, AttributeArguments.TrackTransforms: true })
+        if (input is { IsGenericType: true, AttributeSettings.TrackTransforms: true })
         {
             src.Line.Write($"public static void InitializeTransformAccessArray()");
 
@@ -353,13 +363,13 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             {
                 src.Line
                     .Write($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize")
-                    .Write($"({input.AttributeArguments.InitialCapacity}, {input.AttributeArguments.DesiredJobCount});");
+                    .Write($"({input.AttributeSettings.InitialCapacity}, {input.AttributeSettings.DesiredJobCount});");
             }
 
             src.Linebreak();
         }
 
-        if (input.AttributeArguments.TrackInstanceIDs)
+        if (input.AttributeSettings.TrackInstanceIDs)
         {
             if (input.Symbols.Has(UNITY_EDITOR))
             {
@@ -551,14 +561,15 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             }
 
             src.Linebreak();
-            string withId = input.AttributeArguments.TrackInstanceIDs ? "WithInstanceID" : "";
+            string withId = input.AttributeSettings.TrackInstanceIDs ? "WithInstanceID" : "";
 
             EmitRegistrationMethod(
                 methodName: "OnEnableINTERNAL",
                 methodCalls:
                 [
                     $"{m}Storage.Instances<{input.TypeFQN}>.Register{withId}(this)",
-                    input.AttributeArguments.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Register(transform)" : null,
+                    input.AttributeSettings.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Register(transform)" : null,
+                    input.AttributeSettings.CacheEnabledState ? $"{m}MedicineInternalCachedEnabledState = true" : null,
                     ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Register(this)"),
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Register(this)"),
                     ..input.TrackingIdFQNs.AsArray().Select(x => $"{m}Storage.LookupByID<{input.TypeFQN}, {x}>.Register(this)"),
@@ -571,9 +582,10 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 [
                     $"int index = {m}Storage.Instances<{input.TypeFQN}>.Unregister{withId}(this)",
                     ..input.TrackingIdFQNs.AsArray().Select(x => $"{m}Storage.LookupByID<{input.TypeFQN}, {x}>.Unregister(this)"),
+                    input.AttributeSettings.CacheEnabledState ? $"{m}MedicineInternalCachedEnabledState = false" : null,
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Unregister(this, index)").Reverse(),
                     ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Unregister(this)").Reverse(),
-                    input.AttributeArguments.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Unregister(index)" : null,
+                    input.AttributeSettings.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Unregister(index)" : null,
                 ]
             );
 
@@ -583,6 +595,32 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write(Alias.Hidden);
                 src.Line.Write(Alias.ObsoleteInternal);
                 src.Line.Write($"[{m}NS] int {m}MedicineInvalidateInstanceToken = {m}Storage.Instances<{input.TypeFQN}>.EditMode.Invalidate();");
+            }
+
+            if (input.AttributeSettings.CacheEnabledState)
+            {
+                src.Linebreak();
+                src.Line.Write(Alias.Hidden);
+                src.Line.Write($"bool {m}MedicineInternalCachedEnabledState;");
+
+                src.Linebreak();
+                src.Line.Write($"/// <summary>");
+                src.Line.Write($"/// Enabled components are updated, disabled components are not.");
+                src.Line.Write($"/// </summary>");
+                src.Line.Write($"/// <remarks>");
+                src.Line.Write($"/// This property returns the cached value of <see cref=\"UnityEngine.Behaviour.enabled\"/>.");
+                src.Line.Write($"/// Setting this property normally updates the component's enabled state.");
+                src.Line.Write($"/// The cached value is automatically updated when the component is enabled/disabled.<br/><br/>");
+                src.Line.Write($"/// This generated property effectively hides the built-in <c>enabled</c>");
+                src.Line.Write($"/// property, and tries to exactly replicate its behaviour.");
+                src.Line.Write($"/// </remarks>");
+                src.Line.Write($"/// <codegen>Generated because of the <c>TrackAttribute</c> parameter: <c>cacheEnabledState</c></codegen>");
+                src.Line.Write($"public new bool enabled");
+                using (src.Braces)
+                {
+                    src.Line.Write($"{Alias.Inline} get => {m}MedicineInternalCachedEnabledState;");
+                    src.Line.Write($"{Alias.Inline} set => base.enabled = value;");
+                }
             }
         }
 
