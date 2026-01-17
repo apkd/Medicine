@@ -24,6 +24,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public EquatableArray<string> Declaration;
         public byte Order;
         public EquatableArray<string> PubliclyImplementedMembers;
+        public bool HasParameterlessConstructor;
     }
 
     record struct GeneratorInput : IGeneratorTransformOutput
@@ -58,6 +59,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public ImmutableArray<INamedTypeSymbol> Interfaces { get; init; }
         public byte Order { get; init; }
         public EquatableArray<string> PublicMembers { get; init; }
+        public bool HasParameterlessConstructor { get; init; }
     }
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -179,6 +181,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 .Select(x => x.Name)
                 .Distinct()
                 .ToArray(),
+            HasParameterlessConstructor = symbol.InstanceConstructors.Any(x => x is { Parameters.Length: 0, IsImplicitlyDeclared: false }),
         };
     }
 
@@ -196,6 +199,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     Declaration = x.Declaration,
                     Order = x.Order,
                     PubliclyImplementedMembers = x.PublicMembers,
+                    HasParameterlessConstructor = x.HasParameterlessConstructor,
                 }
             )
             .OrderBy(x => x.Order)
@@ -244,7 +248,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             src.Line.Write($"public const {input.TypeIDEnumFQN} TypeID = {input.TypeIDEnumFQN}.{derived.Name};");
             src.Linebreak();
 
-            if (input.LangVersion >= LanguageVersion.CSharp10)
+            if (input.LangVersion >= LanguageVersion.CSharp10 && !derived.HasParameterlessConstructor)
             {
                 src.Line.Write($"public {derived.Name}()");
                 using (src.Braces)
