@@ -151,7 +151,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
             return new() { SourceGeneratorError = $"Unexpected symbol type." };
         }
 
-        var outputFilename = Utility.GetOutputFilename(declSyntax.SyntaxTree.FilePath, wrapperName, context.TargetSymbol.GetFQN()!);
+        var outputFilename = Utility.GetOutputFilename(declSyntax.SyntaxTree.FilePath, wrapperName, context.TargetSymbol.FQN!);
         var retExpr = GetSymbolRetExpr(context.TargetSymbol);
 
         var output = new GeneratorInput

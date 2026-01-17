@@ -333,7 +333,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                                    },
                                }
                                && context.SemanticModel.GetSymbolInfo(findClassIdentifier, ct).Symbol is ITypeSymbol medicineFindTypeSymbol
-                               && medicineFindTypeSymbol.GetFQN() is MedicineFindClassFQN
+                               && medicineFindTypeSymbol.FQN is MedicineFindClassFQN
                                && identifierText == methodName;
 
                         string? cleanupExpression = null;

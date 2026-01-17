@@ -351,7 +351,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                         .Select(x => x.refKind.AsRefString() + x.call);
 
                 string parameters = !member.IsProperty
-                    ? string.Join(", ", parametersEnumerable)
+                    ? parametersEnumerable.Join(", ")
                     : "";
 
                 var callParametersEnumerable
@@ -362,7 +362,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                         .Select(x => x.refKind.AsRefString() + x.call.Split(spaceSplitParams)[^1]);
 
                 string callParameters = !member.IsProperty
-                    ? string.Join(", ", callParametersEnumerable)
+                    ? callParametersEnumerable.Join(", ")
                     : "";
 
                 string callParametersWithInvoke = !member.IsProperty
@@ -410,11 +410,15 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                             using (src.Indent)
                             {
                                 var outParameters = member.Parameters
-                                    .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call.Split(spaceSplitParams)[^1], refKind))
+                                    .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call: call.Split(spaceSplitParams)[^1], refKind))
                                     .Where(x => x.refKind is (byte)RefKind.Out);
 
                                 foreach (var (call, _) in outParameters)
                                     src.Line.Write($"{call} = default;");
+
+                                string outInit = outParameters
+                                    .Select(x => $".WithAssign(out {x.call})")
+                                    .Join(", ");
 
                                 src.Line.Write($"ThrowUnknownTypeException(self.{input.TypeIDFieldName}); return;");
                             }
@@ -474,14 +478,22 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
             // throw helpers
             src.Line.Write("[MethodImpl(MethodImplOptions.NoInlining)]");
-            src.Line.Write($"static unsafe void* ThrowUnknownTypeException({input.TypeIDEnumFQN} typeId)");
+            src.Line.Write($"static unsafe nint ThrowUnknownTypeException({input.TypeIDEnumFQN} typeId)");
             using (src.Braces)
             {
                 src.Line.Write("[BurstDiscard]");
                 src.Line.Write($"void Throw() => throw new InvalidOperationException($\"Unknown {input.BaseTypeName} type ID: {{typeId}}\");");
                 src.Linebreak();
                 src.Line.Write("Throw();");
-                src.Line.Write("return null;");
+                src.Line.Write("return 0;");
+            }
+
+            src.Line.Write("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+            src.Line.Write($"static unsafe nint WithAssign(this nint ptr, out T? value)");
+            using (src.Braces)
+            {
+                src.Line.Write("value = default;");
+                src.Line.Write("return ptr;");
             }
 
             src.Linebreak();

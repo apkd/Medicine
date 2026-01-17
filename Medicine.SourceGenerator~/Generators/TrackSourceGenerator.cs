@@ -99,16 +99,16 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             Attribute = attributeName,
             AttributeArguments = attributeArguments,
             UnmanagedDataFQNs = classSymbol.Interfaces
-                .Where(x => x.GetFQN()?.StartsWith(UnmanagedDataInterfaceFQN) is true)
-                .Select(x => x.TypeArguments.FirstOrDefault().GetFQN()!)
+                .Where(x => x.FQN?.StartsWith(UnmanagedDataInterfaceFQN) is true)
+                .Select(x => x.TypeArguments.FirstOrDefault().FQN!)
                 .ToArray(),
             TrackingIdFQNs = classSymbol.Interfaces
-                .Where(x => x.GetFQN()?.StartsWith(TrackingIdInterfaceFQN) is true)
-                .Select(x => x.TypeArguments.FirstOrDefault().GetFQN()!)
+                .Where(x => x.FQN?.StartsWith(TrackingIdInterfaceFQN) is true)
+                .Select(x => x.TypeArguments.FirstOrDefault().FQN!)
                 .ToArray(),
             HasIInstanceIndex = classSymbol.HasInterface(IInstanceIndexInterfaceFQN),
             EmitIInstanceIndex = classSymbol.HasInterface(IInstanceIndexInterfaceFQN) && !classSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false),
-            TypeFQN = classSymbol.GetFQN()!,
+            TypeFQN = classSymbol.FQN!,
             TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode(),
             IsSealed = classSymbol.IsSealed,
             IsGenericType = classSymbol.IsGenericType,
@@ -117,7 +117,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 = classSymbol.Interfaces
                     .Where(x => x.HasAttribute(attributeFQN))
                     .Where(x => !classSymbol.GetBaseTypes().Any(y => y.Interfaces.Contains(x))) // skip interfaces already registered via base class
-                    .Select(x => x.GetFQN()!)
+                    .Select(x => x.FQN!)
                     .Where(x => x != null)
                     .ToArray(),
             HasBaseDeclarationsWithAttribute
