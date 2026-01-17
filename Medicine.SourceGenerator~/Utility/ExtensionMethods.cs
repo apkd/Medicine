@@ -24,22 +24,25 @@ public static partial class ExtensionMethods
             => (checkAllInterfaces ? self?.AllInterfaces : self?.Interfaces)?.Any(x => x.Is(interfaceFullyQualifiedName)) is true;
     }
 
+    extension(ISymbol self)
+    {
+        [NotNullIfNotNull("self")]
+        public string FQN
+            => self.ToDisplayString(FullyQualifiedFormat);
+    }
+
     extension(ISymbol? self)
     {
         public bool Is(ISymbol? other)
             => SymbolEqualityComparer.Default.Equals(self, other);
 
         public bool Is(string fqn)
-            => fqn.Equals(self.FQN, Ordinal);
-
-        public string? FQN
-            => self?.ToDisplayString(FullyQualifiedFormat);
-
+            => self?.FQN.Equals(fqn, Ordinal) ?? false;
         public bool HasAttribute(string attributeFullyQualifiedName)
             => self?.GetAttributes().Any(x => x.AttributeClass.Is(attributeFullyQualifiedName)) is true;
 
         public bool HasAttribute(Func<string, bool> attributeFullyQualifiedNamePredicate)
-            => self?.GetAttributes().Select(x => x.AttributeClass.FQN ?? "").Any(attributeFullyQualifiedNamePredicate) is true;
+            => self?.GetAttributes().Select(x => x?.AttributeClass?.FQN ?? "").Any(attributeFullyQualifiedNamePredicate) is true;
 
         public AttributeData? GetAttribute(string attributeFullyQualifiedName)
             => self?.GetAttributes().FirstOrDefault(x => x.AttributeClass.Is(attributeFullyQualifiedName));

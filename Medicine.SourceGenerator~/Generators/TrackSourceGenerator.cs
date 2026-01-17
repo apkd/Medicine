@@ -100,11 +100,11 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             AttributeArguments = attributeArguments,
             UnmanagedDataFQNs = classSymbol.Interfaces
                 .Where(x => x.FQN?.StartsWith(UnmanagedDataInterfaceFQN) is true)
-                .Select(x => x.TypeArguments.FirstOrDefault().FQN!)
+                .Select(x => x.TypeArguments.FirstOrDefault()?.FQN ?? "")
                 .ToArray(),
             TrackingIdFQNs = classSymbol.Interfaces
                 .Where(x => x.FQN?.StartsWith(TrackingIdInterfaceFQN) is true)
-                .Select(x => x.TypeArguments.FirstOrDefault().FQN!)
+                .Select(x => x.TypeArguments.FirstOrDefault()?.FQN ?? "")
                 .ToArray(),
             HasIInstanceIndex = classSymbol.HasInterface(IInstanceIndexInterfaceFQN),
             EmitIInstanceIndex = classSymbol.HasInterface(IInstanceIndexInterfaceFQN) && !classSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false),

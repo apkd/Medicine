@@ -120,8 +120,8 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     new()
                     {
                         Name = method.Name,
-                        ReturnTypeFQN = method.ReturnType.ToDisplayString(FullyQualifiedFormat),
-                        Parameters = method.Parameters.Select(x => $"{x.Type.ToDisplayString(FullyQualifiedFormat)} {x.Name}").ToArray(),
+                        ReturnTypeFQN = method.ReturnType.FQN,
+                        Parameters = method.Parameters.Select(x => $"{x.Type.FQN} {x.Name}").ToArray(),
                         ParameterRefKinds = method.Parameters.Select(x => (byte)x.RefKind).ToArray(),
                         IsProperty = false,
                     }
@@ -133,7 +133,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     new()
                     {
                         Name = property.Name,
-                        ReturnTypeFQN = property.Type.ToDisplayString(FullyQualifiedFormat),
+                        ReturnTypeFQN = property.Type.FQN,
                         IsProperty = true,
                     }
                 );
@@ -145,10 +145,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "Union"),
             BaseDeclaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
             BaseTypeName = symbol.Name,
-            BaseTypeFQN = symbol.ToDisplayString(FullyQualifiedFormat),
+            BaseTypeFQN = symbol.FQN,
             InterfaceName = interfaceSymbol.Name,
-            InterfaceFQN = interfaceSymbol.ToDisplayString(FullyQualifiedFormat),
-            TypeIDEnumFQN = typeIDEnumSymbol?.ToDisplayString(FullyQualifiedFormat) ?? $"{symbol.ToDisplayString(FullyQualifiedFormat)}.TypeIDs",
+            InterfaceFQN = interfaceSymbol.FQN,
+            TypeIDEnumFQN = typeIDEnumSymbol?.FQN ?? $"{symbol.FQN}.TypeIDs",
             TypeIDFieldName = typeIDField?.Name ?? "TypeID",
             IsPublic = structDecl.Modifiers.Any(SyntaxKind.PublicKeyword),
             InterfaceMembers = members.ToArray(),
@@ -169,7 +169,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
         return new()
         {
-            DerivedFQN = symbol.ToDisplayString(FullyQualifiedFormat),
+            DerivedFQN = symbol.FQN,
             DerivedName = symbol.Name,
             Declaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
             Interfaces = symbol.AllInterfaces,
@@ -186,8 +186,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     {
         var result = input.Base;
 
-        var derivedStructs = input.Candidates.AsArray()
-            .Where(candidate => candidate.Interfaces.Any(x => x.Name.Contains(result.InterfaceName) && x.ToDisplayString(FullyQualifiedFormat) == result.InterfaceFQN))
+        var derivedStructs = input.Candidates
+            .AsArray()
+            .Where(candidate => candidate.Interfaces.Any(x => x.Name.Contains(result.InterfaceName) && x.FQN == result.InterfaceFQN))
             .Select(x => new DerivedInput
                 {
                     Name = x.DerivedName,
@@ -201,11 +202,12 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             .ThenBy(x => x.Name)
             .ToArray();
 
-        var firstError = result.GetError()
-                         ?? input.Candidates
-                             .AsArray()
-                             .Select(x => x.GetError())
-                             .FirstOrDefault(x => x is not null);
+        var firstError
+            = result.GetError()
+              ?? input.Candidates
+                  .AsArray()
+                  .Select(x => x.GetError())
+                  .FirstOrDefault(x => x is not null);
 
         return result with
         {
@@ -251,6 +253,8 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     src.Line.Write($"UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}>(ref this).{input.TypeIDFieldName} = TypeID;");
                 }
             }
+
+            src.TrimEndWhitespace();
 
             foreach (var _ in derived.Declaration.AsSpan())
             {
@@ -336,6 +340,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         }
 
         // 3. extensions class
+        bool emitWithAssignHelper = false;
         string @public = input.IsPublic ? "public " : "";
         src.Line.Write($"{@public}static partial class {input.BaseTypeName}Extensions");
         using (src.Braces)
@@ -373,14 +378,8 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     ? $", {parameters}"
                     : "";
 
+                bool emitGenericInvokeHelper = false;
                 string genericInvokeName = $"{member.Name}_GenericInvoke";
-
-                // generic helper for explicit interface implementations
-                src.Line.Write($"static {member.ReturnTypeFQN} {genericInvokeName}<T>(this ref T self{methodParameters}) where T : struct, {input.InterfaceFQN}");
-                using (src.Indent)
-                    src.Line.Write($"=> self.{member.Name}{callParametersWithInvoke};");
-
-                src.Linebreak();
 
                 src.Line.Write($"public static unsafe {member.ReturnTypeFQN} {member.Name}(this ref {input.BaseTypeFQN} self{methodParameters})");
                 if (member.ReturnTypeFQN is "void")
@@ -400,9 +399,14 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                                         : "";
 
                                     if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
+                                    {
                                         src.Line.Write($"UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke}; return;");
+                                    }
                                     else
+                                    {
                                         src.Line.Write($"{genericInvokeName}(ref UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}); return;");
+                                        emitGenericInvokeHelper = true;
+                                    }
                                 }
                             }
 
@@ -410,8 +414,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                             using (src.Indent)
                             {
                                 var outParameters = member.Parameters
+                                    .AsArray()
                                     .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call: call.Split(spaceSplitParams)[^1], refKind))
-                                    .Where(x => x.refKind is (byte)RefKind.Out);
+                                    .Where(x => x.refKind is (byte)RefKind.Out)
+                                    .ToArray();
 
                                 foreach (var (call, _) in outParameters)
                                     src.Line.Write($"{call} = default;");
@@ -420,7 +426,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                                     .Select(x => $".WithAssign(out {x.call})")
                                     .Join(", ");
 
-                                src.Line.Write($"ThrowUnknownTypeException(self.{input.TypeIDFieldName}); return;");
+                                if (outParameters.Length > 0)
+                                    emitWithAssignHelper = true;
+
+                                src.Line.Write($"ThrowUnknownTypeException(self.{input.TypeIDFieldName}){outInit}; return;");
                             }
                         }
                     }
@@ -442,9 +451,14 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                                         : "";
 
                                     if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
+                                    {
                                         src.Line.Write($"=> UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke},");
+                                    }
                                     else
+                                    {
                                         src.Line.Write($"=> {genericInvokeName}(ref UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}),");
+                                        emitGenericInvokeHelper = true;
+                                    }
                                 }
                             }
 
@@ -456,6 +470,15 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 }
 
                 src.Linebreak();
+
+                if (emitGenericInvokeHelper)
+                {
+                    src.Line.Write($"static {member.ReturnTypeFQN} {genericInvokeName}<T>(this ref T self{methodParameters}) where T : struct, {input.InterfaceFQN}");
+                    using (src.Indent)
+                        src.Line.Write($"=> self.{member.Name}{callParametersWithInvoke};");
+
+                    src.Linebreak();
+                }
             }
 
             // AsDerivedStruct methods
@@ -488,12 +511,15 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Line.Write("return 0;");
             }
 
-            src.Line.Write("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            src.Line.Write($"static unsafe nint WithAssign(this nint ptr, out T? value)");
-            using (src.Braces)
+            if (emitWithAssignHelper)
             {
-                src.Line.Write("value = default;");
-                src.Line.Write("return ptr;");
+                src.Line.Write("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                src.Line.Write($"static unsafe nint WithAssign<T>(this nint ptr, out T? value)");
+                using (src.Braces)
+                {
+                    src.Line.Write("value = default;");
+                    src.Line.Write("return ptr;");
+                }
             }
 
             src.Linebreak();

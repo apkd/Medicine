@@ -226,10 +226,10 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
             Declaration = Utility.DeconstructTypeDeclaration(declSyntax, context.SemanticModel, ct),
             WrapperName = wrapperName,
             MethodTextChecksumForCache = context.TargetNode.GetText().GetChecksum(),
-            EnumerableFQN = retExprType.ToDisplayString(FullyQualifiedFormat),
-            EnumeratorFQN = getEnumerator.ReturnType.ToDisplayString(FullyQualifiedFormat),
-            EnumeratorInnerFQN = (getEnumerator.ReturnType as INamedTypeSymbol)!.TypeArguments.First().ToDisplayString(FullyQualifiedFormat),
-            ElementTypeFQN = (retExprType as INamedTypeSymbol)!.TypeArguments.Last().ToDisplayString(FullyQualifiedFormat),
+            EnumerableFQN = retExprType.FQN,
+            EnumeratorFQN = getEnumerator.ReturnType.FQN,
+            EnumeratorInnerFQN = (getEnumerator.ReturnType as INamedTypeSymbol)!.TypeArguments.First().FQN,
+            ElementTypeFQN = (retExprType as INamedTypeSymbol)!.TypeArguments.Last().FQN,
             GetEnumeratorNamespace = enumeratorNamespace,
             IsPublic = declSyntax.Modifiers.Any(SyntaxKind.PublicKeyword),
         };
@@ -406,7 +406,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 
     sealed class CastMemberAccessRewriter(MemberAccessExpressionSyntax memberAccessExpression, ITypeSymbol type) : CSharpSyntaxRewriter
     {
-        readonly string typeName = type.ToDisplayString(FullyQualifiedFormat);
+        readonly string typeName = type.FQN;
 
         public override SyntaxNode? VisitMemberAccessExpression(MemberAccessExpressionSyntax node)
         {
@@ -431,7 +431,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 
     sealed class CastRewriter(string identifier, ITypeSymbol type) : CSharpSyntaxRewriter
     {
-        readonly string typeName = type.ToDisplayString(FullyQualifiedFormat);
+        readonly string typeName = type.FQN;
 
         public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
             => node.Identifier.ValueText == identifier
