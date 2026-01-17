@@ -228,11 +228,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         if (input.DerivedStructs.Length == 0)
             return;
 
-        src.Line.Write("using System;");
-        src.Line.Write("using System.Runtime.CompilerServices;");
-        src.Line.Write("using System.Runtime.InteropServices;");
-        src.Line.Write("using Unity.Burst;");
-        src.Line.Write("using Unity.Collections.LowLevel.Unsafe;");
+        src.Line.Write(Alias.UsingInline);
+        src.Line.Write($"using {m}UnsafeUtility = global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility;");
+        src.Line.Write($"using {m}BurstDiscard = global::Unity.Burst.BurstDiscardAttribute;");
         src.Linebreak();
 
         // 1. derived structs generated members
@@ -254,7 +252,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 using (src.Braces)
                 {
                     src.Line.Write("this = default;");
-                    src.Line.Write($"UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}>(ref this).{input.TypeIDFieldName} = TypeID;");
+                    src.Line.Write($"{m}UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}>(ref this).{input.TypeIDFieldName} = TypeID;");
                 }
             }
 
@@ -293,7 +291,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             {
                 src.Line.Write("-1,");
                 foreach (var derived in input.DerivedStructs)
-                    src.Line.Write($"UnsafeUtility.SizeOf<{derived.FQN}>(),");
+                    src.Line.Write($"{m}UnsafeUtility.SizeOf<{derived.FQN}>(),");
             }
 
             src.Write(';').Linebreak();
@@ -404,11 +402,11 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
                                     if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
                                     {
-                                        src.Line.Write($"UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke}; return;");
+                                        src.Line.Write($"{m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke}; return;");
                                     }
                                     else
                                     {
-                                        src.Line.Write($"{genericInvokeName}(ref UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}); return;");
+                                        src.Line.Write($"{genericInvokeName}(ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}); return;");
                                         emitGenericInvokeHelper = true;
                                     }
                                 }
@@ -456,11 +454,11 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
                                     if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
                                     {
-                                        src.Line.Write($"=> UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke},");
+                                        src.Line.Write($"=> {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke},");
                                     }
                                     else
                                     {
-                                        src.Line.Write($"=> {genericInvokeName}(ref UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}),");
+                                        src.Line.Write($"=> {genericInvokeName}(ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}),");
                                         emitGenericInvokeHelper = true;
                                     }
                                 }
@@ -494,22 +492,22 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     src.Write("\n#if DEBUG");
                     src.Line.Write($"if (self.{input.TypeIDFieldName} is not {input.TypeIDEnumFQN}.{derived.Name})");
                     using (src.Indent)
-                        src.Line.Write($"ThrowUnexpectedTypeException(\"{derived.FQN}\", self.TypeName);");
+                        src.Line.Write($"ThrowUnexpectedTypeException(\"{derived.Name}\", self.TypeName);");
 
                     src.Write("\n#endif");
-                    src.Line.Write($"return ref UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self);");
+                    src.Line.Write($"return ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self);");
                 }
 
                 src.Linebreak();
             }
 
             // throw helpers
-            src.Line.Write("[MethodImpl(MethodImplOptions.NoInlining)]");
+            src.Line.Write(Alias.NoInline);
             src.Line.Write($"static unsafe nint ThrowUnknownTypeException({input.TypeIDEnumFQN} typeId)");
             using (src.Braces)
             {
-                src.Line.Write("[BurstDiscard]");
-                src.Line.Write($"void Throw() => throw new InvalidOperationException($\"Unknown {input.BaseTypeName} type ID: {{typeId}}\");");
+                src.Line.Write($"[{m}BurstDiscard]");
+                src.Line.Write($"void Throw() => throw new global::System.InvalidOperationException($\"Unknown {input.BaseTypeName} type ID: {{typeId}}\");");
                 src.Linebreak();
                 src.Line.Write("Throw();");
                 src.Line.Write("return 0;");
@@ -517,7 +515,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
             if (emitWithAssignHelper)
             {
-                src.Line.Write("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                src.Line.Write(Alias.Inline);
                 src.Line.Write($"static unsafe nint WithAssign<T>(this nint ptr, out T? value)");
                 using (src.Braces)
                 {
@@ -528,11 +526,11 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
             src.Linebreak();
 
-            src.Line.Write("[BurstDiscard]");
-            src.Line.Write("[MethodImpl(MethodImplOptions.NoInlining)]");
+            src.Line.Write($"[{m}BurstDiscard]");
+            src.Line.Write(Alias.NoInline);
             src.Line.Write("static void ThrowUnexpectedTypeException(string expected, string got)");
             using (src.Indent)
-                src.Line.Write("=> throw new InvalidOperationException($\"Invalid struct type ID: expected {expected}, got {got}\");");
+                src.Line.Write("=> throw new global::System.InvalidOperationException($\"Invalid struct type ID: expected {expected}, got {got}\");");
 
             src.Linebreak();
         }
