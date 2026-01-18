@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 
 #pragma warning disable CS9113
@@ -144,25 +145,26 @@ public sealed class SourceWriter : IDisposable
     void IDisposable.Dispose()
         => StringBuilderPool.Return(stringBuilder);
 
-    public readonly ref struct IndentScope : IDisposable
+    [StructLayout((short)0, Size = 128)]
+    public readonly ref struct IndentScope
     {
         readonly SourceWriter writer;
 
         public IndentScope(SourceWriter writer)
             => (this.writer = writer).IncreaseIndent();
 
-        void IDisposable.Dispose()
+        public void Dispose()
             => writer.DecreaseIndent();
     }
 
-    public readonly ref struct BracesScope : IDisposable
+    public readonly ref struct BracesScope
     {
         readonly SourceWriter writer;
 
         public BracesScope(SourceWriter writer)
             => (this.writer = writer).OpenBrace();
 
-        void IDisposable.Dispose()
+        public void Dispose()
             => writer.CloseBrace();
     }
 

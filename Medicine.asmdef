@@ -2,7 +2,8 @@
     "name": "Medicine",
     "rootNamespace": "",
     "references": [
-        "GUID:e0cd26848372d4e5c891c569017e11f1"
+        "GUID:e0cd26848372d4e5c891c569017e11f1",
+        "GUID:2665a8d13d1b3f18800f46e256720795"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -16,6 +17,11 @@
             "name": "com.cysharp.zlinq",
             "expression": "",
             "define": "MODULE_ZLINQ"
+        },
+        {
+            "name": "com.unity.burst",
+            "expression": "",
+            "define": "MODULE_BURST"
         },
         {
             "name": "Unity",

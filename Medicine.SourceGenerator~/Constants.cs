@@ -33,6 +33,10 @@ static class Constants
     public const string UnionStructAttributeMetadataName = $"{Namespace}.{UnionStructAttributeName}";
     public const string UnionStructAttributeFQN = $"{NamespaceWithGlobal}.{UnionStructAttributeName}";
 
+    public const string UnmanagedAccessAttributeName = "UnmanagedAccessAttribute";
+    public const string UnmanagedAccessAttributeMetadataName = $"{Namespace}.{UnmanagedAccessAttributeName}";
+    public const string UnmanagedAccessAttributeFQN = $"{NamespaceWithGlobal}.{UnmanagedAccessAttributeName}";
+
     public const string GenerateConstantsAttributeNameShort = "GenerateUnityConstants";
     public const string GenerateConstantsAttributeName = $"{GenerateConstantsAttributeNameShort}Attribute";
     public const string GenerateConstantsAttributeMetadataName = $"{Namespace}.{GenerateConstantsAttributeName}";
@@ -67,5 +71,7 @@ static class Constants
         public const string UsingDebug = $"using {m}Debug = global::UnityEngine.Debug;";
         public const string UsingDeclaredIn = $"using {m}DeclaredIn = global::Medicine.Internal.InjectionDeclaredInAttribute;";
         public const string UsingNonSerialized = $"using {m}NS = global::System.NonSerializedAttribute;";
+        public const string UsingBindingFlags = $"using {m}BF = global::System.Reflection.BindingFlags;";
+        public const string UsingUnsafeUtility = $"using {m}UU = global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility;";
     }
 }

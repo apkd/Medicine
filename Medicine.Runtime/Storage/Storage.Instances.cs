@@ -24,6 +24,12 @@ namespace Medicine.Internal
             /// </remarks>
             public static readonly List<T> List = new(capacity: 8);
 
+            public static Span<T> AsSpan()
+                => List.AsInternalsView().Array.AsSpan(List.Count);
+
+            public static unsafe UnsafeList<UnmanagedRef<T>> AsUnmanaged()
+                => new((UnmanagedRef<T>*)UnsafeUtility.AddressOf(ref UnsafeUtility.As<T, ulong>(ref List.AsInternalsView().Array[0])), List.Count);
+
             /// <summary>
             /// Registers the object as one of the active instances of <paramref name="T"/>.
             /// </summary>

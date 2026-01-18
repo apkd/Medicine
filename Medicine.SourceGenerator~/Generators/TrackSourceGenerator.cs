@@ -82,7 +82,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         if (context.TargetSymbol is not INamedTypeSymbol { TypeKind: TypeKind.Class } classSymbol)
             return default;
 
-        if (context.Attributes.FirstOrDefault() is not { AttributeConstructor.Parameters: var attributeCtorParameters } attributeData)
+        if (context.Attributes.FirstOrDefault() is not { AttributeConstructor: not null } attributeData)
             return default;
 
         var attributeArguments = attributeData

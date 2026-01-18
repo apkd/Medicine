@@ -154,6 +154,10 @@ namespace Medicine
         ) { }
     }
 
+    /// <summary>
+    /// Generates a set of structs and helpers that can be used to access the class data
+    /// in Burst-compiled code.
+    /// </summary>
     public sealed class UnmanagedAccessAttribute : Attribute { }
 
     /// <summary>
