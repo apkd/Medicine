@@ -115,18 +115,20 @@ jobs:
               -projectPath $PROJECT \
               -executeMethod CI.RunTests
 
-      - name: Return Unity license
-        if: ${{ always() }}
-        run: |
-          set -euo pipefail
-          docker run --rm \
-            -v "$LIC_DIR:/root/.local/share/unity3d" \
-            -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
-            "${{ env.IMAGE_TAG }}" \
-            unity-editor \
-              -quit -batchmode -returnlicense \
-              -username "$(cat /run/secrets/unity_user)" \
-              -password "$(cat /run/secrets/unity_password)"
+#        doesn't work for now - `unity-editor` command embedded in the Dockerfile
+#        runs with `-serial` which is incompatible with `-returnlicense`
+#      - name: Return Unity license
+#        if: ${{ always() }}
+#        run: |
+#          set -euo pipefail
+#          docker run --rm \
+#            -v "$LIC_DIR:/root/.local/share/unity3d" \
+#            -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
+#            "${{ env.IMAGE_TAG }}" \
+#            unity-editor \
+#              -quit -batchmode -returnlicense \
+#              -username "$(cat /run/secrets/unity_user)" \
+#              -password "$(cat /run/secrets/unity_password)"
 
       - uses: dorny/test-reporter@v2
         if: ${{ !cancelled() }}
