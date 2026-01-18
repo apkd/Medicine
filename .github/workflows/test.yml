@@ -20,6 +20,7 @@ jobs:
       PROJECT: /MedicineCI
     strategy:
       fail-fast: false
+      max-parallel: 8
       matrix:
         UNITY_VERSION: [
           # 2022.3 -- AFAIK 12f is the earliest version with functioning incremental source generators
@@ -113,6 +114,19 @@ jobs:
             unity-editor \
               -projectPath $PROJECT \
               -executeMethod CI.RunTests
+
+      - name: Return Unity license
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$LIC_DIR:/root/.local/share/unity3d" \
+            -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
+            "${{ env.IMAGE_TAG }}" \
+            unity-editor \
+              -quit -batchmode -returnlicense \
+              -username "$(cat /run/secrets/unity_user)" \
+              -password "$(cat /run/secrets/unity_password)"
 
       - uses: dorny/test-reporter@v2
         if: ${{ !cancelled() }}
