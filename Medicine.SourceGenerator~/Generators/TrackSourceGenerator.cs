@@ -413,7 +413,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"/// <codegen>Generated because of the implemented interface{s}: {origin}</codegen>");
             }
 
-            src.Line.Write($"public static class Unmanaged");
+            src.Line.Write($"public static partial class Unmanaged");
             using (src.Braces)
             {
                 foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)

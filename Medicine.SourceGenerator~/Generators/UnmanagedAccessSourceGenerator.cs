@@ -16,7 +16,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
         // public EquatableArray<string> NamespaceImports;
         public EquatableArray<string> ContainingTypeDeclaration;
+
         public string ClassFQN;
+
         // public string ClassName;
         public bool IsUnityObject;
         public bool IsTracked;
@@ -49,7 +51,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         var syntaxProvider = context.SyntaxProvider
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: UnmanagedAccessAttributeMetadataName,
-                predicate: static (node, _) => node is ClassDeclarationSyntax or StructDeclarationSyntax,
+                predicate: static (node, _) => node is ClassDeclarationSyntax,
                 transform: TransformSyntaxContext
             );
 
@@ -117,14 +119,16 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
         if (hasCachedEnable)
         {
-            fields.Add(new()
-            {
-                Name = "enabled",
-                MetadataName = $"{m}MedicineInternalCachedEnabledState",
-                TypeFQN = "global::System.Boolean",
-                Visibility = "Public",
-                IsReadOnly = true,
-            });
+            fields.Add(
+                new()
+                {
+                    Name = "enabled",
+                    MetadataName = $"{m}MedicineInternalCachedEnabledState",
+                    TypeFQN = "global::System.Boolean",
+                    Visibility = "NonPublic",
+                    IsReadOnly = true,
+                }
+            );
         }
 
         output.Fields = fields.ToArray();
@@ -178,11 +182,11 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"public static AccessArray Instances");
                 using (src.Indent)
                     src.Line.Write($"=> new(ᵐStorage.Instances<{input.ClassFQN}>.AsUnmanaged());");
-            }
+                }
 
-            src.Linebreak();
+                src.Linebreak();
 
-            src.Linebreak();
+                src.Linebreak();
             src.Write("\n#if UNITY_EDITOR");
             src.Line.Write("[global::System.Runtime.InteropServices.StructLayout((short)0, Size = 128)]");
             src.Write("\n#endif");
@@ -209,7 +213,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
             src.Linebreak();
 
-            src.Line.Write("public readonly struct AccessArray");
+            src.Line.Write("public readonly partial struct AccessArray");
             using (src.Braces)
             {
                 src.Line.Write($"readonly global::Medicine.Internal.UnmanagedAccessArray<{input.ClassFQN}, Layout, Access> impl;");
@@ -235,7 +239,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
             src.Linebreak();
 
-            src.Line.Write("public readonly unsafe struct Access");
+            src.Line.Write("public readonly unsafe partial struct Access");
             using (src.Braces)
             {
                 src.Line.Write($"public readonly global::Medicine.UnmanagedRef<{input.ClassFQN}> Ref;");
