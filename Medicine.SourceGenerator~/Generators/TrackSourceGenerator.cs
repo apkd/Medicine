@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static ActivePreprocessorSymbolNames;
 using static Constants;
+
 // ReSharper disable RedundantStringInterpolation
 
 [Generator]
@@ -568,9 +569,11 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 methodName: "OnEnableINTERNAL",
                 methodCalls:
                 [
-                    $"{m}Storage.Instances<{input.TypeFQN}>.Register{withId}(this)",
-                    input.AttributeSettings.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Register(transform)" : null,
+                    // keep first
                     input.AttributeSettings.CacheEnabledState ? $"{m}MedicineInternalCachedEnabledState = true" : null,
+                    $"{m}Storage.Instances<{input.TypeFQN}>.Register{withId}(this)",
+
+                    input.AttributeSettings.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Register(transform)" : null,
                     ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Register(this)"),
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Register(this)"),
                     ..input.TrackingIdFQNs.AsArray().Select(x => $"{m}Storage.LookupByID<{input.TypeFQN}, {x}>.Register(this)"),
@@ -581,9 +584,11 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 methodName: "OnDisableINTERNAL",
                 methodCalls:
                 [
-                    $"int index = {m}Storage.Instances<{input.TypeFQN}>.Unregister{withId}(this)",
-                    ..input.TrackingIdFQNs.AsArray().Select(x => $"{m}Storage.LookupByID<{input.TypeFQN}, {x}>.Unregister(this)"),
+                    // keep first
                     input.AttributeSettings.CacheEnabledState ? $"{m}MedicineInternalCachedEnabledState = false" : null,
+                    $"int index = {m}Storage.Instances<{input.TypeFQN}>.Unregister{withId}(this)",
+                    // rest in reverse
+                    ..input.TrackingIdFQNs.AsArray().Select(x => $"{m}Storage.LookupByID<{input.TypeFQN}, {x}>.Unregister(this)").Reverse(),
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Unregister(this, index)").Reverse(),
                     ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Unregister(this)").Reverse(),
                     input.AttributeSettings.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Unregister(index)" : null,
@@ -624,10 +629,11 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     using (src.Braces)
                     {
                         src.Line.Write($"if ({m}Utility.EditMode)");
-                            src.Line.Write($"return base.enabled;");
+                        src.Line.Write($"return base.enabled;");
 
                         src.Line.Write($"return {m}MedicineInternalCachedEnabledState;");
                     }
+
                     src.Line.Write($"{Alias.Inline} set => base.enabled = value;");
                 }
             }
