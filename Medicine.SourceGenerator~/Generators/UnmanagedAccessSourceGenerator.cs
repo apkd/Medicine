@@ -100,7 +100,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
         foreach (var member in members)
         {
-            if (member is not IFieldSymbol { IsStatic: false } field)
+            if (member is not IFieldSymbol { IsStatic: false, Type.IsUnmanagedType: true } field)
                 continue;
 
             fields.Add(
@@ -180,13 +180,32 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             if (input.IsTracked)
             {
                 src.Line.Write($"public static AccessArray Instances");
-                using (src.Indent)
-                    src.Line.Write($"=> new(ᵐStorage.Instances<{input.ClassFQN}>.AsUnmanaged());");
+                using (src.Braces)
+                {
+                    src.Line.Write($"{Alias.Inline} get");
+                    using (src.Braces)
+                    {
+                        src.Line.Write($"ref var arr = ref InstanceArrayStorage.InstancesArrayInternalStorage;");
+                        src.Line.Write($"arr.UpdateBuffer(ᵐStorage.Instances<{input.ClassFQN}>.AsUnmanaged());");
+                        src.Line.Write($"return arr;");
+                    }
                 }
 
                 src.Linebreak();
 
+                src.Line.Write($"static class InstanceArrayStorage");
+                using (src.Braces)
+                {
+                    src.Line.Write($"internal static AccessArray InstancesArrayInternalStorage");
+                    using (src.Indent)
+                        src.Line.Write($"= new(ᵐStorage.Instances<{input.ClassFQN}>.AsUnmanaged());");
+
+                    src.Linebreak();
+                }
+
                 src.Linebreak();
+            }
+
             src.Write("\n#if UNITY_EDITOR");
             src.Line.Write("[global::System.Runtime.InteropServices.StructLayout((short)0, Size = 128)]");
             src.Write("\n#endif");
@@ -216,12 +235,24 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             src.Line.Write("public readonly partial struct AccessArray");
             using (src.Braces)
             {
-                src.Line.Write($"readonly global::Medicine.Internal.UnmanagedAccessArray<{input.ClassFQN}, Layout, Access> impl;");
+                src.Line.Write($"readonly global::Medicine.Internal.UnmanagedAccessArray<{input.ClassFQN}, Layout, Access, AccessRO> impl;");
                 src.Linebreak();
 
                 src.Line.Write($"public AccessArray(global::Unity.Collections.LowLevel.Unsafe.UnsafeList<global::Medicine.UnmanagedRef<{input.ClassFQN}>> classRefArray)");
                 using (src.Indent)
                     src.Line.Write("=> impl = new(classRefArray);");
+
+                src.Linebreak();
+
+                src.Line.Write($"public void UpdateBuffer(global::Unity.Collections.LowLevel.Unsafe.UnsafeList<global::Medicine.UnmanagedRef<{input.ClassFQN}>> classRefArray)");
+                using (src.Indent)
+                    src.Line.Write("=> impl.UpdateBuffer(classRefArray);");
+
+                src.Linebreak();
+
+                src.Line.Write($"public int Length");
+                using (src.Indent)
+                    src.Line.Write("=> impl.Length;");
 
                 src.Linebreak();
 
@@ -232,9 +263,51 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 src.Linebreak();
 
                 src.Line.Write(Alias.Inline);
-                src.Line.Write($"public global::Medicine.Internal.UnmanagedAccessArray<{input.ClassFQN}, Layout, Access>.Enumerator GetEnumerator()");
+                src.Line.Write("public ReadOnly AsReadOnly()");
+                using (src.Indent)
+                    src.Line.Write($"=> new(impl);");
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public global::Medicine.Internal.UnmanagedAccessArray<{input.ClassFQN}, Layout, Access, AccessRO>.Enumerator GetEnumerator()");
+
+                src.Linebreak();
+
                 using (src.Indent)
                     src.Line.Write("=> impl.GetEnumerator();");
+
+                src.Linebreak();
+
+                src.Line.Write("public readonly partial struct ReadOnly");
+                using (src.Braces)
+                {
+                    src.Line.Write($"readonly global::Medicine.Internal.UnmanagedAccessArray<{input.ClassFQN}, Layout, Access, AccessRO>.ReadOnly impl;");
+                    src.Linebreak();
+
+                    src.Line.Write($"public ReadOnly(global::Medicine.Internal.UnmanagedAccessArray<{input.ClassFQN}, Layout, Access, AccessRO> accessArray)");
+                    using (src.Indent)
+                        src.Line.Write("=> impl = accessArray.AsReadOnly();");
+
+                    src.Linebreak();
+
+                    src.Line.Write($"public int Length");
+                    using (src.Indent)
+                        src.Line.Write("=> impl.Length;");
+
+                    src.Linebreak();
+
+                    src.Line.Write("public AccessRO this[int index]");
+                    using (src.Braces)
+                        src.Line.Write($"{Alias.Inline} get => impl[index];");
+
+                    src.Linebreak();
+
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write($"public global::Medicine.Internal.UnmanagedAccessArray<{input.ClassFQN}, Layout, Access, AccessRO>.ReadOnly.Enumerator GetEnumerator()");
+                    using (src.Indent)
+                        src.Line.Write("=> impl.GetEnumerator();");
+                }
             }
 
             src.Linebreak();
@@ -265,6 +338,56 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 {
                     src.Line.Write($"/// <inheritdoc cref=\"{input.ClassFQN}.{x.Name}\" />");
                     src.Line.Write($"public ref{(x.IsReadOnly ? " readonly" : "")} {x.TypeFQN} {x.Name}");
+                    using (src.Indent)
+                        src.Line.Write($"=> ref Ref.Read<{x.TypeFQN}>(layoutInfo->{x.Name});");
+
+                    src.Linebreak();
+                }
+
+                if (input.IsUnityObject)
+                {
+                    src.Line.Write($"/// <inheritdoc cref=\"global::Medicine.UnmanagedRefExtensions.IsDestroyed\" />");
+                    src.Line.Write($"public bool IsDestroyed");
+                    using (src.Indent)
+                        src.Line.Write($"=> global::Medicine.UnmanagedRefExtensions.IsDestroyed(Ref);");
+
+                    src.Linebreak();
+
+                    src.Line.Write($"/// <inheritdoc cref=\"global::Medicine.UnmanagedRefExtensions.GetInstanceID\" />");
+                    src.Line.Write($"public int InstanceID");
+                    using (src.Indent)
+                        src.Line.Write($"=> global::Medicine.UnmanagedRefExtensions.GetInstanceID(Ref);");
+
+                    src.Linebreak();
+                }
+            }
+
+            src.Line.Write("public readonly unsafe partial struct AccessRO");
+            using (src.Braces)
+            {
+                src.Line.Write($"public readonly global::Medicine.UnmanagedRef<{input.ClassFQN}> Ref;");
+                src.Line.Write("readonly Layout* layoutInfo;");
+                src.Linebreak();
+
+                src.Line.Write("public ref readonly Layout Layout");
+                using (src.Indent)
+                    src.Line.Write($"=> ref *layoutInfo;");
+
+                src.Linebreak();
+
+                src.Line.Write($"public AccessRO(global::Medicine.UnmanagedRef<{input.ClassFQN}> Ref)");
+                using (src.Braces)
+                {
+                    src.Line.Write("this.Ref = Ref;");
+                    src.Line.Write("layoutInfo = (Layout*)unmanagedLayoutStorage.UnsafeDataPointer;");
+                }
+
+                src.Linebreak();
+
+                foreach (var x in input.Fields.AsArray())
+                {
+                    src.Line.Write($"/// <inheritdoc cref=\"{input.ClassFQN}.{x.Name}\" />");
+                    src.Line.Write($"public ref readonly {x.TypeFQN} {x.Name}");
                     using (src.Indent)
                         src.Line.Write($"=> ref Ref.Read<{x.TypeFQN}>(layoutInfo->{x.Name});");
 
