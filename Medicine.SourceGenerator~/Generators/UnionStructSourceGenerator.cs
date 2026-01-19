@@ -424,14 +424,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                                 foreach (var (call, _) in outParameters)
                                     src.Line.Write($"{call} = default;");
 
-                                string outInit = outParameters
-                                    .Select(x => $".WithAssign(out {x.call})")
-                                    .Join(", ");
-
                                 if (outParameters.Length > 0)
                                     emitWithAssignHelper = true;
 
-                                src.Line.Write($"ThrowUnknownTypeException(self.{input.TypeIDFieldName}){outInit}; return;");
+                                src.Line.Write($"ThrowUnknownTypeException(self.{input.TypeIDFieldName}); return;");
                             }
                         }
                     }
@@ -464,7 +460,20 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                                 }
                             }
 
-                            src.Line.Write($"_ => *({member.ReturnTypeFQN}*)ThrowUnknownTypeException(self.{input.TypeIDFieldName}),");
+                            var outParameters = member.Parameters
+                                .AsArray()
+                                .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call: call.Split(spaceSplitParams)[^1], refKind))
+                                .Where(x => x.refKind is (byte)RefKind.Out)
+                                .ToArray();
+
+                            if (outParameters.Length > 0)
+                                emitWithAssignHelper = true;
+
+                            string outInit = outParameters
+                                .Select(x => $".WithAssign(out {x.call})")
+                                .Join(", ");
+
+                            src.Line.Write($"_ => *({member.ReturnTypeFQN}*)ThrowUnknownTypeException(self.{input.TypeIDFieldName}){outInit},");
                         }
 
                         src.Write(';');
