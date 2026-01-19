@@ -14,12 +14,14 @@ namespace Medicine.Internal
 {
     [NativeContainer]
     [NativeContainerSupportsMinMaxWriteRestriction]
-    public unsafe struct UnmanagedAccessArray<TClass, TLayout, TAccess, TAccessRO> : IDisposable
+    public unsafe struct UnmanagedAccessArray<TClass, TLayout, TAccessRW, TAccessRO> : IDisposable
         where TLayout : unmanaged
-        where TAccess : unmanaged
+        where TAccessRW : unmanaged
         where TAccessRO : unmanaged
         where TClass : class
     {
+        const int PrefetchDistance = 8;
+
         static readonly SharedStatic<TLayout> unmanagedLayoutStorage
             = SharedStatic<TLayout>.GetOrCreate<TLayout>();
 
@@ -36,7 +38,7 @@ namespace Medicine.Internal
         AtomicSafetyHandle m_Safety;
 
         static readonly SharedStatic<int> s_staticSafetyId
-            = SharedStatic<int>.GetOrCreate<UnmanagedAccessArray<TClass, TLayout, TAccess, TAccessRO>>();
+            = SharedStatic<int>.GetOrCreate<UnmanagedAccessArray<TClass, TLayout, TAccessRW, TAccessRO>>();
 #endif
 
         public readonly int Length
@@ -71,7 +73,7 @@ namespace Medicine.Internal
             m_MinIndex = 0;
             m_MaxIndex = m_Length - 1;
             m_Safety = AtomicSafetyHandle.Create();
-            CollectionHelper.SetStaticSafetyId<UnmanagedAccessArray<TClass, TLayout, TAccess, TAccessRO>>(ref m_Safety, ref s_staticSafetyId.Data);
+            CollectionHelper.SetStaticSafetyId<UnmanagedAccessArray<TClass, TLayout, TAccessRW, TAccessRO>>(ref m_Safety, ref s_staticSafetyId.Data);
             AtomicSafetyHandle.SetBumpSecondaryVersionOnScheduleWrite(m_Safety, value: true);
 #endif
         }
@@ -113,10 +115,10 @@ namespace Medicine.Internal
 
         [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
         [MethodImpl(AggressiveInlining)]
-        readonly void CheckReadAccess()
+        readonly void CheckWriteAccess()
         {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-            AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
+            AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 #endif
         }
 
@@ -132,9 +134,9 @@ namespace Medicine.Internal
 
         struct DisposeJob : IJob
         {
-            [NativeDisableUnsafePtrRestriction] UnmanagedAccessArray<TClass, TLayout, TAccess, TAccessRO> array;
+            [NativeDisableUnsafePtrRestriction] UnmanagedAccessArray<TClass, TLayout, TAccessRW, TAccessRO> array;
 
-            public DisposeJob(UnmanagedAccessArray<TClass, TLayout, TAccess, TAccessRO> array)
+            public DisposeJob(UnmanagedAccessArray<TClass, TLayout, TAccessRW, TAccessRO> array)
                 => this.array = array;
 
             void IJob.Execute() => array.Dispose();
@@ -153,17 +155,17 @@ namespace Medicine.Internal
             }
         }
 
-        public readonly TAccess this[int index]
+        public readonly TAccessRW this[int index]
         {
             [MethodImpl(AggressiveInlining)]
             get
             {
-                CheckReadAccess();
+                CheckWriteAccess();
                 CheckIndexInRange(index);
                 CheckIndexInParallelWriteRange(index);
 
                 var access = new UntypedAccess(classRefArray[index], layoutInfo);
-                return UnsafeUtility.As<UntypedAccess, TAccess>(ref access);
+                return UnsafeUtility.As<UntypedAccess, TAccessRW>(ref access);
             }
         }
 
@@ -171,30 +173,33 @@ namespace Medicine.Internal
             => new(this);
 
         public readonly ReadOnly AsReadOnly()
-            => new(classRefArray, layoutInfo, m_Safety);
+            => new(
+                classRefArray, layoutInfo
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                , m_Safety
+#endif
+            );
 
         [DisallowReadonly]
         public struct Enumerator
         {
-            const int PrefetchDistance = 4;
-
-            readonly UnmanagedAccessArray<TClass, TLayout, TAccess, TAccessRO> array;
+            readonly UnmanagedAccessArray<TClass, TLayout, TAccessRW, TAccessRO> array;
             int index;
 
-            public Enumerator(UnmanagedAccessArray<TClass, TLayout, TAccess, TAccessRO> array)
+            public Enumerator(UnmanagedAccessArray<TClass, TLayout, TAccessRW, TAccessRO> array)
             {
                 this.array = array;
                 index = -1;
 
-                array.CheckReadAccess();
+                array.CheckWriteAccess();
 
-#if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC
+#if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC && !MEDICINE_DISABLE_UNMANAGEDACCESSARRAY_PREFETCH
                 var len = array.classRefArray.Length;
                 if (len > 0)
                 {
                     int count = len < PrefetchDistance ? len : PrefetchDistance;
                     for (int i = 0; i < count; i++)
-                        Common.Prefetch((void*)array.classRefArray.Ptr[i].Ptr, Common.ReadWrite.Read, Common.Locality.LowTemporalLocality);
+                        Common.Prefetch((void*)array.classRefArray.Ptr[i].Ptr, Common.ReadWrite.Write);
                 }
 #endif
             }
@@ -202,21 +207,21 @@ namespace Medicine.Internal
             [MethodImpl(AggressiveInlining)]
             public bool MoveNext()
             {
-                array.CheckReadAccess();
+                array.CheckWriteAccess();
 
                 if (++index >= array.classRefArray.Length)
                     return false;
 
-#if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC
+#if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC && !MEDICINE_DISABLE_UNMANAGEDACCESSARRAY_PREFETCH
                 int prefetchOffset = index + PrefetchDistance;
                 if ((uint)prefetchOffset < (uint)array.classRefArray.Length)
-                    Common.Prefetch((void*)array.classRefArray.Ptr[prefetchOffset].Ptr, Common.ReadWrite.Read, Common.Locality.LowTemporalLocality);
+                    Common.Prefetch((void*)array.classRefArray.Ptr[prefetchOffset].Ptr, Common.ReadWrite.Write);
 #endif
 
                 return true;
             }
 
-            public TAccess Current
+            public TAccessRW Current
             {
                 [MethodImpl(AggressiveInlining)]
                 get => array[index];
@@ -306,23 +311,21 @@ namespace Medicine.Internal
             [SuppressMessage("ReSharper", "MemberHidesStaticFromOuterClass")]
             public struct Enumerator
             {
-                const int PrefetchDistance = 4;
-
                 readonly ReadOnly array;
                 int index;
 
-                public Enumerator(ReadOnly array)
+                public Enumerator(in ReadOnly array)
                 {
                     this.array = array;
                     index = -1;
 
-#if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC
+#if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC && !MEDICINE_DISABLE_UNMANAGEDACCESSARRAY_PREFETCH
                     var len = array.Length;
                     if (len > 0)
                     {
                         int count = len < PrefetchDistance ? len : PrefetchDistance;
                         for (int i = 0; i < count; i++)
-                            Common.Prefetch((void*)array.classRefArray.Ptr[i].Ptr, Common.ReadWrite.Read, Common.Locality.LowTemporalLocality);
+                            Common.Prefetch((void*)array.classRefArray.Ptr[i].Ptr, Common.ReadWrite.Read);
                     }
 #endif
                 }
@@ -335,10 +338,10 @@ namespace Medicine.Internal
                     if (++index >= array.classRefArray.Length)
                         return false;
 
-#if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC
+#if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC && !MEDICINE_DISABLE_UNMANAGEDACCESSARRAY_PREFETCH
                     int prefetchOffset = index + PrefetchDistance;
                     if ((uint)prefetchOffset < (uint)array.classRefArray.Length)
-                        Common.Prefetch((void*)array.classRefArray.Ptr[prefetchOffset].Ptr, Common.ReadWrite.Read, Common.Locality.LowTemporalLocality);
+                        Common.Prefetch((void*)array.classRefArray.Ptr[prefetchOffset].Ptr, Common.ReadWrite.Read);
 #endif
 
                     return true;
