@@ -143,6 +143,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         src.Line.Write("#pragma warning disable CS0618 // Type or member is obsolete");
         src.Line.Write(Alias.UsingStorage);
         src.Line.Write(Alias.UsingInline);
+        src.Line.Write(Alias.UsingUtility);
         src.Line.Write(Alias.UsingNonSerialized);
         src.Linebreak();
 
@@ -618,7 +619,15 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"public new bool enabled");
                 using (src.Braces)
                 {
-                    src.Line.Write($"{Alias.Inline} get => {m}MedicineInternalCachedEnabledState;");
+                    src.Line.Write($"{Alias.Inline}");
+                    src.Line.Write($"get");
+                    using (src.Braces)
+                    {
+                        src.Line.Write($"if ({m}Utility.EditMode)");
+                            src.Line.Write($"return base.enabled;");
+
+                        src.Line.Write($"return {m}MedicineInternalCachedEnabledState;");
+                    }
                     src.Line.Write($"{Alias.Inline} set => base.enabled = value;");
                 }
             }
