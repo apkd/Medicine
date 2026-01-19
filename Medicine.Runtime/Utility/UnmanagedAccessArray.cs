@@ -70,7 +70,7 @@ namespace Medicine.Internal
             m_Length = classRefArray.Length;
             m_MinIndex = 0;
             m_MaxIndex = m_Length - 1;
-            m_Safety = CollectionHelper.CreateSafetyHandle(Allocator.TempJob);
+            m_Safety = AtomicSafetyHandle.Create();
             CollectionHelper.SetStaticSafetyId<UnmanagedAccessArray<TClass, TLayout, TAccess, TAccessRO>>(ref m_Safety, ref s_staticSafetyId.Data);
             AtomicSafetyHandle.SetBumpSecondaryVersionOnScheduleWrite(m_Safety, value: true);
 #endif
@@ -80,7 +80,10 @@ namespace Medicine.Internal
         {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             if (AtomicSafetyHandle.IsValidNonDefaultHandle(m_Safety))
-                CollectionHelper.DisposeSafetyHandle(ref m_Safety);
+            {
+                AtomicSafetyHandle.CheckDeallocateAndThrow(m_Safety);
+                AtomicSafetyHandle.Release(m_Safety);
+            }
 #endif
             classRefArray = default;
         }
