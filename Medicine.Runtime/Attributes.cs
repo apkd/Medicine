@@ -155,10 +155,22 @@ namespace Medicine
     }
 
     /// <summary>
-    /// Generates a set of structs and helpers that can be used to access the class data
+    /// Generates a set of structs and helpers that can be used to access class data
     /// in Burst-compiled code.
     /// </summary>
-    public sealed class UnmanagedAccessAttribute : Attribute { }
+    /// <param name="safetyChecks">
+    /// Enables safety checks for class access: ensures that accessed objects are not null/destroyed.
+    /// Accessing a destroyed object will throw an exception.
+    /// Safety checks are always disabled in release builds.<br/>
+    /// (If necessary, you should explicitly check whether an UnmanagedRef is destroyed
+    /// using the <c>.IsDestroyed()</c> extension.)
+    /// </param>
+    public sealed class UnmanagedAccessAttribute : Attribute
+    {
+        public UnmanagedAccessAttribute(
+            bool safetyChecks = true
+        ) { }
+    }
 
     /// <summary>
     /// Can be used to ensure that a mutable struct is not stored in a `readonly` field.

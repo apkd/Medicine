@@ -57,13 +57,21 @@ namespace Medicine
         /// <summary>
         /// Returns true if the <see cref="UnityEngine.Object"/> has been destroyed (or the reference is null).
         /// </summary>
+        [MethodImpl(AggressiveInlining)]
         public static bool IsDestroyed<TClass>(this UnmanagedRef<TClass> classRef) where TClass : UnityEngine.Object
-            => classRef.Ptr is 0 || *(nint*)(classRef.Ptr + sizeof(nint) * 2) is 0;
+        {
+            nint ptr = classRef.Ptr;
+            nint nativePtr = ptr != 0
+                ? *(nint*)(ptr + sizeof(ulong) * 2)
+                : 0;
+            return nativePtr is 0;
+        }
 
         /// <summary>
         /// Equivalent of the <see cref="UnityEngine.Object.GetInstanceID"/> method.
         /// </summary>
+        [MethodImpl(AggressiveInlining)]
         public static int GetInstanceID<TClass>(this UnmanagedRef<TClass> classRef) where TClass : UnityEngine.Object
-            => *(int*)(classRef.Ptr + sizeof(nint) * 3);
+            => *(int*)(classRef.Ptr + sizeof(ulong) * 3);
     }
 }

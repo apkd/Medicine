@@ -14,15 +14,13 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public string? SourceGeneratorError { get; init; }
         public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
 
-        // public EquatableArray<string> NamespaceImports;
         public EquatableArray<string> ContainingTypeDeclaration;
-
         public string ClassName;
         public string ClassFQN;
-
-        // public string ClassName;
+        public bool SafetyChecks;
         public bool IsUnityObject;
         public bool IsTracked;
+        public MedicineSettings MedicineSettings;
         public EquatableArray<FieldInfo> Fields;
     }
 
@@ -51,17 +49,24 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var syntaxProvider = context.SyntaxProvider
+        context.RegisterPostInitializationOutput(x => x.AddSource("UnmanagedAccessExtensions.g.cs", extensionsSrc));
+
+        var settingsProvider = context.CompilationProvider
+            .Combine(context.ParseOptionsProvider)
+            .Select((x, ct) => new MedicineSettings(x, ct));
+
+        var inputProvider = context
+            .SyntaxProvider
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: UnmanagedAccessAttributeMetadataName,
                 predicate: static (node, _) => node is ClassDeclarationSyntax,
                 transform: TransformSyntaxContext
-            );
-
-        context.RegisterPostInitializationOutput(x => x.AddSource("UnmanagedAccessExtensions.g.cs", extensionsSrc));
+            )
+            .Combine(settingsProvider)
+            .Select((x, ct) => x.Left with { MedicineSettings = x.Right });
 
         context.RegisterSourceOutputEx(
-            source: syntaxProvider,
+            source: inputProvider,
             action: GenerateSource
         );
     }
@@ -74,11 +79,17 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         if (context.TargetSymbol is not ITypeSymbol typeSymbol)
             return default;
 
+        var unmanagedAccessAttribute = context.Attributes.First(x => x.AttributeClass.Is(UnmanagedAccessAttributeFQN));
+
+        bool safetyChecks = unmanagedAccessAttribute
+            .GetAttributeConstructorArguments(ct)
+            .Get("safetyChecks", true) || true;
+
         var trackAttribute = context.TargetSymbol.GetAttribute(TrackAttributeFQN);
 
         bool hasCachedEnable = trackAttribute?
             .GetAttributeConstructorArguments(ct)
-            .Select(x => x.Get("cacheEnabledState", false)) ?? false;
+            .Get("cacheEnabledState", false) ?? false;
 
         bool hasIInstanceIndex
             = typeSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false);
@@ -94,13 +105,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDecl, context.SemanticModel, ct),
             ClassName = typeSymbol.Name,
             ClassFQN = typeSymbol.FQN,
-            // ClassName = typeSymbol.Name,
             IsUnityObject = typeSymbol.InheritsFrom("global::UnityEngine.Object"),
             IsTracked = trackAttribute is not null,
+            SafetyChecks = safetyChecks,
         };
-
-        // if (typeDecl.SyntaxTree.GetRoot(ct) is CompilationUnitSyntax compilationUnit)
-        //     output.NamespaceImports = compilationUnit.Usings.Select(x => x.ToString()).ToArray();
 
         var members = typeSymbol.GetMembers().AsArray();
         var fields = new List<FieldInfo>(capacity: members.Length);
@@ -170,8 +178,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
-        // foreach (var x in input.NamespaceImports.AsArray())
-        //     src.Line.Write(x);
+        if (!input.MedicineSettings.PreprocessorSymbolNames.Has(ActivePreprocessorSymbolNames.DEBUG))
+            input.SafetyChecks = false;
 
         src.Line.Write(Alias.UsingStorage);
         src.Line.Write(Alias.UsingInline);
@@ -372,21 +380,40 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Linebreak();
 
+                    void PropertyWithSafetyChecks(string call)
+                    {
+                        using (src.Braces)
+                        {
+                            src.Line.Write($"{Alias.Inline} get");
+                            {
+                                if (input.SafetyChecks)
+                                {
+                                    using (src.Braces)
+                                    {
+                                        src.Line.Write($"CheckDestroyed();");
+                                        src.Line.Write($"return {call};");
+                                    }
+                                }
+                                else
+                                {
+                                    using (src.Indent)
+                                        src.Line.Write($"=> {call};");
+                                }
+                            }
+                        }
+
+                        src.Linebreak();
+                    }
+
                     if (input.IsUnityObject)
                     {
                         src.Line.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.IsDestroyed\" />");
                         src.Line.Write($"public bool IsDestroyed");
-                        using (src.Indent)
-                            src.Line.Write($"=> Medicine.UnmanagedRefExtensions.IsDestroyed(Ref);");
-
-                        src.Linebreak();
+                        PropertyWithSafetyChecks("Medicine.UnmanagedRefExtensions.IsDestroyed(Ref);");
 
                         src.Line.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.GetInstanceID\" />");
                         src.Line.Write($"public int InstanceID");
-                        using (src.Indent)
-                            src.Line.Write($"=> Medicine.UnmanagedRefExtensions.GetInstanceID(Ref);");
-
-                        src.Linebreak();
+                        PropertyWithSafetyChecks($"Medicine.UnmanagedRefExtensions.GetInstanceID(Ref);");
                     }
 
                     foreach (var x in input.Fields.AsArray())
@@ -396,22 +423,55 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         {
                             src.Line.Write($"/// <inheritdoc cref=\"{m}Self.{x.Name}\" />");
                             src.Line.Write($"public ref{ro} {x.TypeFQN} {x.Name}");
-                            using (src.Indent)
-                                src.Line.Write($"=> ref Ref.Read<{x.TypeFQN}>(layoutInfo->{x.Name});");
-
-                            src.Linebreak();
+                            PropertyWithSafetyChecks($"ref Ref.Read<{x.TypeFQN}>(layoutInfo->{x.Name});");
                         }
                         else if (x.IsReferenceType)
                         {
                             src.Line.Write($"/// <inheritdoc cref=\"{m}Self.{x.Name}\" />");
                             src.Line.Write($"public ref{ro} Medicine.UnmanagedRef<{x.TypeFQN}> {x.Name}");
-                            using (src.Indent)
-                                src.Line.Write($"=> ref Ref.Read<Medicine.UnmanagedRef<{x.TypeFQN}>>(layoutInfo->{x.Name});");
+                            PropertyWithSafetyChecks($"ref Ref.Read<Medicine.UnmanagedRef<{x.TypeFQN}>>(layoutInfo->{x.Name});");
 
                             src.Linebreak();
                         }
                     }
+
+                    if (input.SafetyChecks)
+                    {
+                        src.Line.Write(Alias.Inline);
+                        src.Line.Write($"void CheckDestroyed()");
+                        using (src.Braces)
+                        {
+                            src.Line.Write($"if (Medicine.UnmanagedRefExtensions.IsDestroyed(Ref))");
+                            using (src.Braces)
+                            {
+                                src.Line.Write($"if (Ref.Ptr is 0)");
+                                using (src.Indent)
+                                    src.Line.Write($"ThrowNullException();");
+
+                                src.Line.Write("else");
+                                using (src.Indent)
+                                    src.Line.Write($"ThrowDestroyedException();");
+                            }
+
+                            src.Linebreak();
+
+                            src.Line.Write($"{Alias.NoInline}");
+                            src.Line.Write($"static void ThrowNullException()");
+                            using (src.Indent)
+                                src.Line.Write($"=> throw new System.InvalidOperationException(\"Attempted to access a null {input.ClassName} instance.\");");
+
+                            src.Linebreak();
+
+                            src.Line.Write($"{Alias.NoInline}");
+                            src.Line.Write($"static void ThrowDestroyedException()");
+                            using (src.Indent)
+                                src.Line.Write($"=> throw new System.InvalidOperationException(\"Attempted to access a destroyed {input.ClassName} instance.\");");
+                        }
+                    }
+
+                    src.Linebreak();
                 }
+
                 src.Linebreak();
             }
         }
@@ -435,11 +495,15 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 using (src.Indent)
                     src.Line.Write("=> new(classRef);");
 
+                src.Linebreak();
+
                 src.Line.Write($"/// <inheritdoc cref=\"AccessRW(ref UnmanagedRef{{T}})\" />");
                 src.Line.Write(Alias.Inline);
                 src.Line.Write($"public static {m}Self.Unmanaged.AccessRW AccessRW(this ref UnmanagedRef<{m}Self> classRef, ref {m}Self.Unmanaged.Layout layout)");
                 using (src.Indent)
                     src.Line.Write("=> new(classRef, ref layout);");
+
+                src.Linebreak();
 
                 src.Line.Write($"/// <summary>");
                 src.Line.Write($"/// Returns an <see cref=\"AccessRO\"/> struct that can be used to read fields of the given class.");
@@ -450,11 +514,15 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     src.Line.Write("=> new(classRef);");
 
                 src.Linebreak();
+
+                src.Linebreak();
                 src.Line.Write($"/// <inheritdoc cref=\"AccessRO(UnmanagedRef{{T}})\" />");
                 src.Line.Write(Alias.Inline);
                 src.Line.Write($"public static {m}Self.Unmanaged.AccessRO AccessRO(this UnmanagedRef<{m}Self> classRef, ref {m}Self.Unmanaged.Layout layout)");
                 using (src.Indent)
                     src.Line.Write("=> new(classRef, ref layout);");
+
+                src.Linebreak();
             }
         }
     }
