@@ -68,6 +68,7 @@ namespace Medicine.Internal
                         $"Please make sure this method never throws. " +
                         $"This will cause tracking logic errors in release builds."
                     );
+
                     Debug.LogException(ex);
                 }
 #else
@@ -87,7 +88,15 @@ namespace Medicine.Internal
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                 var safety = NativeListUnsafeUtility.GetAtomicSafetyHandle(ref List);
-                AtomicSafetyHandle.EnforceAllBufferJobsHaveCompleted(safety);
+                var enforceJobResult = AtomicSafetyHandle.EnforceAllBufferJobsHaveCompleted(safety);
+                if (enforceJobResult is EnforceJobResult.DidSyncRunningJobs)
+                {
+                    Debug.LogWarning(
+                        $"Job completion was enforced while unregistering an instance of {typeof(T).Name}. " +
+                        $"This is an editor-only check. Disabling/enabling tracked instances while jobs are running " +
+                        $"may cause race condition bugs in release builds."
+                    );
+                }
 #endif
 
 #if DEBUG
@@ -105,6 +114,7 @@ namespace Medicine.Internal
                         $"Please make sure this method never throws. " +
                         $"This will cause tracking logic errors in release builds."
                     );
+
                     Debug.LogException(ex);
                     return;
                 }
