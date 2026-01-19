@@ -629,7 +629,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     using (src.Braces)
                     {
                         src.Line.Write($"if ({m}Utility.EditMode)");
-                        src.Line.Write($"return base.enabled;");
+                        using (src.Indent)
+                            src.Line.Write($"return base.enabled;");
 
                         src.Line.Write($"return {m}MedicineInternalCachedEnabledState;");
                     }

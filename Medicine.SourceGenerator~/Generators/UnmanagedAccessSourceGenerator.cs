@@ -77,6 +77,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             .GetAttributeConstructorArguments(ct)
             .Select(x => x.Get("cacheEnabledState", false)) ?? false;
 
+        bool hasIInstanceIndex
+            = typeSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false);
+
         var output = new GeneratorInput
         {
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
@@ -129,6 +132,18 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     IsReadOnly = true,
                 }
             );
+        }
+
+        if (hasIInstanceIndex)
+        {
+            fields.Add(new()
+            {
+                Name = "InstanceIndex",
+                MetadataName = $"{m}MedicineInternalInstanceIndex",
+                TypeFQN = "global::System.Int32",
+                Visibility = "NonPublic",
+                IsReadOnly = true,
+            });
         }
 
         output.Fields = fields.ToArray();
