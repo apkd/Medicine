@@ -123,6 +123,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     TypeFQN = "global::System.Boolean",
                     Visibility = "NonPublic",
                     IsReadOnly = true,
+                    IsReferenceType = false,
+                    IsUnmanagedType = true,
                 }
             );
         }
@@ -137,6 +139,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     TypeFQN = "global::System.Int32",
                     Visibility = "NonPublic",
                     IsReadOnly = true,
+                    IsReferenceType = false,
+                    IsUnmanagedType = true,
                 }
             );
         }
