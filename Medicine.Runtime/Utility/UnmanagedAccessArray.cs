@@ -228,6 +228,7 @@ namespace Medicine.Internal
             }
         }
 
+        [NativeContainer]
         [NativeContainerIsReadOnly]
         public readonly struct ReadOnly
         {

@@ -249,7 +249,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             using (src.Braces)
             {
                 foreach (var x in input.Fields.AsArray())
-                    src.Line.Write($"public int {x.Name} {{ get; init; }}");
+                    src.Line.Write($"public ushort {x.Name} {{ get; init; }}");
 
                 src.Linebreak();
 
@@ -261,17 +261,17 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 using (src.Indent)
                 using (src.Braces)
                     foreach (var x in input.Fields.AsArray())
-                        src.Line.Write($"{x.Name} = ᵐUU.GetFieldOffset(typeof({m}Self).GetField(\"{x.MetadataName}\", ᵐBF.{x.Visibility} | ᵐBF.Instance)),");
+                        src.Line.Write($"{x.Name} = (ushort)ᵐUU.GetFieldOffset(typeof({m}Self).GetField(\"{x.MetadataName}\", ᵐBF.{x.Visibility} | ᵐBF.Instance)),");
 
                 src.Write(';');
             }
 
             src.Linebreak();
 
-            src.Line.Write("public readonly partial struct AccessArray");
+            src.Line.Write("public partial struct AccessArray");
             using (src.Braces)
             {
-                src.Line.Write($"readonly Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO> impl;");
+                src.Line.Write($"Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO> impl;");
                 src.Linebreak();
 
                 src.Line.Write($"public AccessArray(global::Unity.Collections.LowLevel.Unsafe.UnsafeList<Medicine.UnmanagedRef<{m}Self>> classRefArray)");
@@ -395,13 +395,13 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                                     using (src.Braces)
                                     {
                                         src.Line.Write($"CheckDestroyed();");
-                                        src.Line.Write($"return {call};");
+                                        src.Line.Write($"return {call}");
                                     }
                                 }
                                 else
                                 {
                                     using (src.Indent)
-                                        src.Line.Write($"=> {call};");
+                                        src.Line.Write($"=> {call}");
                                 }
                             }
                         }
