@@ -5,10 +5,10 @@
 </picture>
 
 [![Unity package badge](https://img.shields.io/badge/Unity%20Package-2C3439?style=flat&logo=unity&logoColor=white)](https://github.com/apkd/Medicine/releases/tag/latest)
-![GitHub License](https://img.shields.io/github/license/apkd/medicine?style=flat&label=License&labelColor=2C3439)
+[![GitHub License](https://img.shields.io/github/license/apkd/medicine?style=flat&label=License&labelColor=2C3439)](https://github.com/apkd/Medicine/blob/master/LICENSE)
 [![Test status badge](https://github.com/apkd/Medicine/actions/workflows/test.yml/badge.svg?branch=master&event=push)](https://github.com/apkd/Medicine/actions/workflows/test.yml)
-![GitHub commit activity](https://img.shields.io/github/commit-activity/y/apkd/Medicine?authorFilter=apkd&label=Commits&labelColor=2C3439)
-![GitHub last commit](https://img.shields.io/github/last-commit/apkd/Medicine?labelColor=2C3439)
+[![GitHub commit activity](https://img.shields.io/github/commit-activity/y/apkd/Medicine?authorFilter=apkd&label=Commits&labelColor=2C3439)](https://github.com/apkd/Medicine/commits/master)
+[![GitHub last commit](https://img.shields.io/github/last-commit/apkd/Medicine?labelColor=2C3439)](https://github.com/apkd/Medicine/commit/HEAD~1)
 
 
 Medicine is a package that uses Roslyn source generators and efficient runtime helpers to remove common Unity component boilerplate.

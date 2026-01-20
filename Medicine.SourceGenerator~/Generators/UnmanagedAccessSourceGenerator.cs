@@ -192,6 +192,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
         src.Line.Write(Alias.UsingStorage);
         src.Line.Write(Alias.UsingInline);
+        src.Line.Write(Alias.UsingUtility);
         src.Line.Write(Alias.UsingBindingFlags);
         src.Line.Write(Alias.UsingUnsafeUtility);
         src.Line.Write($"using {m}Self = {input.ClassFQN};");
@@ -266,7 +267,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 using (src.Indent)
                 using (src.Braces)
                     foreach (var x in input.Fields.AsArray())
-                        src.Line.Write($"{x.Name} = (ushort)ᵐUU.GetFieldOffset(typeof({m}Self).GetField(\"{x.MetadataName}\", ᵐBF.{x.Visibility} | ᵐBF.Instance)),");
+                        src.Line.Write($"{x.Name} = ᵐUtility.GetFieldOffset(typeof({m}Self), \"{x.MetadataName}\", ᵐBF.{x.Visibility} | ᵐBF.Instance),");
 
                 src.Write(';');
             }

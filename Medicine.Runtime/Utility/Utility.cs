@@ -91,6 +91,20 @@ namespace Medicine.Internal
             public T Elements = default!;
         }
 
+        public static ushort GetFieldOffset(Type type, string fieldName, BindingFlags flags)
+        {
+            FieldInfo GetFieldInHierarchy()
+            {
+                for (var t = type; t != null; t = t.BaseType)
+                    if (t.GetField(fieldName, flags) is { } result)
+                        return result;
+
+                throw new ArgumentException($"Field '{fieldName}' not found in type '{type.FullName}'.");
+            }
+
+            return (ushort)UnsafeUtility.GetFieldOffset(GetFieldInHierarchy());
+        }
+
         internal static void InvokeDispose<T>(this T disposable)
             where T : struct, IDisposable
             => disposable.Dispose();
