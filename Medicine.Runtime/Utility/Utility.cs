@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -101,8 +102,14 @@ namespace Medicine.Internal
               ?? throw new InvalidOperationException("Could not find the IsNativeObjectAlive method on UnityEngine.Object.");
 
         [MethodImpl(AggressiveInlining)]
-        public static bool IsNativeObjectAlive(UnityEngine.Object? obj)
-            => !ReferenceEquals(obj, null) && isNativeObjectAliveDelegate(obj);
+        public static unsafe bool IsNativeObjectAlive([NotNullWhen(true)] UnityEngine.Object? obj)
+        {
+            nint ptr = UnsafeUtility.As<UnityEngine.Object?, nint>(ref obj);
+            nint nativePtr = ptr != 0
+                ? *(nint*)(ptr + sizeof(ulong) * 2)
+                : 0;
+            return nativePtr is not 0;
+        }
 
         [MethodImpl(AggressiveInlining)]
         public static bool IsValueType<T>()
