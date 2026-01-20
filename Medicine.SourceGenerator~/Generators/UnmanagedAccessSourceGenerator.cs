@@ -110,8 +110,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             SafetyChecks = safetyChecks,
         };
 
-        var members = typeSymbol.GetMembers().AsArray();
-        var fields = new List<FieldInfo>(capacity: members.Length);
+        var fields = new List<FieldInfo>(capacity: 16);
 
         if (hasCachedEnable)
         {
@@ -145,10 +144,29 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             );
         }
 
-        foreach (var member in members)
+        foreach (var member in typeSymbol.GetMembers().AsArray())
+            CollectField(member);
+
+        foreach (var member in typeSymbol.GetBaseTypes().SelectMany(x => x.GetMembers().AsArray()))
+            CollectField(member);
+
+        output.Fields = fields.ToArray();
+
+        if (output.Fields.Length is 0)
+        {
+            return output with
+            {
+                SourceGeneratorError = "Class marked with [UnmanagedAccess] has no instance fields or properties with backing fields.",
+                SourceGeneratorErrorLocation = typeDecl.Identifier.GetLocation(),
+            };
+        }
+
+        return output;
+
+        void CollectField(ISymbol member)
         {
             if (member is not IFieldSymbol { IsStatic: false } field)
-                continue;
+                return;
 
             fields.Add(
                 new()
@@ -165,19 +183,6 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 }
             );
         }
-
-        output.Fields = fields.ToArray();
-
-        if (output.Fields.Length is 0)
-        {
-            return output with
-            {
-                SourceGeneratorError = "Class marked with [UnmanagedAccess] has no instance fields or properties with backing fields.",
-                SourceGeneratorErrorLocation = typeDecl.Identifier.GetLocation(),
-            };
-        }
-
-        return output;
     }
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
