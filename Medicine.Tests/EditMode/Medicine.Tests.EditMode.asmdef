@@ -8,7 +8,8 @@
         "GUID:27619889b8ba8c24980f49ee34dbb44a",
         "GUID:0acc523941302664db1f4e527237feb3",
         "GUID:e0cd26848372d4e5c891c569017e11f1",
-        "GUID:afa2f73b1721ebc48b4c7d6a53e552e1"
+        "GUID:afa2f73b1721ebc48b4c7d6a53e552e1",
+        "GUID:2665a8d13d1b3f18800f46e256720795"
     ],
     "includePlatforms": [
         "Editor"
@@ -29,6 +30,11 @@
             "name": "com.cysharp.zlinq",
             "expression": "",
             "define": "MODULE_ZLINQ"
+        },
+        {
+            "name": "com.unity.burst",
+            "expression": "",
+            "define": "MODULE_BURST"
         }
     ],
     "noEngineReferences": false
