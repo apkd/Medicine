@@ -259,6 +259,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
+                src.Write("\n#if UNITY_EDITOR");
+                src.Line.Write("[global::UnityEditor.InitializeOnLoadMethodAttribute]");
+                src.Write("\n#endif");
                 src.Line.Write("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.BeforeSceneLoad)]");
                 src.Line.Write("static void InitializeUnmanagedLayout()");
                 using (src.Indent)
@@ -400,7 +403,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                                 {
                                     using (src.Braces)
                                     {
-                                        src.Line.Write($"CheckDestroyed();");
+                                        src.Line.Write($"CheckNullOrDestroyed();");
                                         src.Line.Write($"return {call}");
                                     }
                                 }
@@ -419,7 +422,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     {
                         src.Line.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.IsDestroyed\" />");
                         src.Line.Write($"public bool IsDestroyed");
-                        PropertyWithSafetyChecks("Medicine.UnmanagedRefExtensions.IsDestroyed(Ref);");
+                        using (src.Indent)
+                            src.Line.Write($"=> Medicine.UnmanagedRefExtensions.IsDestroyed(Ref);");
 
                         src.Line.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.GetInstanceID\" />");
                         src.Line.Write($"public int InstanceID");
@@ -448,19 +452,28 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     if (input.SafetyChecks)
                     {
                         src.Line.Write(Alias.Inline);
-                        src.Line.Write($"void CheckDestroyed()");
+                        src.Line.Write($"void CheckNullOrDestroyed()");
                         using (src.Braces)
                         {
-                            src.Line.Write($"if (Medicine.UnmanagedRefExtensions.IsDestroyed(Ref))");
-                            using (src.Braces)
+                            if (input.IsUnityObject)
+                            {
+                                src.Line.Write($"if (Medicine.UnmanagedRefExtensions.IsDestroyed(Ref))");
+                                using (src.Braces)
+                                {
+                                    src.Line.Write($"if (Ref.Ptr is 0)");
+                                    using (src.Indent)
+                                        src.Line.Write($"ThrowNullException();");
+
+                                    src.Line.Write("else");
+                                    using (src.Indent)
+                                        src.Line.Write($"ThrowDestroyedException();");
+                                }
+                            }
+                            else
                             {
                                 src.Line.Write($"if (Ref.Ptr is 0)");
                                 using (src.Indent)
                                     src.Line.Write($"ThrowNullException();");
-
-                                src.Line.Write("else");
-                                using (src.Indent)
-                                    src.Line.Write($"ThrowDestroyedException();");
                             }
 
                             src.Linebreak();
