@@ -6,8 +6,8 @@ using static System.Runtime.CompilerServices.MethodImplOptions;
 namespace Medicine
 {
     /// <summary>
-    /// A low-level wrapper for managing Burst-compatible references to instances of a class.
-    /// Essentially a pointer to a class instance.
+    /// Represents Burst-compatible references to managed objects.<br/>
+    /// Essentially a wrapper for a pointer to a class instance.
     /// </summary>
     /// <typeparam name="TClass">The type of the class to which this reference points. Must be a reference type.</typeparam>
     /// <remarks>
@@ -38,6 +38,11 @@ namespace Medicine
         public static implicit operator UnmanagedRef<TClass>(TClass ptr)
             => new(ptr);
 
+        /// <summary>
+        /// Returns a ref to an unmanaged value of type <typeparamref name="T"/> located at a specified memory offset.
+        /// </summary>
+        /// <param name="offset">The memory offset, in bytes, from the base pointer.</param>
+        /// <returns> A writeable reference to the value of type <typeparamref name="T"/> at the specified offset. </returns>
         [MethodImpl(AggressiveInlining)]
         public ref T Read<T>(int offset) where T : unmanaged
             => ref *(T*)(Ptr + offset);

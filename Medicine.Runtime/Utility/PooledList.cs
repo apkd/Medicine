@@ -77,7 +77,7 @@ namespace Medicine
 #if MEDICINE_NO_FUNSAFE
             disposable = ListPool<T>.Get(out list);
 #else
-            if (Utility.IsValueType<T>())
+            if (Utility.TypeInfo<T>.IsValueType)
             {
                 disposable = ListPool<T>.Get(out list);
             }
@@ -119,7 +119,7 @@ namespace Medicine
 #if MEDICINE_NO_FUNSAFE
             disposable.InvokeDispose();
 #else
-            if (Utility.IsValueType<T>())
+            if (Utility.TypeInfo<T>.IsValueType)
             {
                 disposable.InvokeDispose();
             }

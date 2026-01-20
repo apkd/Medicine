@@ -109,12 +109,6 @@ namespace Medicine.Internal
             where T : struct, IDisposable
             => disposable.Dispose();
 
-        static readonly Func<UnityEngine.Object?, bool> isNativeObjectAliveDelegate
-            = typeof(UnityEngine.Object)
-                  .GetMethod("IsNativeObjectAlive", BindingFlags.NonPublic | BindingFlags.Static)
-                  .CreateDelegate(typeof(Func<UnityEngine.Object?, bool>)) as Func<UnityEngine.Object?, bool>
-              ?? throw new InvalidOperationException("Could not find the IsNativeObjectAlive method on UnityEngine.Object.");
-
         [MethodImpl(AggressiveInlining)]
         public static unsafe bool IsNativeObjectAlive([NotNullWhen(true)] UnityEngine.Object? obj)
         {
@@ -122,16 +116,33 @@ namespace Medicine.Internal
             nint nativePtr = ptr != 0
                 ? *(nint*)(ptr + sizeof(ulong) * 2)
                 : 0;
+
             return nativePtr is not 0;
         }
 
-        [MethodImpl(AggressiveInlining)]
-        public static bool IsValueType<T>()
-            => TypeCache<T>.IsValueType is 1;
-
-        static class TypeCache<T>
+        public static class TypeInfo<T>
         {
-            public static readonly byte IsValueType = typeof(T).IsValueType ? (byte)1 : (byte)0;
+            public static bool IsValueType => (Flags & TypeFlags.IsValueType) != 0;
+
+            // public static bool IsUnityEngineObject => (Flags & TypeFlags.IsUnityEngineObject) != 0;
+            public static bool IsScriptableObject => (Flags & TypeFlags.IsScriptableObject) != 0;
+            // public static bool IsMonoBehaviour => (Flags & TypeFlags.IsMonoBehaviour) != 0;
+
+            public static readonly TypeFlags Flags
+                = 0
+                  | (typeof(T).IsValueType ? TypeFlags.IsValueType : 0)
+                  // | (typeof(UnityEngine.Object).IsAssignableFrom(typeof(T)) ? TypeFlags.IsUnityEngineObject : 0)
+                  | (typeof(ScriptableObject).IsAssignableFrom(typeof(T)) ? TypeFlags.IsScriptableObject : 0);
+                  // | (typeof(MonoBehaviour).IsAssignableFrom(typeof(T)) ? TypeFlags.IsMonoBehaviour : 0);
+        }
+
+        [Flags]
+        public enum TypeFlags : ushort
+        {
+            IsValueType = 1 << 0,
+            IsUnityEngineObject = 1 << 1,
+            IsScriptableObject = 1 << 2,
+            IsMonoBehaviour = 1 << 3,
         }
     }
 }

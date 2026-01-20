@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using JetBrains.Annotations;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.Scripting;
 using static System.ComponentModel.EditorBrowsableState;
@@ -18,6 +20,7 @@ namespace Medicine.Internal
 {
     public static partial class Storage
     {
+        [EditorBrowsable(Never)]
         public static class Singleton
         {
             internal static readonly Dictionary<Type, Func<Object?>> UntypedAccess = new(capacity: 8);
@@ -28,15 +31,16 @@ namespace Medicine.Internal
         {
             static class StaticInit
             {
-                [Preserve]
-                public static void Init() { }
+                [MethodImpl(AggressiveInlining)]
+                internal static void RunOnce() { }
 
                 static StaticInit()
                     => Singleton.UntypedAccess.Add(typeof(T), static () => Instance as Object);
             }
 
 #if UNITY_EDITOR
-            static T? instance;
+            [EditorBrowsable(Never)]
+            public static T? RawInstance;
 
             /// <remarks>
             /// Do not access directly!
@@ -50,9 +54,15 @@ namespace Medicine.Internal
                     if (Utility.EditMode)
                         EditMode.Refresh();
 
+#if MEDICINE_DISABLE_SINGLETON_DESTROYED_FILTER
                     return instance;
+#else
+                    return Utility.IsNativeObjectAlive(RawInstance as Object)
+                        ? RawInstance
+                        : null; // ensure pure null is returned for destroyed objects
+#endif
                 }
-                set => instance = value;
+                set => RawInstance = value;
             }
 #else
             public static T? Instance;
@@ -63,12 +73,12 @@ namespace Medicine.Internal
             /// </summary>
             public static void Register(T? instance)
             {
-                StaticInit.Init();
+                StaticInit.RunOnce();
 
                 if (instance == null)
                 {
 #if DEBUG
-                    Debug.LogError($"Singleton<{typeof(T).Name}> is null, ignoring");
+                    Debug.LogError($"Tried to register null Singleton<{typeof(T).Name}> instance, ignoring");
 #endif
                     return;
                 }
@@ -84,7 +94,7 @@ namespace Medicine.Internal
                 if (instance == null)
                 {
 #if DEBUG
-                    Debug.LogError($"Singleton<{typeof(T).Name}> is null, ignoring");
+                    Debug.LogError($"Tried to unregister null Singleton<{typeof(T).Name}> instance, ignoring");
 #endif
                     return;
                 }
@@ -100,20 +110,17 @@ namespace Medicine.Internal
             {
                 static int editModeVersion = int.MinValue;
 
-                static readonly bool editModeIsScriptableObject
-                    = typeof(ScriptableObject).IsAssignableFrom(typeof(T));
-
                 /// <inheritdoc cref="Storage.Instances{T}.EditMode.Invalidate()"/>
                 public static int Invalidate()
                     => editModeVersion = int.MinValue;
 
                 static bool InstanceBecameInvalid()
-                    => instance as Object == null ||                        // destroyed
-                       instance is Behaviour { isActiveAndEnabled: false }; // deactivated;
+                    => RawInstance as Object == null ||                        // destroyed
+                       RawInstance is Behaviour { isActiveAndEnabled: false }; // deactivated;
 
                 static T? Search()
                 {
-                    if (editModeIsScriptableObject)
+                    if (Utility.TypeInfo<T>.IsScriptableObject)
                         return Find.ObjectsByTypeAll<T>().FirstOrDefault();
 
                     foreach (var obj in Find.ObjectsByType<T>())

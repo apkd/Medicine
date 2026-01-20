@@ -52,6 +52,7 @@ namespace Medicine
         TimeSpan Elapsed
             => new TimeSpan(GetElapsedDateTimeTicks());
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Dispose()
         {
             var elapsed = Elapsed.TotalMilliseconds;

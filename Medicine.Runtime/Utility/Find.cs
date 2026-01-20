@@ -129,8 +129,31 @@ namespace Medicine
                 sortMode
             );
 
-            // todo: actually mutate the array type
+            // todo: actually mutate the array type?
             return UnsafeUtility.As<Object[], T[]>(ref array);
+        }
+
+        /// <summary>
+        /// Returns the first loaded object of type <typeparamref name="T"/>.<br/>
+        /// Included for parity with <see cref="Object.FindAnyObjectByType{T}()"/>
+        /// - sadly, doesn't give any performance benefits in the general case,
+        /// as the underlying UnityEngine API is plain bad,
+        /// but it does at least check for a [Singleton]/[Track] fast path first.
+        /// </summary>
+        /// <returns><inheritdoc cref="Object.FindAnyObjectByType(System.Type)"/></returns>
+        public static T? AnyObjectByType<T>(bool includeInactive = false) where T : Object
+        {
+            if (Storage.Singleton<T>.RawInstance is var singleton)
+                if (Utility.IsNativeObjectAlive(singleton))
+                    return singleton;
+
+            if (Storage.Instances<T>.TypeIsRegistered)
+                return Storage.Instances<T>.List[0];
+
+            return Object.FindAnyObjectByType(
+                type: typeof(T),
+                findObjectsInactive: includeInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude
+            ) as T;
         }
 
         /// <summary>
@@ -159,7 +182,7 @@ namespace Medicine
         {
             var array = Resources.FindObjectsOfTypeAll(typeof(T));
 
-            // todo: actually mutate the array type
+            // todo: actually mutate the array type?
             return UnsafeUtility.As<Object[], T[]>(ref array);
         }
     }

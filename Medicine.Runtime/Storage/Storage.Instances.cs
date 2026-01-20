@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -5,6 +6,7 @@ using System.Runtime.CompilerServices;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using static System.ComponentModel.EditorBrowsableState;
+using static System.Runtime.CompilerServices.MethodImplOptions;
 using Object = UnityEngine.Object;
 
 // ReSharper disable UnusedType.Global
@@ -16,30 +18,61 @@ namespace Medicine.Internal
     public static partial class Storage
     {
         [EditorBrowsable(Never)]
+        public static class Instances
+        {
+            internal static readonly Dictionary<Type, Func<IEnumerable<object>>> UntypedAccess = new(capacity: 8);
+        }
+
+        [EditorBrowsable(Never)]
         public static class Instances<T> where T : class
         {
-            /// <remarks>
-            /// Do not access directly!
-            /// <p>Use <see cref="Find.Instances{T}"/> or the generated <c>.Instances</c> property instead.</p>
-            /// </remarks>
-            public static readonly List<T> List = new(capacity: 8);
+            static class StaticInit
+            {
+                [MethodImpl(AggressiveInlining)]
+                internal static void RunOnce() { }
 
+                static StaticInit()
+                {
+                    List.Capacity = 64;
+                    Instances.UntypedAccess.Add(typeof(T), static () => List);
+                }
+            }
+
+            /// <summary>
+            /// Main active instance storage for type <typeparamref name="T"/>.
+            /// </summary>
+            /// <remarks>
+            /// Do not modify! <br/>
+            /// Prefer read-only access via <see cref="Find.Instances{T}"/> or the
+            /// generated <c>.Instances</c> property instead.
+            /// </remarks>
+            public static readonly List<T> List = new(capacity: 0);
+
+            public static bool TypeIsRegistered
+                => List.Capacity > 0;
+
+            [MethodImpl(AggressiveInlining)]
             public static Span<T> AsSpan()
-                => List.AsInternalsView().Array.AsSpan(List.Count);
+                => List.AsInternalsView().Array.AsSpanUnsafe(List.Count);
 
             public static unsafe UnsafeList<UnmanagedRef<T>> AsUnmanaged()
-                => new((UnmanagedRef<T>*)UnsafeUtility.AddressOf(ref UnsafeUtility.As<T, ulong>(ref List.AsInternalsView().Array[0])), List.Count);
+                => new((UnmanagedRef<T>*)UnsafeUtility.AddressOf(ref UnsafeUtility.As<T, ulong>(ref List.AsInternalsView().Array![0])), List.Count);
 
             /// <summary>
             /// Registers the object as one of the active instances of <paramref name="T"/>.
             /// </summary>
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static int Register(T instance)
             {
+                StaticInit.RunOnce();
 #if DEBUG
-                if (instance == null)
+                if (!Utility.IsNativeObjectAlive(instance as Object))
                 {
-                    Debug.LogError($"Tried to register a null instance of {typeof(T).Name} for tracking.");
+                    Debug.LogError(
+                        $"Tried to register a null instance of {typeof(T).Name} for tracking. " +
+                        $"This probably indicates a logic error in your code. " +
+                        $"This check is not present in release builds and will result in bugs/errors."
+                    );
+
                     return -1;
                 }
 #endif
@@ -55,13 +88,16 @@ namespace Medicine.Internal
             /// <summary>
             /// Unregisters the object from the list of active instances of <paramref name="T"/>.
             /// </summary>
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static int Unregister(T instance)
             {
 #if DEBUG
                 if (ReferenceEquals(instance, null))
                 {
-                    Debug.LogError($"Singleton<{typeof(T).Name}> is null, ignoring");
+                    Debug.LogError(
+                        $"Tried to unregister a null instance of {typeof(T).Name}. " +
+                        $"This probably indicates a logic error in your code. " +
+                        $"This check is not present in release builds and will result in bugs/errors."
+                    );
                     return -1;
                 }
 #endif
@@ -69,6 +105,7 @@ namespace Medicine.Internal
                 return RemoveFromEndSwapBack(List, instance);
             }
 
+            [MethodImpl(AggressiveInlining)]
             static int RemoveFromEndSwapBack(List<T> list, T instance)
             {
                 // RemoveFromEndSwapBack implementation:
@@ -94,8 +131,8 @@ namespace Medicine.Internal
                     index = selfTrackIndex.InstanceIndex;
 
                     // update swapped instance's index
-                    // (we know the other element also implements the interface)
-                    var lastElement = (IInstanceIndex<T>)array[listView.Count - 1];
+                    // (unsafe cast - we know the other element also implements the interface)
+                    var lastElement = UnsafeUtility.As<T, IInstanceIndex<T>>(ref array[listView.Count - 1]);
                     lastElement.InstanceIndex = index;
 
                     selfTrackIndex.InstanceIndex = -1;
@@ -123,7 +160,7 @@ namespace Medicine.Internal
                 array[index] = array[last];
 
                 // clear the last element
-                array[last] = null;
+                array[last] = null!;
 
                 // decrease element count
                 listView.Count = last;
@@ -133,18 +170,16 @@ namespace Medicine.Internal
             }
 
             /// <inheritdoc cref="Register{T}"/>
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static int RegisterWithInstanceID(T instance)
             {
                 int index = Register(instance);
                 if (index >= 0)
-                    InstanceIDs<T>.List.Add((instance as Object)!.GetInstanceID());
+                    InstanceIDs<T>.List.Add(UnsafeUtility.As<T, Object>(ref instance)!.GetInstanceID());
 
                 return index;
             }
 
             /// <inheritdoc cref="Unregister{T}"/>
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static int UnregisterWithInstanceID(T instance)
             {
                 int index = Unregister(instance);
@@ -169,7 +204,6 @@ namespace Medicine.Internal
             public static class EditMode
             {
                 static int editModeVersion = int.MinValue;
-                static readonly bool editModeIsScriptableObject = typeof(ScriptableObject).IsAssignableFrom(typeof(T));
 
                 /// <remarks>
                 /// This method is used to hook into the object constructor to invalidate the active object list.
@@ -186,10 +220,11 @@ namespace Medicine.Internal
 
                 static bool AnyInstanceBecameInvalid()
                 {
+                    // this method is theoretically burstable, but not sure if it's worth it for edit mode code
                     foreach (var instance in List.AsInternalsView().Array ?? Array.Empty<T>())
                     {
                         // any instance was destroyed
-                        if (instance as Object == null)
+                        if (!Utility.IsNativeObjectAlive(instance as Object))
                             return true;
 
                         // any instance was deactivated
@@ -216,7 +251,7 @@ namespace Medicine.Internal
                     {
                         List.Clear();
 
-                        if (editModeIsScriptableObject)
+                        if (Utility.TypeInfo<T>.IsScriptableObject)
                         {
                             List.AddRange(Find.ObjectsByTypeAll<T>());
                         }
