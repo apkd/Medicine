@@ -26,8 +26,12 @@ concurrency:
 jobs:
   release:
     if: >
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
-      github.event_name == 'workflow_dispatch'
+      (
+      github.event_name == 'workflow_run' && 
+      github.event.workflow_run.conclusion == 'success' &&  
+      !contains(github.event.workflow_run.head_commit.message, '[skip release]')
+      ) 
+      || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     env:
