@@ -81,7 +81,7 @@ test -n "$EDITOR_URL"
 # extract revision
 REV="$(printf '%s' "$EDITOR_URL" | sed -nE 's#.*/(download_unity|download)/([^/]+)/.*#\2#p')"
 test -n "$REV"
-echo "Downloading: $URL (revision: $REV)"
+echo "Downloading: $EDITOR_URL (revision: $REV)"
 
 download_and_extract "$EDITOR_URL" "/tmp/unity_editor.tar.xz"
 
