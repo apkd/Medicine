@@ -130,8 +130,6 @@ rm -rf "$DEST/Editor/Data/Resources/PackageManager/BuiltInPackages/com.unity.2d.
 rm -rf "$DEST/Editor/Data/Resources/OpenRL" || true
 rm -rf "$DEST/Editor/Data/Resources/GI" || true
 rm -rf "$DEST/Editor/Data/MonoEmbedRuntime" || true
-rm -rf "$DEST/Editor/Data/MonoBleedingEdge/etc" || true
-rm -rf "$DEST/Editor/Data/MonoBleedingEdge/bin" || true
 rm -rf "$DEST/Editor/BugReporter" || true
 rm -rf "$DEST/Editor/*_s.debug" || true
 find "$DEST/Editor/Data/Resources/PackageManager/Editor/" ! -name 'manifest.json' -type f -exec rm -f {} + || true
