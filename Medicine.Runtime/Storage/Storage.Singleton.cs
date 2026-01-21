@@ -38,7 +38,6 @@ namespace Medicine.Internal
                     => Singleton.UntypedAccess.Add(typeof(T), static () => Instance as Object);
             }
 
-#if UNITY_EDITOR
             [EditorBrowsable(Never)]
             public static T? RawInstance;
 
@@ -51,8 +50,10 @@ namespace Medicine.Internal
                 [MethodImpl(AggressiveInlining)]
                 get
                 {
+#if UNITY_EDITOR
                     if (Utility.EditMode)
                         EditMode.Refresh();
+#endif
 
 #if MEDICINE_DISABLE_SINGLETON_DESTROYED_FILTER
                     return RawInstance;
@@ -64,9 +65,6 @@ namespace Medicine.Internal
                 }
                 set => RawInstance = value;
             }
-#else
-            public static T? RawInstance;
-#endif
 
             /// <summary>
             /// Registers the given object as the current active singleton instance of <paramref name="T"/>.
