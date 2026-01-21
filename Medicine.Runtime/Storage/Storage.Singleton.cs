@@ -55,7 +55,7 @@ namespace Medicine.Internal
                         EditMode.Refresh();
 
 #if MEDICINE_DISABLE_SINGLETON_DESTROYED_FILTER
-                    return instance;
+                    return RawInstance;
 #else
                     return Utility.IsNativeObjectAlive(RawInstance as Object)
                         ? RawInstance
@@ -65,7 +65,7 @@ namespace Medicine.Internal
                 set => RawInstance = value;
             }
 #else
-            public static T? Instance;
+            public static T? RawInstance;
 #endif
 
             /// <summary>
