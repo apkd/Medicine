@@ -53,12 +53,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prep vars
+        id: vars
         run: |
           REPO='${{ github.repository }}'
           REPO_LC=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
           echo "REPO_LC=$REPO_LC" >> "$GITHUB_ENV"
           echo "IMAGE_TAG=ghcr.io/$REPO_LC/unity-ci:${{ github.sha }}-${{ matrix.UNITY_VERSION }}" >> "$GITHUB_ENV"
           echo "CACHE_REF=ghcr.io/$REPO_LC/unity-ci:cache-${{ matrix.UNITY_VERSION }}" >> "$GITHUB_ENV"
+          echo "unity_v_mm=$(printf '%s' '${{ matrix.UNITY_VERSION }}' | cut -d. -f1-2)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
         env:
@@ -116,7 +118,7 @@ jobs:
               -executeMethod CI.RunTests
 
       - name: Run tests in standalone player
-        if: ${{ matrix.UNITY_VERSION == '6000.0.65f1' }}
+        if: contains(fromJSON('["2022.3", "6000.0"]'), steps.vars.outputs.unity_v_mm)
         run: |
           set -euo pipefail
 
