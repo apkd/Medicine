@@ -92,7 +92,6 @@ rm -rf "$DEST/Editor/libembree.*" || true
 rm -rf "$DEST/Editor/libRadeonRays.*" || true
 rm -rf "$DEST/Editor/libRL.*" || true
 rm -rf "$DEST/Editor/Unity_s.debug" || true
-rm -rf "$DEST/Editor/Data/il2cpp" || true
 rm -rf "$DEST/Editor/Data/Tools/usymtool" || true
 rm -rf "$DEST/Editor/Data/Tools/macosx" || true
 rm -rf "$DEST/Editor/Data/Tools/libembree.*" || true
