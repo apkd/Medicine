@@ -58,29 +58,35 @@ rm -f libssl1.1_1.1.1f-1ubuntu2.24_amd64.deb
 
 DEST="${INSTALL_ROOT}/${UNITY_VERSION}"
 mkdir -p "$DEST"
-TARBALL="/tmp/unity.tar.xz"
-BASE="${UNITY_VERSION%f*}"
 TMPHTML="/tmp/unity_whats_new.html"
 axel -q -o "$TMPHTML" "https://unity.com/releases/editor/whats-new/${UNITY_VERSION}"
-URL="$( \
+
+download_and_extract() {
+  local url="$1"
+  local tarball="$2"
+  test -n "$url"
+  echo "Downloading: $url"
+  axel -q -n 16 -o "$tarball" "$url"
+  xz -T0 -dc "$tarball" | tar -x --no-same-owner --no-same-permissions --delay-directory-restore --no-xattrs --no-acls --no-selinux -C "$DEST"
+  rm -f "$tarball"
+}
+
+EDITOR_URL="$( \
   tr '\n' ' ' < "$TMPHTML" \
   | grep -oE "https?://(download\.unity3d\.com/download_unity|beta\.unity3d\.com/download)/[^\"']+/LinuxEditorInstaller/Unity-${UNITY_VERSION}\.tar\.xz" \
   | head -n1 \
 )"
-rm -f "$TMPHTML"
-test -n "$URL"
+test -n "$EDITOR_URL"
 
 # extract revision
-REV="$(printf '%s' "$URL" | sed -nE 's#.*/(download_unity|download)/([^/]+)/.*#\2#p')"
+REV="$(printf '%s' "$EDITOR_URL" | sed -nE 's#.*/(download_unity|download)/([^/]+)/.*#\2#p')"
 test -n "$REV"
 echo "Downloading: $URL (revision: $REV)"
 
-# https://www.tecmint.com/axel-commandline-download-accelerator-for-linux/
-axel -q -n 16 -o "$TARBALL" "$URL"
-xz -T0 -dc "$TARBALL" | tar -x --no-same-owner --no-same-permissions --delay-directory-restore --no-xattrs --no-acls --no-selinux -C "$DEST"
-rm -f "$TARBALL"
+download_and_extract "$EDITOR_URL" "/tmp/unity_editor.tar.xz"
 
 # strip editor
+rm -f "$TMPHTML"
 rm -rf "$DEST/Editor/libumbraoptimizer64.*" || true
 rm -rf "$DEST/Editor/libembree.*" || true
 rm -rf "$DEST/Editor/libRadeonRays.*" || true
@@ -124,7 +130,6 @@ rm -rf "$DEST/Editor/Data/Resources/PackageManager/BuiltInPackages/com.unity.2d.
 rm -rf "$DEST/Editor/Data/Resources/PackageManager/BuiltInPackages/com.unity.2d.sprite" || true
 rm -rf "$DEST/Editor/Data/Resources/OpenRL" || true
 rm -rf "$DEST/Editor/Data/Resources/GI" || true
-rm -rf "$DEST/Editor/Data/PlaybackEngines" || true
 rm -rf "$DEST/Editor/Data/MonoEmbedRuntime" || true
 rm -rf "$DEST/Editor/Data/MonoBleedingEdge/etc" || true
 rm -rf "$DEST/Editor/Data/MonoBleedingEdge/bin" || true
