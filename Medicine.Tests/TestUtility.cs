@@ -1,3 +1,8 @@
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEditor.TestTools.TestRunner.Api;
+using static UnityEditor.EnterPlayModeOptions;
+#endif
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -6,9 +11,6 @@ using JetBrains.Annotations;
 using Medicine;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using UnityEditor;
-using UnityEditor.TestTools.TestRunner.Api;
-using static UnityEditor.EnterPlayModeOptions;
 using Object = UnityEngine.Object;
 
 public static class TestUtility
@@ -22,8 +24,19 @@ public static class TestUtility
                 if (gameObject != testRunner)
                     Object.DestroyImmediate(gameObject);
     }
+
+    static void CopyTestResults(string filename)
+    {
+#if UNITY_6000_0_OR_NEWER
+        File.Copy(
+            $"{Application.persistentDataPath}/TestResults.xml",
+            $"test-results/{filename}"
+        );
+#endif
+    }
 }
 
+#if UNITY_EDITOR
 public static class CI
 {
     sealed class TestRunnerLambdaCallbacks : ICallbacks
@@ -144,3 +157,4 @@ public static class CI
         }
     }
 }
+#endif

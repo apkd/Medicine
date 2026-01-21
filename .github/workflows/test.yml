@@ -115,6 +115,24 @@ jobs:
               -projectPath $PROJECT \
               -executeMethod CI.RunTests
 
+      - name: Run tests in standalone player
+        if: ${{ matrix.UNITY_VERSION == '6000.0.65f1' }}
+        run: |
+          set -euo pipefail
+
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:$PROJECT/Packages/Medicine/" \
+            -v "$RUNNER_TEMP/test-results:$PROJECT/test-results" \
+            -v "$LIC_DIR:/root/.local/share/unity3d" \
+            -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
+            -w $PROJECT \
+            "${{ env.IMAGE_TAG }}" \
+            unity-editor \
+              -projectPath $PROJECT \
+              -runTests \
+              -testPlatform StandaloneLinux64 \
+              -testResults "$PROJECT/test-results/Standalone tests.xml"
+
 #        doesn't work for now - `unity-editor` command embedded in the Dockerfile
 #        runs with `-serial` which is incompatible with `-returnlicense`
 #      - name: Return Unity license
