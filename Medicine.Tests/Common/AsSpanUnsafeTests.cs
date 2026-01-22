@@ -6,7 +6,7 @@ using NUnit.Framework;
 using Medicine.Internal;
 
 [SuppressMessage("ReSharper", "ExpressionIsAlwaysNull")]
-public sealed class AsSpanUnsafeTests
+public class AsSpanUnsafeTests
 {
     [Test]
     public void List_AsSpanUnsafe_Empty()

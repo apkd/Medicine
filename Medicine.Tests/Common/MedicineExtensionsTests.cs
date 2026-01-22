@@ -10,7 +10,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.Animations;
 
-public sealed class MedicineExtensionsTests
+public class MedicineExtensionsTests
 {
     Scene scene;
 

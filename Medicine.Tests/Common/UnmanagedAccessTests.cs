@@ -10,7 +10,7 @@ using System.Diagnostics.CodeAnalysis;
 [SuppressMessage("ReSharper", "ConvertToConstant.Global")]
 [SuppressMessage("ReSharper", "ConvertToConstant.Local")]
 [SuppressMessage("ReSharper", "HeapView.BoxingAllocation")]
-public sealed partial class UnmanagedAccessTests
+public partial class UnmanagedAccessTests
 {
     [UnmanagedAccess]
     public partial class BasicFields
@@ -107,22 +107,44 @@ public sealed partial class UnmanagedAccessTests
     public partial class UnityObjectAccess : MonoBehaviour
     {
         public int SomeValue = 5;
+
+        [Inject]
+        void Awake()
+        {
+            Transform = GetComponent<Transform>();
+            GameObject = gameObject;
+        }
+    }
+
+    [Test]
+    public void UnmanagedAccess_UnityObject()
+    {
+        var gameObject = new GameObject("Test", typeof(UnityObjectAccess));
+        var component = gameObject.GetComponent<UnityObjectAccess>();
+
+        UnmanagedRef<UnityObjectAccess> unmanagedRef = component;
+        var access = unmanagedRef.AccessRW();
+
+        Assert.That(unmanagedRef.GetInstanceID(), Is.EqualTo(component.GetInstanceID()));
+        Assert.That(access.InstanceID, Is.EqualTo(component.GetInstanceID()));
+
+        Assert.That(unmanagedRef.IsDestroyed(), Is.False);
+        Assert.That(access.IsDestroyed, Is.False);
+
+        Assert.That(access.SomeValue, Is.EqualTo(5));
+        UnityEngine.Object.DestroyImmediate(gameObject);
+        Assert.That(access.IsDestroyed, Is.True);
     }
 
     [Test]
     public void UnmanagedAccess_UnityObject_SafetyChecks()
     {
-        var go = new GameObject("Test", typeof(UnityObjectAccess));
-        var component = go.GetComponent<UnityObjectAccess>();
+        var gameObject = new GameObject("Test", typeof(UnityObjectAccess));
+        var component = gameObject.GetComponent<UnityObjectAccess>();
         UnmanagedRef<UnityObjectAccess> unmanagedRef = component;
         var access = unmanagedRef.AccessRW();
 
-        Assert.That(access.IsDestroyed, Is.False);
-        Assert.That(access.SomeValue, Is.EqualTo(5));
-
-        UnityEngine.Object.DestroyImmediate(go);
-
-        Assert.That(access.IsDestroyed, Is.True);
+        UnityEngine.Object.DestroyImmediate(gameObject);
         Assert.Throws<InvalidOperationException>(() => _ = access.SomeValue);
     }
 

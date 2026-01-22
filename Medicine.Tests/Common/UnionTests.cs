@@ -1,7 +1,7 @@
 using Medicine;
 using NUnit.Framework;
 
-public sealed partial class UnionTests
+public partial class UnionTests
 {
     public readonly struct Result
     {

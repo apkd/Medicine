@@ -4,7 +4,7 @@ using Medicine;
 using NUnit.Framework;
 using ZLinq;
 
-public sealed partial class WrapValueEnumerableCompileTests
+public partial class WrapValueEnumerableCompileTests
 {
     static partial class Fixtures
     {

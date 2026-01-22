@@ -2,7 +2,7 @@ using System.Threading;
 using NUnit.Framework;
 using Medicine;
 
-public sealed class LazyTests
+public class LazyTests
 {
     sealed class TestClass
     {
