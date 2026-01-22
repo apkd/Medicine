@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Unity.Collections.LowLevel.Unsafe;
 using static System.Runtime.CompilerServices.MethodImplOptions;
@@ -57,21 +58,40 @@ namespace Medicine
     /// Objects derived from <see cref="UnityEngine.Object"/> have a common sequential layout, allowing us to
     /// access these internal fields.
     /// </summary>
+    [SuppressMessage("ReSharper", "HeuristicUnreachableCode")]
     public static unsafe class UnmanagedRefExtensions
     {
         /// <summary>
         /// Returns true if the <see cref="UnityEngine.Object"/> has been destroyed (or the reference is null).
         /// </summary>
         [MethodImpl(AggressiveInlining)]
-        public static bool IsDestroyed<TClass>(this UnmanagedRef<TClass> classRef) where TClass : UnityEngine.Object
+        public static bool IsInvalid<TClass>(this UnmanagedRef<TClass> classRef) where TClass : UnityEngine.Object
         {
             nint ptr = classRef.Ptr;
-            nint nativePtr = ptr != 0
-                ? *(nint*)(ptr + sizeof(nint) * 2)
-                : 0;
-
+            nint nativePtr = ptr is not 0 ? *(nint*)(ptr + sizeof(nint) * 2) : 0;
             return nativePtr is 0;
         }
+
+        /// <summary>
+        /// Returns true if the <see cref="UnityEngine.Object"/> is not null and not a destroyed object.
+        /// </summary>
+        [MethodImpl(AggressiveInlining)]
+        public static bool IsValid<TClass>(this UnmanagedRef<TClass> classRef) where TClass : UnityEngine.Object
+        {
+            nint ptr = classRef.Ptr;
+            nint nativePtr = ptr is not 0 ? *(nint*)(ptr + sizeof(nint) * 2) : 0;
+            return nativePtr is not 0;
+        }
+
+        /// <summary>
+        /// Retrieves the unmanaged native object pointer associated with a UnityEngine.Object instance.
+        /// </summary>
+        /// <typeparam name="TClass">The type of UnityEngine.Object the unmanaged reference points to.</typeparam>
+        /// <param name="classRef">A reference to the unmanaged UnityEngine.Object wrapper.</param>
+        /// <returns>The native memory address of the native representation of a Unity object as an <see cref="nint"/> value.</returns>
+        [MethodImpl(AggressiveInlining)]
+        public static nint GetNativeObjectPtr<TClass>(this UnmanagedRef<TClass> classRef) where TClass : UnityEngine.Object
+            => *(nint*)(classRef.Ptr + sizeof(nint) * 2);
 
         /// <summary>
         /// Equivalent of the <see cref="UnityEngine.Object.GetInstanceID"/> method.
@@ -119,13 +139,10 @@ namespace Medicine
 
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void InitializeOffsetOfInstanceID()
-        {
-            UnityEngine.Debug.Log("Initializing offsetOfInstanceIDInCPlusPlusObject");
-            offsetOfInstanceIDInCPlusPlusObject.Data
+            => offsetOfInstanceIDInCPlusPlusObject.Data
                 = (int)typeof(UnityEngine.Object)
                     .GetMethod("GetOffsetOfInstanceIDInCPlusPlusObject", PrivateStatic)
                     .Invoke(null, Array.Empty<object>());
-        }
 #else
         static readonly nint offsetOfInstanceIDInCPlusPlusObject
             = (int)typeof(UnityEngine.Object)

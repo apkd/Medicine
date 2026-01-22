@@ -90,7 +90,7 @@ public partial class UnmanagedAccessTests
     {
         var other = new BasicFields { IntField = 55 };
         var obj = new ReferenceFields { Other = other };
-        
+
         UnmanagedRef<ReferenceFields> unmanagedRef = obj;
         var access = unmanagedRef.AccessRW();
 
@@ -128,12 +128,25 @@ public partial class UnmanagedAccessTests
         Assert.That(unmanagedRef.GetInstanceID(), Is.EqualTo(component.GetInstanceID()));
         Assert.That(access.InstanceID, Is.EqualTo(component.GetInstanceID()));
 
-        Assert.That(unmanagedRef.IsDestroyed(), Is.False);
-        Assert.That(access.IsDestroyed, Is.False);
+        Assert.That(unmanagedRef.IsInvalid(), Is.False);
+        Assert.That(unmanagedRef.IsValid(), Is.True);
+        Assert.That(access.IsInvalid, Is.False);
+        Assert.That(access.IsValid, Is.True);
 
         Assert.That(access.SomeValue, Is.EqualTo(5));
         UnityEngine.Object.DestroyImmediate(gameObject);
-        Assert.That(access.IsDestroyed, Is.True);
+
+        Assert.That(unmanagedRef.IsInvalid(), Is.True);
+        Assert.That(unmanagedRef.IsValid(), Is.False);
+        Assert.That(access.IsValid, Is.False);
+        Assert.That(access.IsInvalid, Is.True);
+
+        unmanagedRef = default;
+
+        Assert.That(unmanagedRef.IsInvalid(), Is.True);
+        Assert.That(unmanagedRef.IsValid(), Is.False);
+        Assert.That(access.IsValid, Is.False);
+        Assert.That(access.IsInvalid, Is.True);
     }
 
     [Test]

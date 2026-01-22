@@ -166,8 +166,8 @@ namespace Medicine
     /// Accessing a destroyed object will throw an exception.
     /// Safety checks are always disabled in release builds.<br/>
     /// If necessary, you should explicitly check whether an UnmanagedRef is destroyed
-    /// using the <c>.IsDestroyed()</c> extension, or using the generated
-    /// <c>Access.IsDestroyed</c> helper property.<br/>
+    /// using the <c>.IsValid()</c> extension, or using the generated
+    /// <c>Access.IsValid</c> helper property.<br/>
     /// </param>
     public sealed class UnmanagedAccessAttribute : Attribute
     {

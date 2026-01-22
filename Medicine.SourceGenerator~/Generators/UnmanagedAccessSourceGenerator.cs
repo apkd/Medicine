@@ -391,6 +391,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
             void EmitAccessStruct(string accessStructName, bool isReadOnly)
             {
+                string safetyCheckMethodName = input.IsUnityObject
+                    ? "CheckNullOrDestroyed"
+                    : "CheckNull";
+
                 src.Line.Write($"public readonly unsafe partial struct {accessStructName}");
                 using (src.Braces)
                 {
@@ -432,7 +436,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                                 {
                                     using (src.Braces)
                                     {
-                                        src.Line.Write($"CheckNullOrDestroyed();");
+                                        src.Line.Write($"{safetyCheckMethodName}();");
                                         src.Line.Write($"return {call}");
                                     }
                                 }
@@ -449,10 +453,15 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     if (input.IsUnityObject)
                     {
-                        src.Line.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.IsDestroyed\" />");
-                        src.Line.Write($"public bool IsDestroyed");
+                        src.Line.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.IsValid\" />");
+                        src.Line.Write($"public bool IsValid");
                         using (src.Indent)
-                            src.Line.Write($"=> Medicine.UnmanagedRefExtensions.IsDestroyed(Ref);");
+                            src.Line.Write($"=> Medicine.UnmanagedRefExtensions.IsValid(Ref);");
+
+                        src.Line.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.IsInvalid\" />");
+                        src.Line.Write($"public bool IsInvalid");
+                        using (src.Indent)
+                            src.Line.Write($"=> Medicine.UnmanagedRefExtensions.IsInvalid(Ref);");
 
                         src.Line.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.GetInstanceID\" />");
                         src.Line.Write($"public int InstanceID");
@@ -487,12 +496,12 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     if (input.AttributeSettings.SafetyChecks)
                     {
                         src.Line.Write(Alias.Inline);
-                        src.Line.Write($"void CheckNullOrDestroyed()");
+                        src.Line.Write($"void {safetyCheckMethodName}()");
                         using (src.Braces)
                         {
                             if (input.IsUnityObject)
                             {
-                                src.Line.Write($"if (Medicine.UnmanagedRefExtensions.IsDestroyed(Ref))");
+                                src.Line.Write($"if (Medicine.UnmanagedRefExtensions.IsInvalid(Ref))");
                                 using (src.Braces)
                                 {
                                     src.Line.Write($"if (Ref.Ptr is 0)");
@@ -518,12 +527,15 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                             using (src.Indent)
                                 src.Line.Write($"=> throw new System.InvalidOperationException(\"Attempted to access a null {input.ClassName} instance.\");");
 
-                            src.Linebreak();
+                            if (input.IsUnityObject)
+                            {
+                                src.Linebreak();
 
-                            src.Line.Write($"{Alias.NoInline}");
-                            src.Line.Write($"static void ThrowDestroyedException()");
-                            using (src.Indent)
-                                src.Line.Write($"=> throw new System.InvalidOperationException(\"Attempted to access a destroyed {input.ClassName} instance.\");");
+                                src.Line.Write($"{Alias.NoInline}");
+                                src.Line.Write($"static void ThrowDestroyedException()");
+                                using (src.Indent)
+                                    src.Line.Write($"=> throw new System.InvalidOperationException(\"Attempted to access a destroyed {input.ClassName} instance.\");");
+                            }
                         }
                     }
 
