@@ -67,16 +67,71 @@ namespace Medicine
         {
             nint ptr = classRef.Ptr;
             nint nativePtr = ptr != 0
-                ? *(nint*)(ptr + sizeof(ulong) * 2)
+                ? *(nint*)(ptr + sizeof(nint) * 2)
                 : 0;
+
             return nativePtr is 0;
         }
 
         /// <summary>
         /// Equivalent of the <see cref="UnityEngine.Object.GetInstanceID"/> method.
+        /// Assumes that the referenced object is not null or destroyed.
         /// </summary>
+        /// <remarks>
+        /// The instance ID of an object acts like a handle to the in-memory instance.
+        /// It is always unique and never has the value 0.
+        /// Objects loaded from a file will be assigned a positive Instance ID.
+        /// <br/></br>
+        /// Newly created objects will have a negative Instance ID and retain that
+        /// negative value even if the object is later saved to file.
+        /// Therefore, the sign of the InstanceID value is not a safe indicator for
+        /// whether the object is persistent.
+        /// <br/></br>
+        /// The ID changes between sessions of the player runtime and Editor.
+        /// As such, the ID is not reliable for performing actions that could span between sessions, for example,
+        /// loading an object state from a file.
+        /// </remarks>
         [MethodImpl(AggressiveInlining)]
         public static int GetInstanceID<TClass>(this UnmanagedRef<TClass> classRef) where TClass : UnityEngine.Object
-            => *(int*)(classRef.Ptr + sizeof(ulong) * 3);
+        {
+#if UNITY_EDITOR
+            // we can use this fast path in the editor
+            return *(int*)(classRef.Ptr + sizeof(nint) * 3);
+#elif MODULE_BURST
+            // in player builds, the instance ID is not stored in the managed object;
+            // we need to grab it from the actual native object
+            return *(int*)(*(nint*)(classRef.Ptr + sizeof(nint) * 2) + offsetOfInstanceIDInCPlusPlusObject.Data);
+#else
+            // i can't really see why anyone would want to use UnmanagedRef<T> without
+            // Burst Compiler installed, but it doesn't cost us much to support it, so here we go
+            return *(int*)(*(nint*)(classRef.Ptr + sizeof(nint) * 2) + offsetOfInstanceIDInCPlusPlusObject);
+#endif
+        }
+
+#if !UNITY_EDITOR
+        const System.Reflection.BindingFlags PrivateStatic
+            = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+#if MODULE_BURST
+        enum OffsetOfInstanceIDTypeKey { }
+
+        static readonly Unity.Burst.SharedStatic<nint> offsetOfInstanceIDInCPlusPlusObject
+            = Unity.Burst.SharedStatic<nint>.GetOrCreate<nint, OffsetOfInstanceIDTypeKey>();
+
+        [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.BeforeSceneLoad)]
+        static void InitializeOffsetOfInstanceID()
+        {
+            UnityEngine.Debug.Log("Initializing offsetOfInstanceIDInCPlusPlusObject");
+            offsetOfInstanceIDInCPlusPlusObject.Data
+                = (int)typeof(UnityEngine.Object)
+                    .GetMethod("GetOffsetOfInstanceIDInCPlusPlusObject", PrivateStatic)
+                    .Invoke(null, Array.Empty<object>());
+        }
+#else
+        static readonly nint offsetOfInstanceIDInCPlusPlusObject
+            = (int)typeof(UnityEngine.Object)
+                .GetMethod("GetOffsetOfInstanceIDInCPlusPlusObject", PrivateStatic)
+                .Invoke(null, Array.Empty<object>());
+#endif
+#endif
     }
 }

@@ -158,16 +158,31 @@ namespace Medicine
     /// Generates a set of structs and helpers that can be used to access class data
     /// in Burst-compiled code.
     /// </summary>
+    /// <param name="includePrivate">Whether to include private members.</param>
+    /// <param name="includePublic">Whether to include public members.</param>
+    /// <param name="memberNames">Names of members to include in access.</param>
     /// <param name="safetyChecks">
-    /// Enables safety checks for class access: ensures that accessed objects are not null/destroyed.
+    /// Enables/disables debug-only safety checks, for ensuring that accessed objects are not null/destroyed.
     /// Accessing a destroyed object will throw an exception.
     /// Safety checks are always disabled in release builds.<br/>
-    /// (If necessary, you should explicitly check whether an UnmanagedRef is destroyed
-    /// using the <c>.IsDestroyed()</c> extension.)
+    /// If necessary, you should explicitly check whether an UnmanagedRef is destroyed
+    /// using the <c>.IsDestroyed()</c> extension, or using the generated
+    /// <c>Access.IsDestroyed</c> helper property.<br/>
     /// </param>
     public sealed class UnmanagedAccessAttribute : Attribute
     {
         public UnmanagedAccessAttribute(
+            params string[] memberNames
+        ) { }
+
+        public UnmanagedAccessAttribute(
+            bool safetyChecks = true,
+            params string[] memberNames
+        ) { }
+
+        public UnmanagedAccessAttribute(
+            bool includePrivate = true,
+            bool includePublic = true,
             bool safetyChecks = true
         ) { }
     }
@@ -182,14 +197,14 @@ namespace Medicine
     namespace Internal
     {
         /// <summary>
-        /// Used by the source generator to mark where the generated property was declared.
-        /// You can use IDE navigation features to jump to the injection site.
+        /// Used by source generators to mark which declaration triggered code generation for this property.
+        /// You can use IDE navigation features to jump to the declaration site.
         /// </summary>
         [EditorBrowsable(Never)]
         [AttributeUsage(Property)]
-        public sealed class InjectionDeclaredInAttribute : Attribute
+        public sealed class DeclaredAtAttribute : Attribute
         {
-            public InjectionDeclaredInAttribute(string method, int line) { }
+            public DeclaredAtAttribute(string method = "", string property = "", string field = "", int line = 0) { }
         }
     }
 

@@ -1,7 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-
 public readonly struct AttributeConstructorArgumentsDict
 {
     readonly Dictionary<string, object> values = new(StringComparer.Ordinal);
@@ -16,13 +15,31 @@ public readonly struct AttributeConstructorArgumentsDict
             var ctor = attributeData.AttributeConstructor ?? throw new("Attribute constructor is null");
             var ctorParams = ctor.Parameters;
             var ctorArgs = attributeData.ConstructorArguments;
-
-            // keep only the constructor parameters that the caller actually wrote
             var explicitOrdinals = GetExplicitConstructorOrdinals(attributeData, ct);
 
             foreach (int ordinal in explicitOrdinals)
-                if (ctorArgs[ordinal].Value is { } arg)
-                    values[ctorParams[ordinal].Name] = arg;
+            {
+                if ((uint)ordinal >= (uint)ctorParams.Length)
+                    continue;
+
+                if ((uint)ordinal >= (uint)ctorArgs.Length)
+                    continue;
+
+                var tc = ctorArgs[ordinal];
+                var param = ctorParams[ordinal];
+
+                if (tc.Kind is TypedConstantKind.Array)
+                {
+                    if (tc.IsNull)
+                        continue;
+
+                    values[param.Name] = MaterializeArray(tc, param.Type);
+                    continue;
+                }
+
+                if (tc.Value is { } scalar)
+                    values[param.Name] = scalar;
+            }
 
             // foreach (var namedArg in attributeData.NamedArguments)
             //     if (namedArg.Value.Value is { } value)
@@ -39,27 +56,40 @@ public readonly struct AttributeConstructorArgumentsDict
         var ordinals = new HashSet<int>();
         try
         {
-            var parameterSymbols = attributeData.AttributeConstructor!.Parameters;
+            if (attributeData.AttributeConstructor is not { } ctor)
+                return ordinals;
+
+            var parameterSymbols = ctor.Parameters;
+            int paramCount = parameterSymbols.Length;
+            bool lastIsParams = paramCount > 0 && parameterSymbols[paramCount - 1].IsParams;
+            int lastOrdinal = paramCount - 1;
 
             if (attributeData.ApplicationSyntaxReference?.GetSyntax(ct) is not AttributeSyntax { ArgumentList: { } argumentList })
-                return ordinals; // metadata-only attribute → syntax unavailable
+                return ordinals;
 
             int positionalIndex = 0;
             foreach (var arg in argumentList.Arguments)
             {
-                // if (arg.NameEquals != null)
-                //     continue;
-
-                if (arg.NameColon != null) // paramName: expr
+                if (arg.NameColon is not null)
                 {
                     var name = arg.NameColon.Name.Identifier.ValueText;
-                    ordinals.Add(parameterSymbols.First(p => p.Name == name).Ordinal);
+                    var p = parameterSymbols.FirstOrDefault(p => p.Name == name);
+                    if (p is not null)
+                        ordinals.Add(p.Ordinal);
+                    continue;
                 }
-                else // pure positional
-                {
-                    ordinals.Add(positionalIndex);
-                    positionalIndex++;
-                }
+
+                int mappedOrdinal;
+
+                if (positionalIndex < paramCount)
+                    mappedOrdinal = positionalIndex;
+                else if (lastIsParams)
+                    mappedOrdinal = lastOrdinal;
+                else
+                    break;
+
+                ordinals.Add(mappedOrdinal);
+                positionalIndex++;
             }
         }
         catch (Exception)
@@ -70,16 +100,29 @@ public readonly struct AttributeConstructorArgumentsDict
         return ordinals;
     }
 
-    /// <summary>
-    /// Retrieves the value associated with the specified name from the attribute constructor
-    /// or returns a default value if the name does not exist.
-    /// </summary>
-    /// <param name="defaultValue">
-    /// The default value to return when the argument value is not provided.
-    /// Note that the default value specified in the constructor definition is ignored.
-    /// You can specify <c>null</c> to make the return value nullable, in case you want to
-    /// specifically check whether the argument value was explicitly provided.
-    /// </param>
+    static object MaterializeArray(TypedConstant arrayConstant, ITypeSymbol parameterType)
+    {
+        if (parameterType is IArrayTypeSymbol arrayType)
+        {
+            if (arrayType.ElementType.SpecialType == SpecialType.System_String)
+                return arrayConstant.Values.Select(v => (string?)v.Value).ToArray();
+
+            if (arrayType.ElementType.SpecialType == SpecialType.System_Boolean)
+                return arrayConstant.Values.Select(v => v.Value is bool b && b).ToArray();
+
+            if (arrayType.ElementType.SpecialType == SpecialType.System_Int32)
+                return arrayConstant.Values.Select(v => v.Value is int i ? i : default).ToArray();
+
+            if (arrayType.ElementType.SpecialType == SpecialType.System_Int64)
+                return arrayConstant.Values.Select(v => v.Value is long l ? l : default).ToArray();
+
+            if (arrayType.ElementType.SpecialType == SpecialType.System_Double)
+                return arrayConstant.Values.Select(v => v.Value is double d ? d : default).ToArray();
+        }
+
+        return arrayConstant.Values.Select(v => v.Value).ToArray();
+    }
+
     public T? Get<T>(string name, T? defaultValue)
     {
         if (values.TryGetValue(name, out var value))
@@ -89,7 +132,6 @@ public readonly struct AttributeConstructorArgumentsDict
         return defaultValue;
     }
 
-    /// <inheritdoc cref="Get{T}(string,T?)"/>
     public T? Get<T>(string name, T? defaultValue) where T : struct
     {
         if (values.TryGetValue(name, out var value))
@@ -99,9 +141,6 @@ public readonly struct AttributeConstructorArgumentsDict
         return defaultValue;
     }
 
-    /// <summary>
-    /// Utility method that can be used to project the constructor arguments, e.g., to a tuple.
-    /// </summary>
     public T Select<T>(Func<AttributeConstructorArgumentsDict, T> selector)
         => selector(this);
 }

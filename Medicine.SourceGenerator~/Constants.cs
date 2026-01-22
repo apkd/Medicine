@@ -69,7 +69,7 @@ static class Constants
         public const string UsingStorage = $"using {m}Storage = global::Medicine.Internal.Storage;";
         public const string UsingFind = $"using {m}Find = {MedicineFindClassFQN};";
         public const string UsingDebug = $"using {m}Debug = global::UnityEngine.Debug;";
-        public const string UsingDeclaredIn = $"using {m}DeclaredIn = global::Medicine.Internal.InjectionDeclaredInAttribute;";
+        public const string UsingDeclaredAt = $"using {m}DeclaredAt = global::Medicine.Internal.DeclaredAtAttribute;";
         public const string UsingNonSerialized = $"using {m}NS = global::System.NonSerializedAttribute;";
         public const string UsingBindingFlags = $"using {m}BF = global::System.Reflection.BindingFlags;";
         public const string UsingUnsafeUtility = $"using {m}UU = global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility;";

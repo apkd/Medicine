@@ -52,4 +52,15 @@ public readonly struct EquatableArray<T>(T[]? array) : IEquatable<EquatableArray
 
     public static bool operator !=(EquatableArray<T> left, EquatableArray<T> right)
         => !left.Equals(right);
+
+    public override string ToString()
+        => (array, typeof(T)) switch
+        {
+            ({Length: > 0}, { IsPrimitive: true })
+                => $"[{array.Select(x => x?.ToString() ?? "null").Join(", ")}]",
+            ({Length: > 0},  { FullName: "System.String" })
+                => $"[{array.Select(x => $"\"{x as string ?? "null"}\"").Join(", ")}]",
+            ({Length: > 0}, _) => $"{typeof(T).Name}[{array.Length}]",
+            _ => "[]",
+        };
 }

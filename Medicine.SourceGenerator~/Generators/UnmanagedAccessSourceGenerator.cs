@@ -13,14 +13,13 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
         public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
-
         public EquatableArray<string> ContainingTypeDeclaration;
         public string ClassName;
         public string ClassFQN;
-        public bool SafetyChecks;
         public bool IsUnityObject;
         public bool IsTracked;
         public MedicineSettings MedicineSettings;
+        public AttributeSettings AttributeSettings;
         public EquatableArray<FieldInfo> Fields;
     }
 
@@ -33,7 +32,15 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public bool IsReadOnly;
         public bool IsUnmanagedType;
         public bool IsReferenceType;
+        public bool IsPropertyBackingField;
     }
+
+    record struct AttributeSettings(
+        bool SafetyChecks,
+        bool IncludePublic,
+        bool IncludePrivate,
+        EquatableArray<string> MemberNames
+    );
 
     static readonly SourceText extensionsSrc
         = SourceText.From(
@@ -81,9 +88,15 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
         var unmanagedAccessAttribute = context.Attributes.First(x => x.AttributeClass.Is(UnmanagedAccessAttributeFQN));
 
-        bool safetyChecks = unmanagedAccessAttribute
+        var settings = unmanagedAccessAttribute
             .GetAttributeConstructorArguments(ct)
-            .Get("safetyChecks", true) || true;
+            .Select(x => new AttributeSettings(
+                    SafetyChecks: x.Get("safetyChecks", true),
+                    IncludePublic: x.Get("includePublic", true),
+                    IncludePrivate: x.Get("includePrivate", true),
+                    MemberNames: x.Get<string[]>("memberNames", []) ?? []
+                )
+            );
 
         var trackAttribute = context.TargetSymbol.GetAttribute(TrackAttributeFQN);
 
@@ -102,12 +115,12 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 label: "UnmanagedAccess",
                 includeFilename: false
             ),
+            AttributeSettings = settings,
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDecl, context.SemanticModel, ct),
             ClassName = typeSymbol.Name,
             ClassFQN = typeSymbol.FQN,
             IsUnityObject = typeSymbol.InheritsFrom("global::UnityEngine.Object"),
             IsTracked = trackAttribute is not null,
-            SafetyChecks = safetyChecks,
         };
 
         var fields = new List<FieldInfo>(capacity: 16);
@@ -175,6 +188,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     Name = field.IsImplicitlyDeclared
                         ? field.Name[1..^16]
                         : field.Name,
+                    IsPropertyBackingField = field.IsImplicitlyDeclared,
                     TypeFQN = field.Type.FQN,
                     Visibility = field.DeclaredAccessibility is Accessibility.Public ? "Public" : "NonPublic",
                     IsReadOnly = field.IsReadOnly,
@@ -188,13 +202,28 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
         if (!input.MedicineSettings.PreprocessorSymbolNames.Has(ActivePreprocessorSymbolNames.DEBUG))
-            input.SafetyChecks = false;
+            input.AttributeSettings = input.AttributeSettings with { SafetyChecks = false };
+
+        if (input.AttributeSettings.MemberNames is { Length: > 0 })
+            input.Fields = input.Fields.AsArray().Where(x => input.AttributeSettings.MemberNames.Contains(x.Name)).ToArray();
+
+        if (input.AttributeSettings is { IncludePublic: false, IncludePrivate: false })
+            throw new InvalidOperationException("Must include at least one visibility modifier.");
+
+        if (!input.AttributeSettings.IncludePublic)
+            input.Fields = input.Fields.AsArray().Where(x => x.Visibility != "Public").ToArray();
+
+        if (!input.AttributeSettings.IncludePrivate)
+            input.Fields = input.Fields.AsArray().Where(x => x.Visibility != "NonPublic").ToArray();
+
+        src.Line.Write($"// {input.AttributeSettings.ToString()}");
 
         src.Line.Write(Alias.UsingStorage);
         src.Line.Write(Alias.UsingInline);
         src.Line.Write(Alias.UsingUtility);
         src.Line.Write(Alias.UsingBindingFlags);
         src.Line.Write(Alias.UsingUnsafeUtility);
+        src.Line.Write(Alias.UsingDeclaredAt);
         src.Line.Write($"using {m}Self = {input.ClassFQN};");
         src.Linebreak();
 
@@ -399,7 +428,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         {
                             src.Line.Write($"{Alias.Inline} get");
                             {
-                                if (input.SafetyChecks)
+                                if (input.AttributeSettings.SafetyChecks)
                                 {
                                     using (src.Braces)
                                     {
@@ -433,15 +462,21 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     foreach (var x in input.Fields.AsArray())
                     {
                         string ro = isReadOnly || x.IsReadOnly ? " readonly" : "";
-                        if (x.IsUnmanagedType)
+
+                        if (x.IsUnmanagedType || x.IsReferenceType)
                         {
                             src.Line.Write($"/// <inheritdoc cref=\"{m}Self.{x.Name}\" />");
+                            if (x.IsPropertyBackingField)
+                                src.Line.Write($"[{m}DeclaredAt(nameof({m}Self.{x.Name}))]");
+                        }
+
+                        if (x.IsUnmanagedType)
+                        {
                             src.Line.Write($"public ref{ro} {x.TypeFQN} {x.Name}");
                             PropertyWithSafetyChecks($"ref Ref.Read<{x.TypeFQN}>(layoutInfo->{x.Name});");
                         }
                         else if (x.IsReferenceType)
                         {
-                            src.Line.Write($"/// <inheritdoc cref=\"{m}Self.{x.Name}\" />");
                             src.Line.Write($"public ref{ro} Medicine.UnmanagedRef<{x.TypeFQN}> {x.Name}");
                             PropertyWithSafetyChecks($"ref Ref.Read<Medicine.UnmanagedRef<{x.TypeFQN}>>(layoutInfo->{x.Name});");
 
@@ -449,7 +484,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         }
                     }
 
-                    if (input.SafetyChecks)
+                    if (input.AttributeSettings.SafetyChecks)
                     {
                         src.Line.Write(Alias.Inline);
                         src.Line.Write($"void CheckNullOrDestroyed()");
