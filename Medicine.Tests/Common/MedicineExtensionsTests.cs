@@ -8,7 +8,6 @@ using System.Linq;
 using Medicine;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using UnityEngine.Animations;
 
 public class MedicineExtensionsTests
 {
@@ -21,6 +20,10 @@ public class MedicineExtensionsTests
     [TearDown]
     public void Cleanup()
         => TestUtility.DestroyAllGameObjects();
+
+    interface ISomeInterface { }
+
+    sealed class MonoBehaviourWithInterface : MonoBehaviour, ISomeInterface { }
 
     static T[] SpawnGameObjectsWith<T>(int count, bool nested = false) where T : Component
     {
@@ -55,26 +58,26 @@ public class MedicineExtensionsTests
     public void EnumerateComponentsInScene_MixedTypes()
     {
         SpawnGameObjectsWith<BoxCollider>(count: 8, nested: true);
-        SpawnGameObjectsWith<PositionConstraint>(count: 8, nested: true);
+        SpawnGameObjectsWith<MonoBehaviourWithInterface>(count: 8, nested: true);
         SpawnGameObjectsWith<Light>(count: 8, nested: true);
         SpawnGameObjectsWith<Rigidbody>(count: 8, nested: true);
 
         foreach (var go in scene.GetRootGameObjects())
         {
             go.EnumerateComponentsInChildren<BoxCollider>().AsValueEnumerable().ToArray();
-            go.EnumerateComponentsInChildren<PositionConstraint>().AsValueEnumerable().ToArray();
+            go.EnumerateComponentsInChildren<MonoBehaviourWithInterface>().AsValueEnumerable().ToArray();
             go.EnumerateComponentsInChildren<Light>().AsValueEnumerable().ToArray();
             go.EnumerateComponentsInChildren<Rigidbody>().AsValueEnumerable().ToArray();
             go.EnumerateComponentsInChildren<Transform>().AsValueEnumerable().ToArray();
-            go.EnumerateComponentsInChildren<IConstraint>().AsValueEnumerable().ToArray();
+            go.EnumerateComponentsInChildren<ISomeInterface>().AsValueEnumerable().ToArray();
         }
     }
 
     [Test]
     public void EnumerateComponentsInScene_WithInterfaceType()
     {
-        var spawned = SpawnGameObjectsWith<PositionConstraint>(count: 8, nested: true);
-        var result = scene.EnumerateComponentsInScene<IConstraint>().AsValueEnumerable().ToArray();
+        var spawned = SpawnGameObjectsWith<MonoBehaviourWithInterface>(count: 8, nested: true);
+        var result = scene.EnumerateComponentsInScene<ISomeInterface>().AsValueEnumerable().ToArray();
         Assert.That(result, Is.EquivalentTo(spawned), "Should find all components implementing the interface");
     }
 
@@ -159,10 +162,10 @@ public class MedicineExtensionsTests
     [Test]
     public void EnumerateComponents_WithInterfaceType()
     {
-        var go = new GameObject("Test", typeof(BoxCollider), typeof(PositionConstraint));
-        var constraint = go.GetComponent<PositionConstraint>();
+        var go = new GameObject("Test", typeof(BoxCollider), typeof(MonoBehaviourWithInterface));
+        var constraint = go.GetComponent<MonoBehaviourWithInterface>();
 
-        var result = go.EnumerateComponents<IConstraint>().AsValueEnumerable().ToArray();
+        var result = go.EnumerateComponents<ISomeInterface>().AsValueEnumerable().ToArray();
 
         Assert.That(result, Has.Length.EqualTo(1));
         Assert.That(result[0], Is.EqualTo(constraint));
@@ -190,9 +193,9 @@ public class MedicineExtensionsTests
     {
         var rootGo = new GameObject("Root");
         var childGo = new GameObject("Child") { transform = { parent = rootGo.transform } };
-        var constraint = childGo.AddComponent<PositionConstraint>();
+        var constraint = childGo.AddComponent<MonoBehaviourWithInterface>();
 
-        var result = rootGo.EnumerateComponentsInChildren<IConstraint>(true).AsValueEnumerable().ToArray();
+        var result = rootGo.EnumerateComponentsInChildren<ISomeInterface>(true).AsValueEnumerable().ToArray();
 
         Assert.That(result, Has.Length.EqualTo(1));
         Assert.That(result[0], Is.EqualTo(constraint));
@@ -221,16 +224,16 @@ public class MedicineExtensionsTests
     [Test]
     public void EnumerateComponentsInParents_WithInterfaceType()
     {
-        var go1 = new GameObject("Root", typeof(PositionConstraint));
-        var go2 = new GameObject("Parent", typeof(PositionConstraint)) { transform = { parent = go1.transform } };
+        var go1 = new GameObject("Root", typeof(MonoBehaviourWithInterface));
+        var go2 = new GameObject("Parent", typeof(MonoBehaviourWithInterface)) { transform = { parent = go1.transform } };
         var go3 = new GameObject("Child") { transform = { parent = go2.transform } };
 
-        var comp1 = go1.GetComponent<PositionConstraint>();
-        var comp2 = go2.GetComponent<PositionConstraint>();
+        var comp1 = go1.GetComponent<MonoBehaviourWithInterface>();
+        var comp2 = go2.GetComponent<MonoBehaviourWithInterface>();
 
         go2.SetActive(false);
 
-        var resultIncludeInactive = go3.EnumerateComponentsInParents<IConstraint>(includeInactive: true)
+        var resultIncludeInactive = go3.EnumerateComponentsInParents<ISomeInterface>(includeInactive: true)
             .AsValueEnumerable()
             .ToArray();
 
@@ -243,7 +246,7 @@ public class MedicineExtensionsTests
         Assert.That(resultIncludeInactive[1], Is.EqualTo(comp1), "Should return active parent second");
         ;
 
-        var resultOnlyActive = go3.EnumerateComponentsInParents<IConstraint>(includeInactive: false)
+        var resultOnlyActive = go3.EnumerateComponentsInParents<ISomeInterface>(includeInactive: false)
             .AsValueEnumerable()
             .ToArray();
 
