@@ -74,7 +74,7 @@ public partial class TrackAttributePlayModeTests
     public void Track_StressTest()
     {
         const int instanceCount = 512;
-        const int passCount = 512;
+        int passCount = Application.isBatchMode ? 1024 : 256;
 
         var all = new MBTrackStressTest[instanceCount];
 
@@ -137,7 +137,7 @@ public partial class TrackAttributePlayModeTests
     public void Track_StressTest_Generic()
     {
         const int instanceCount = 512;
-        const int passCount = 512;
+        int passCount = Application.isBatchMode ? 1024 : 256;
 
         MBTrackStressTestDerived.InitializeTransformAccessArray();
 
