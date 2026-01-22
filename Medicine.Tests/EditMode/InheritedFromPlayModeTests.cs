@@ -5,9 +5,16 @@
 namespace InheritedFromPlayMode
 {
     public sealed class UnionTests : global::UnionTests { }
+
     public sealed class LazyTests : global::LazyTests { }
+
     public sealed class AsSpanUnsafeTests : global::AsSpanUnsafeTests { }
+
     public sealed class MedicineExtensionsTests : global::MedicineExtensionsTests { }
+
     public sealed class UnmanagedAccessTests : global::UnmanagedAccessTests { }
+
+#if MODULE_ZLINQ
     public sealed class WrapValueEnumerableCompileTests : global::WrapValueEnumerableCompileTests { }
+#endif
 }
