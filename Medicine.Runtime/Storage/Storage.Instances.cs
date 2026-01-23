@@ -55,8 +55,16 @@ namespace Medicine.Internal
             public static Span<T> AsSpan()
                 => List.AsInternalsView().Array.AsSpanUnsafe(List.Count);
 
+            [MethodImpl(AggressiveInlining)]
             public static unsafe UnsafeList<UnmanagedRef<T>> AsUnmanaged()
-                => new((UnmanagedRef<T>*)UnsafeUtility.AddressOf(ref UnsafeUtility.As<T, ulong>(ref List.AsInternalsView().Array![0])), List.Count);
+            {
+                var array = List.AsInternalsView().Array;
+
+                if (array is not { Length: > 0 })
+                    return default;
+
+                return new((UnmanagedRef<T>*)UnsafeUtility.AddressOf(ref UnsafeUtility.As<T, ulong>(ref array[0])), List.Count);
+            }
 
             /// <summary>
             /// Registers the object as one of the active instances of <paramref name="T"/>.
