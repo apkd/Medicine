@@ -15,12 +15,19 @@ using static System.Runtime.CompilerServices.MethodImplOptions;
 namespace Medicine.Internal
 {
     [UsedImplicitly]
-    [StructLayout(LayoutKind.Sequential)]
     sealed class ListView<T>
     {
         public T[]? Array;
         public int Count;
         public int Version;
+    }
+
+    [UsedImplicitly, StructLayout(LayoutKind.Sequential)]
+    sealed class ArrayView<T>
+    {
+        public long Length;
+        public long Bounds;
+        public T Elements = default!;
     }
 
     /// <summary>
@@ -61,6 +68,24 @@ namespace Medicine.Internal
             => list.AsInternalsView().Array.AsSpanUnsafe(0, list.Count);
 
         [MethodImpl(AggressiveInlining)]
+        internal static unsafe UnsafeList<TTo> AsUnsafeList<TFrom, TTo>(this List<TFrom> list)
+            where TTo : unmanaged
+        {
+            var array = list.AsInternalsView().Array;
+
+            if (ReferenceEquals(array, null))
+                return default;
+
+            var arrayData = UnsafeUtility.As<TFrom[], ArrayView<TTo>>(ref array);
+            return new((TTo*)UnsafeUtility.AddressOf(ref arrayData.Elements), list.Count);
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        internal static UnsafeList<T> AsUnsafeList<T>(this List<T> list)
+            where T : unmanaged
+            => list.AsUnsafeList<T, T>();
+
+        [MethodImpl(AggressiveInlining)]
         internal static Span<T> AsSpanUnsafe<T>(this T[]? array, int start = 0, int length = int.MinValue)
         {
             if (array is not { Length: > 0 })
@@ -79,16 +104,8 @@ namespace Medicine.Internal
                 throw new ArgumentOutOfRangeException(nameof(length));
 #endif
 
-            ref var first = ref UnsafeUtility.As<T[], ArrayData<T>>(ref array).Elements;
+            ref var first = ref UnsafeUtility.As<T[], ArrayView<T>>(ref array).Elements;
             return MemoryMarshal.CreateSpan(ref first, array.Length)[start..(start + length)];
-        }
-
-        [UsedImplicitly, StructLayout(LayoutKind.Sequential)]
-        sealed class ArrayData<T>
-        {
-            public long Length;
-            public long Bounds;
-            public T Elements = default!;
         }
 
         public static ushort GetFieldOffset(Type type, string fieldName, BindingFlags flags)
