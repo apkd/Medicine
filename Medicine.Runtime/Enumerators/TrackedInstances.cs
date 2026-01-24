@@ -4,14 +4,14 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using JetBrains.Annotations;
+using Medicine.Internal;
 using UnityEngine.Assertions;
-using UnityEngine.Pool;
 using static System.ComponentModel.EditorBrowsableState;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 
 // ReSharper disable UnusedMember.Global
 
-namespace Medicine.Internal
+namespace Medicine
 {
 #if MODULE_ZLINQ
     using ZLinq;
@@ -25,7 +25,6 @@ namespace Medicine.Internal
     /// <remarks>
     /// You probably want to use <see cref="Find.Instances{T}"/> instead of working with this struct directly.
     /// </remarks>
-    [EditorBrowsable(Never)]
     public readonly struct TrackedInstances<T> : ILinqFallbackEnumerable<TrackedInstances<T>.Enumerator, T>
         where T : class
     {

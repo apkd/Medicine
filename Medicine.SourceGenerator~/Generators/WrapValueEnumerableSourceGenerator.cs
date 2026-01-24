@@ -337,7 +337,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
                 // try to fix "SomeTrackedType.Instances"
                 case "Instances":
                 {
-                    const string trackedStruct = "Medicine.Internal.TrackedInstances`1";
+                    const string trackedStruct = "Medicine.TrackedInstances`1";
                     if (identifier.Parent is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax typeName } memberAccess)
                         if (model.GetSymbolInfo(typeName, ct).Symbol is INamedTypeSymbol typeSymbol)
                             if (typeSymbol.HasAttribute(TrackAttributeFQN))

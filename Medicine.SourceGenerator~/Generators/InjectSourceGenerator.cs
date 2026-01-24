@@ -649,7 +649,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     AppendInjectionDeclaredIn();
                 }
 
-                src.Line.Write($"{access}{@static}global::Medicine.Internal.TrackedInstances<{x.TypeFQN}> {x.PropertyName}");
+                src.Line.Write($"{access}{@static}global::Medicine.TrackedInstances<{x.TypeFQN}> {x.PropertyName}");
                 using (src.Braces)
                 {
                     // we can save some memory by omitting the backing field when the struct is a static accessor with no stored state

@@ -556,7 +556,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"/// </remarks>");
             }
 
-            src.Line.Write($"public static global::Medicine.Internal.TrackedInstances<{input.TypeFQN}> Instances");
+            src.Line.Write($"public static global::Medicine.TrackedInstances<{input.TypeFQN}> Instances");
             using (src.Braces)
             {
                 src.Line.Write($"{Alias.Inline} get => default;");
