@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [ master ]
+    branches: [ '**' ]
   pull_request:
   workflow_dispatch:
 
@@ -10,6 +10,10 @@ permissions:
   contents: read
   actions: write
   packages: write
+
+concurrency:
+  group: unity
+  cancel-in-progress: false
 
 jobs:
   unity:
@@ -20,7 +24,7 @@ jobs:
       PROJECT: /MedicineCI
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 10
       matrix:
         UNITY_VERSION: [
           # 2022.3 -- AFAIK 12f is the earliest version with functioning incremental source generators
