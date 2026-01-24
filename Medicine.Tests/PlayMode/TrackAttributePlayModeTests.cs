@@ -23,9 +23,14 @@ public partial class TrackAttributePlayModeTests
     [Test]
     public void Track_Basic()
     {
+        foreach (var _ in MBTrackBasic.Instances)
+            Assert.Fail("Instance count should be zero at this point.");
+
+        Assert.That(MBTrackBasic.Instances, Has.Count.EqualTo(0));
+
         for (int i = 1; i < 5; ++i)
         {
-            var go = new GameObject(null, typeof(MBTrackBasic));
+            _ = new GameObject(null, typeof(MBTrackBasic));
             Assert.That(MBTrackBasic.Instances, Has.Count.EqualTo(i));
             Assert.That(Find.Instances<MBTrackBasic>(), Has.Count.EqualTo(i));
         }
