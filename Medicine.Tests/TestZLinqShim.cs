@@ -1,6 +1,6 @@
 #if !MODULE_ZLINQ
 using System.Collections.Generic;
-using Medicine.Internal;
+using Medicine;
 
 public static class TestZLinqShim
 {
