@@ -95,13 +95,13 @@ public static class CI
 
                 callbacks = new()
                 {
-                    TestStarted = static test => Console.WriteLine($"Running test: {test.Name}"),
+                    TestStarted = static test => Console.WriteLine($"[{test.Name}] Running test"),
                     TestFinished = static result =>
                     {
-                        Console.WriteLine($"Result: {result.ResultState}.");
+                        Console.WriteLine($"[{result.Test.Name}] Result: {result.ResultState}");
                         if (result.TestStatus is TestStatus.Failed)
                         {
-                            Console.WriteLine($"Message: {result.Message}");
+                            Console.WriteLine($"[{result.Test.Name}] Message: {result.Message}");
                             Console.WriteLine(result.StackTrace);
                         }
                     },
@@ -133,7 +133,16 @@ public static class CI
 
                 callbacks = new()
                 {
-                    TestStarted = static test => Console.WriteLine($"Running test: {test.Name}"),
+                    TestStarted = static test => Console.WriteLine($"[{test.Name}] Running test"),
+                    TestFinished = static result =>
+                    {
+                        Console.WriteLine($"[{result.Test.Name}] Result: {result.ResultState}");
+                        if (result.TestStatus is TestStatus.Failed)
+                        {
+                            Console.WriteLine($"[{result.Test.Name}] Message: {result.Message}");
+                            Console.WriteLine(result.StackTrace);
+                        }
+                    },
                     RunFinished = results =>
                     {
                         try
