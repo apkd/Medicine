@@ -134,11 +134,10 @@ namespace Medicine
         }
 
         /// <summary>
-        /// Returns the first loaded object of type <typeparamref name="T"/>.<br/>
-        /// Included for parity with <see cref="Object.FindAnyObjectByType{T}()"/>
-        /// - sadly, doesn't give any performance benefits in the general case,
-        /// as the underlying UnityEngine API is plain bad,
-        /// but it does at least check for a [Singleton]/[Track] fast path first.
+        /// Returns any live object of type <typeparamref name="T"/>.<br/>
+        /// Equivalent of <see cref="Object.FindAnyObjectByType{T}()"/>, but with some fast paths.
+        /// Returns a <c>[Singleton]</c> / <c>[Track]</c> instance if available, and otherwise
+        /// caches the result of <c>FindAnyObjectByType</c> until the object is destroyed.
         /// </summary>
         /// <returns><inheritdoc cref="Object.FindAnyObjectByType(System.Type)"/></returns>
         public static T? AnyObjectByType<T>(bool includeInactive = false) where T : Object
@@ -150,10 +149,26 @@ namespace Medicine
             if (Storage.Instances<T>.TypeIsRegistered)
                 return Storage.Instances<T>.List[0];
 
-            return Object.FindAnyObjectByType(
+            if (Storage.AnyObject<T>.WeakReference?.TryGetTarget(out var cached) is true)
+                if (Utility.IsNativeObjectAlive(cached))
+                    return cached;
+
+            var any = Object.FindAnyObjectByType(
                 type: typeof(T),
                 findObjectsInactive: includeInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude
             ) as T;
+
+            if (Utility.IsNativeObjectAlive(any))
+            {
+                if (Storage.AnyObject<T>.WeakReference != null)
+                    Storage.AnyObject<T>.WeakReference.SetTarget(any);
+                else
+                    Storage.AnyObject<T>.WeakReference = new(any);
+
+                return any;
+            }
+
+            return null;
         }
 
         /// <summary>

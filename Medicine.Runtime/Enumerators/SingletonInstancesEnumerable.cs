@@ -43,7 +43,7 @@ namespace Medicine.Internal
                 var instance = DictEnumerator.Current();
                 if (Utility.IsNativeObjectAlive(instance))
                 {
-                    Current = instance!;
+                    Current = instance;
                     return true;
                 }
             }
