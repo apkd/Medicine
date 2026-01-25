@@ -58,6 +58,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
         public ActivePreprocessorSymbolNames Symbols;
         public string? InjectMethodName;
+        public string? InjectMethodOrLocalFunctionName;
         public bool IsSealed;
         public bool IsStatic;
         public bool? MakePublic;
@@ -96,9 +97,10 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         IsLazy = 1 << 08,
         IsValueType = 1 << 09,
         IsOptional = 1 << 10,
-        IsTransient = 1 << 11,
-        IsCleanupDispose = 1 << 12,
-        IsCleanupDestroy = 1 << 13,
+        IsOptionalViaComment = 1 << 11,
+        IsTransient = 1 << 12,
+        IsCleanupDispose = 1 << 13,
+        IsCleanupDestroy = 1 << 14,
     }
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
@@ -115,7 +117,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     {
                         MethodDecl x        => !x.Modifiers.Any(SyntaxKind.AbstractKeyword),
                         LocalFunctionDecl x => !x.Modifiers.Any(SyntaxKind.AbstractKeyword),
-                        _               => false,
+                        _                   => false,
                     },
                 transform: TransformSyntaxContext
             );
@@ -148,7 +150,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         {
             MethodDecl x        => (x.Identifier.Text, x.Modifiers),
             LocalFunctionDecl x => (methodDecl.Identifier.Text, x.Modifiers),
-            _               => (null, default),
+            _                   => (null, default),
         };
 
         if (injectMethodName is null)
@@ -157,9 +159,11 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         var output = new GeneratorInput
         {
             InjectMethodName = injectMethodName,
+            InjectMethodOrLocalFunctionName = (targetNode as LocalFunctionDecl)?.Identifier.ValueText ?? injectMethodName,
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
                 filePath: classDecl.Identifier.ValueText,
                 targetFQN: injectMethodName,
+                shadowTargetFQN: (targetNode as LocalFunctionDecl)?.Identifier.ValueText ?? "",
                 label: InjectAttributeName
             ),
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(classDecl, context.SemanticModel, ct),
@@ -408,6 +412,43 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         break;
                     }
 
+                    // match optional comment
+                    {
+                        SyntaxTriviaList trivia = [];
+
+                        static SyntaxTriviaList TerminatorTrailingTrivia(SyntaxNode node)
+                            => node.GetLastToken(includeZeroWidth: true).TrailingTrivia;
+
+                        // prefer the nearest statement terminator (covers: `x = ...; // optional`, `return x = ...; // optional`, etc.)
+                        if (assignment.FirstAncestorOrSelf<StatementSyntax>() is { } stmt)
+                            trivia = TerminatorTrailingTrivia(stmt);
+                        // expression-bodied methods/local functions: `=> x = ...; // optional`
+                        else if (assignment.FirstAncestorOrSelf<ArrowExpressionClauseSyntax>()?.Parent is { } owner)
+                            trivia = TerminatorTrailingTrivia(owner);
+
+                        foreach (var t in trivia)
+                        {
+                            if (t.IsKind(SyntaxKind.SingleLineCommentTrivia))
+                            {
+                                var text = t.ToString().AsSpan().Trim();
+                                if (text.StartsWith("//", Ordinal) && text[2..].Trim().Equals("optional", OrdinalIgnoreCase))
+                                {
+                                    flags |= IsOptional | IsOptionalViaComment;
+                                    break;
+                                }
+                            }
+                            else if (t.IsKind(SyntaxKind.MultiLineCommentTrivia))
+                            {
+                                var text = t.ToString().AsSpan().Trim();
+                                if (text.StartsWith("/*", Ordinal) && text.EndsWith("*/", Ordinal) && text[2..^2].Trim().Equals("optional", OrdinalIgnoreCase))
+                                {
+                                    flags |= IsOptional | IsOptionalViaComment;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
                     bool isSingleton =
                         IsStaticPropertyAccess(SingletonAttributeFQN, "Instance") ||
                         IsFindMethodCall("Singleton");
@@ -575,7 +616,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             );
         }
 
-        string storageSuffix = input.InjectMethodName is "Awake" ? "" : $"For{input.InjectMethodName}";
+        string storageSuffix = input.InjectMethodOrLocalFunctionName is "Awake" ? "" : $"For{input.InjectMethodOrLocalFunctionName}";
         string storagePropName = $"{m}MedicineInternal{storageSuffix}";
         string storageStructName = $"{m}MedicineInternalBackingStorage{storageSuffix}";
 
@@ -647,12 +688,15 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                 if (x.Flags.Has(IsOptional))
                 {
                     src.Line.Write($"/// <item>This property will <b>silently</b> return <c>null</c> if {nullIf}.</item>");
-                    src.Line.Write($"/// <item>Remove <c>.Optional()</c> from the end of the assignment to re-enable the null check + error log. </item>");
+                    if (x.Flags.Has(IsOptionalViaComment))
+                        src.Line.Write($"/// <item>Remove <c>// optional</c> comment from the end of the assignment to re-enable the null check + error log. </item>");
+                    else
+                        src.Line.Write($"/// <item>Remove <c>.Optional()</c> call from the end of the assignment to re-enable the null check + error log. </item>");
                 }
                 else if (x.Flags.Has(NeedsNullCheck))
                 {
                     src.Line.Write($"/// <item>This property <b>will log an error</b> and return <c>null</c> if {nullIf}.</item>");
-                    src.Line.Write($"/// <item>Append <c>.Optional()</c> at the end of the assignment to suppress the null check + error log. </item>");
+                    src.Line.Write($"/// <item>Append <c>.Optional()</c> call or a <c>// optional</c> comment at the end of the assignment to suppress the null check + error log. </item>");
                 }
                 else if (x.Flags.Has(IsArray))
                 {
