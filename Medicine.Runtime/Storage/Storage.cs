@@ -21,6 +21,7 @@ namespace Medicine.Internal
 #if UNITY_EDITOR
         // used to release static native resources (e.g., TransformAccessArray)
         static Action? beforeAssemblyUnload;
+        static Action? enterPlayModeCleanup;
 
         [UnityEditor.InitializeOnLoadMethod]
         static void OnAssemblyUnload()
@@ -30,6 +31,12 @@ namespace Medicine.Internal
                 beforeAssemblyUnload?.Invoke();
                 beforeAssemblyUnload = null;
             }
+
+            UnityEditor.EditorApplication.playModeStateChanged += static state =>
+            {
+                if (state is UnityEditor.PlayModeStateChange.ExitingEditMode)
+                    enterPlayModeCleanup?.Invoke();
+            };
 
             UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += InvokeBeforeAssemblyUnload;
         }

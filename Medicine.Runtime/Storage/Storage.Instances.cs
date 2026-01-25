@@ -35,6 +35,9 @@ namespace Medicine.Internal
                 {
                     List.Capacity = 64;
                     Instances.UntypedAccess.Add(typeof(T), static () => List);
+#if UNITY_EDITOR
+                    enterPlayModeCleanup += static () => List.Clear();
+#endif
                 }
             }
 
@@ -99,6 +102,7 @@ namespace Medicine.Internal
                         $"This probably indicates a logic error in your code. " +
                         $"This check is not present in release builds and will result in bugs/errors."
                     );
+
                     return -1;
                 }
 #endif
@@ -238,6 +242,7 @@ namespace Medicine.Internal
 
                 internal static void Refresh()
                 {
+                    StaticInit.RunOnce();
                     int frameCount = Time.frameCount;
 
 #if !MEDICINE_EDITMODE_ALWAYS_REFRESH
