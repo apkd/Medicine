@@ -96,6 +96,15 @@ public static class CI
                 callbacks = new()
                 {
                     TestStarted = static test => Console.WriteLine($"Running test: {test.Name}"),
+                    TestFinished = static result =>
+                    {
+                        Console.WriteLine($"Result: {result.ResultState}.");
+                        if (result.TestStatus is TestStatus.Failed)
+                        {
+                            Console.WriteLine($"Message: {result.Message}");
+                            Console.WriteLine(result.StackTrace);
+                        }
+                    },
                     RunFinished = results =>
                     {
                         try
