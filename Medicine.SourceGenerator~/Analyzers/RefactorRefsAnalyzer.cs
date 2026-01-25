@@ -36,8 +36,17 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
         isEnabledByDefault: true
     );
 
+    public static readonly DiagnosticDescriptor TESTESTES = new(
+        id: "TESTESTES",
+        title: "Exception",
+        messageFormat: "Exception: {0}",
+        category: "Exception",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; }
-        = ImmutableArray.Create(MED007, MED008, MED009);
+        = ImmutableArray.Create(MED007, MED008, MED009, TESTESTES);
 
     static readonly ImmutableHashSet<string> TargetMethodNames
         = ImmutableHashSet.Create(
@@ -80,17 +89,25 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
                 return;
         }
 
-        // check if the containing method is marked with [Inject]
+        // check if the containing method is already marked with [Inject]
         {
-            if (invocationExpr.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault() is not { } containingMethod)
-                return;
+            var containingMethod = invocationExpr.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
+            var containingLocalFunction = invocationExpr.Ancestors().OfType<LocalFunctionStatementSyntax>().FirstOrDefault();
+
+            if (containingMethod is null)
+                if (containingLocalFunction is null)
+                    return;
 
             // ignore static methods
-            if (containingMethod.Modifiers.Any(SyntaxKind.StaticKeyword))
+            if (containingMethod?.Modifiers.Any(SyntaxKind.StaticKeyword) is true)
                 return;
 
             // fast attribute name test
             if (containingMethod.HasAttribute(x => x is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute"))
+                return;
+
+            // fast attribute name test
+            if (containingLocalFunction.HasAttribute(x => x is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute"))
                 return;
         }
 
@@ -102,35 +119,44 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
         if (invocationExpr.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault() is not { } classDecl)
             return; // no parent class decl?
 
-        var injectionMethod = classDecl.Members
-            .OfType<MethodDeclarationSyntax>()
-            .FirstOrDefault(m =>
-                (m.Identifier.Text == "Awake" && !m.ParameterList.Parameters.Any()) ||
-                m.HasAttribute(x => x is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute")
-            );
+        var injectionMethod
+            = classDecl.Members
+                  .OfType<MethodDeclarationSyntax>()
+                  .FirstOrDefault(m => m.HasAttribute(x => x is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute")) ??
+              classDecl.Members
+                  .OfType<MethodDeclarationSyntax>()
+                  .FirstOrDefault(m => m.Identifier.Text == "Awake" && !m.ParameterList.Parameters.Any());
 
-        if (injectionMethod is null)
+        var injectionLocalFunction = classDecl
+            .DescendantNodes()
+            .OfType<LocalFunctionStatementSyntax>()
+            .FirstOrDefault(m => m.HasAttribute(x => x is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute"));
+
+        if (injectionMethod is null && injectionLocalFunction is null)
         {
             // needs a new [Inject] method -- report fixable diagnostic
             context.ReportDiagnostic(Diagnostic.Create(MED009, invocationExpr.GetLocation(), invocationExpr.ToString()));
             return;
         }
 
-        // can create cache property -- report fixable diagnostic
-        var assignmentsToProperty = injectionMethod?.Body?.Statements
+        var assignmentsToProperty
+            = (injectionMethod?.Body?.Statements ?? [])
+            .Concat(injectionLocalFunction?.Body?.Statements ?? [])
             .OfType<ExpressionStatementSyntax>()
             .Select(x => x.Expression as AssignmentExpressionSyntax)
             .Where(x => x is { Left: IdentifierNameSyntax })
             .Select(x => x!.Right)
-            .ToArray() ?? [];
+            .ToArray();
 
-        // find existing initialization expression
         if (assignmentsToProperty.Any(x => SyntaxFactory.AreEquivalent(x, invocationExpr)))
         {
+            // has existing initialization expression - already cached, can merge
             context.ReportDiagnostic(Diagnostic.Create(MED008, invocationExpr.GetLocation(), invocationExpr.ToString()));
-            return;
         }
-
-        context.ReportDiagnostic(Diagnostic.Create(MED007, invocationExpr.GetLocation(), invocationExpr.ToString()));
+        else
+        {
+            // can create cache property - report fixable diagnostic
+            context.ReportDiagnostic(Diagnostic.Create(MED007, invocationExpr.GetLocation(), invocationExpr.ToString()));
+        }
     }
 }

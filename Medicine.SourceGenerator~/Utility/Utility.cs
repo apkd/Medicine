@@ -39,7 +39,7 @@ public static class Utility
         }
     }
 
-    public static string GetOutputFilename(string filePath, string targetFQN, string label, bool includeFilename = true)
+    public static string GetOutputFilename(string filePath, string targetFQN, string label, string shadowTargetFQN = "", bool includeFilename = true)
     {
         string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(filePath);
         string typename = new string(targetFQN.Select(x => char.IsLetterOrDigit(x) ? x : '_').ToArray());
@@ -62,6 +62,9 @@ public static class Utility
                     hash = hash * 31 + c;
 
                 foreach (char c in targetFQN)
+                    hash = hash * 31 + c;
+
+                foreach (char c in shadowTargetFQN)
                     hash = hash * 31 + c;
 
                 return hash;

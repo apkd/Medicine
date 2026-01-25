@@ -80,6 +80,15 @@ public static partial class ExtensionMethods
             => self?.AttributeLists.SelectMany(x => x.Attributes).FirstOrDefault(x => predicate(x.Name.ToString()));
     }
 
+    extension(LocalFunctionStatementSyntax? self)
+    {
+        public bool HasAttribute(Func<string, bool> predicate)
+            => self?.AttributeLists.SelectMany(x => x.Attributes.Select(x => x.Name.ToString())).Any(predicate) is true;
+
+        public AttributeSyntax? GetAttribute(Func<string, bool> predicate)
+            => self?.AttributeLists.SelectMany(x => x.Attributes).FirstOrDefault(x => predicate(x.Name.ToString()));
+    }
+
     extension(SyntaxNode node)
     {
         public SyntaxNode RewriteThisAndFullyQualityReferences(
