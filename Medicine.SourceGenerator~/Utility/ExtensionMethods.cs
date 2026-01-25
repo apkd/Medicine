@@ -26,9 +26,11 @@ public static partial class ExtensionMethods
 
     extension(ISymbol self)
     {
-        [NotNullIfNotNull("self")]
         public string FQN
             => self.ToDisplayString(FullyQualifiedFormat);
+
+        public int Hash
+            => SymbolEqualityComparer.Default.GetHashCode(self);
     }
 
     extension(ISymbol? self)
@@ -171,4 +173,7 @@ public static partial class ExtensionMethods
         => syntaxReference is { SyntaxTree: { } tree, Span: { IsEmpty: false } span }
             ? Location.Create(tree, span)
             : null;
+
+    public static void Deconstruct<TKey, TValue>(this KeyValuePair<TKey, TValue> pair, out TKey key, out TValue value)
+        => (key, value) = (pair.Key, pair.Value);
 }

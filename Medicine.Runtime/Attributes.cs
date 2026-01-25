@@ -222,7 +222,10 @@ namespace Medicine
     /// </summary>
     [AttributeUsage(Struct)]
     [EditorBrowsable(Never)] // experimental feature - needs optimizations, analyzers etc
-    public sealed class UnionAttribute : Attribute { }
+    public sealed class UnionAttribute : Attribute
+    {
+        public UnionAttribute(byte id = 0) { }
+    }
 
     /// <summary>
     /// Marks the assembly for generation of a <see cref="Medicine.Constants"/> class,

@@ -23,11 +23,10 @@ public partial class UnionTests
         public TypeIDs TypeID;
     }
 
-    [Union]
+    [Union(1)]
     public partial struct Triangle : Shape.Interface
     {
         public Shape Header;
-        public const byte Order = 1;
 
         public int Sides => 3;
 
@@ -44,11 +43,10 @@ public partial class UnionTests
             => new(x + 3);
     }
 
-    [Union]
+    [Union(2)]
     public partial struct Square : Shape.Interface
     {
         public Shape Header;
-        public const byte Order = 2;
 
         public int Sides => 4;
         public int Perimeter(int scale) => 4 * scale;
@@ -76,7 +74,7 @@ public partial class UnionTests
     }
 
     [Test]
-    public unsafe void CallsWork_ForExplicitAndPublicImplementations()
+    public void CallsWork_ForExplicitAndPublicImplementations()
     {
         // explicit
         {

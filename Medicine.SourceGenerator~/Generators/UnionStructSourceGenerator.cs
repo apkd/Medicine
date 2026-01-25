@@ -22,7 +22,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public string Name;
         public string FQN;
         public EquatableArray<string> Declaration;
-        public byte Order;
+        public byte AssignedId;
         public EquatableArray<string> PubliclyImplementedMembers;
         public bool HasParameterlessConstructor;
     }
@@ -57,7 +57,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public string DerivedName { get; init; }
         public EquatableArray<string> Declaration { get; init; }
         public ImmutableArray<INamedTypeSymbol> Interfaces { get; init; }
-        public byte Order { get; init; }
+        public byte? ForcedId { get; init; }
         public EquatableArray<string> PublicMembers { get; init; }
         public bool HasParameterlessConstructor { get; init; }
     }
@@ -165,9 +165,13 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         if (context.SemanticModel.GetDeclaredSymbol(structDecl, ct) is not { } symbol)
             return default;
 
-        byte order = symbol.GetMembers("Order").FirstOrDefault() is IFieldSymbol { HasConstantValue: true, ConstantValue: byte orderValue }
-            ? orderValue
-            : (byte)0;
+        byte? forcedId = context.Attributes
+            .First()
+            .GetAttributeConstructorArguments(ct)
+            .Get<byte>("id", null);
+
+        if (forcedId == 0)
+            forcedId = null;
 
         return new()
         {
@@ -175,7 +179,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             DerivedName = symbol.Name,
             Declaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
             Interfaces = symbol.AllInterfaces,
-            Order = order,
+            ForcedId = forcedId,
             PublicMembers = symbol.GetMembers()
                 .Where(x => x is { DeclaredAccessibility: Accessibility.Public } and not IMethodSymbol { MethodKind: not MethodKind.Ordinary })
                 .Select(x => x.Name)
@@ -189,21 +193,42 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     {
         var result = input.Base;
 
-        var derivedStructs = input.Candidates
+        var candidates = input.Candidates
             .AsArray()
             .Where(candidate => candidate.Interfaces.Any(x => x.Name.Contains(result.InterfaceName) && x.FQN == result.InterfaceFQN))
+            .ToArray();
+
+        var usedIds = new HashSet<byte>();
+        foreach (var c in candidates)
+            if (c.ForcedId.HasValue)
+                usedIds.Add(c.ForcedId.Value);
+
+        var nextId = (byte)1;
+
+        byte GetNextId()
+        {
+            while (usedIds.Contains(nextId))
+                nextId++;
+
+            return nextId++;
+        }
+
+        var derivedStructs = candidates
+            .Select(x => (candidate: x, isForced: x.ForcedId.HasValue))
+            .OrderBy(x => !x.isForced)
+            .ThenBy(x => x.candidate.DerivedName)
+            .ToArray()
             .Select(x => new DerivedInput
                 {
-                    Name = x.DerivedName,
-                    FQN = x.DerivedFQN,
-                    Declaration = x.Declaration,
-                    Order = x.Order,
-                    PubliclyImplementedMembers = x.PublicMembers,
-                    HasParameterlessConstructor = x.HasParameterlessConstructor,
+                    Name = x.candidate.DerivedName,
+                    FQN = x.candidate.DerivedFQN,
+                    Declaration = x.candidate.Declaration,
+                    AssignedId = x.candidate.ForcedId ?? GetNextId(),
+                    PubliclyImplementedMembers = x.candidate.PublicMembers,
+                    HasParameterlessConstructor = x.candidate.HasParameterlessConstructor,
                 }
             )
-            .OrderBy(x => x.Order)
-            .ThenBy(x => x.Name)
+            .OrderBy(x => x.AssignedId)
             .ToArray();
 
         var firstError
@@ -281,7 +306,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             {
                 src.Line.Write("Unset = 0,");
                 foreach (var derived in input.DerivedStructs)
-                    src.Line.Write($"{derived.Name},");
+                    src.Line.Write($"{derived.Name} = {derived.AssignedId},");
             }
 
             src.Linebreak();
@@ -289,9 +314,16 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             src.Line.Write("static readonly int[] derivedStructSizes =");
             using (src.Braces)
             {
-                src.Line.Write("-1,");
+                var maxId = input.DerivedStructs.Length > 0 ? input.DerivedStructs.AsArray().Max(x => x.AssignedId) : 0;
+                var sizes = new string[maxId + 1];
+                for (int i = 0; i < sizes.Length; i++)
+                    sizes[i] = "-1";
+
                 foreach (var derived in input.DerivedStructs)
-                    src.Line.Write($"{m}UnsafeUtility.SizeOf<{derived.FQN}>(),");
+                    sizes[derived.AssignedId] = $"{m}UnsafeUtility.SizeOf<{derived.FQN}>()";
+
+                for (int i = 0; i < sizes.Length; i++)
+                    src.Line.Write($"{sizes[i]},");
             }
 
             src.Write(';').Linebreak();
@@ -299,9 +331,16 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             src.Line.Write("static readonly string[] derivedStructNames =");
             using (src.Braces)
             {
-                src.Line.Write("\"Undefined (TypeID=0)\",");
+                var maxId = input.DerivedStructs.Length > 0 ? input.DerivedStructs.AsArray().Max(x => x.AssignedId) : 0;
+                var names = new string[maxId + 1];
+                for (int i = 0; i < names.Length; i++)
+                    names[i] = $"\"Undefined (TypeID={i})\"";
+
                 foreach (var derived in input.DerivedStructs)
-                    src.Line.Write($"\"{derived.Name}\",");
+                    names[derived.AssignedId] = $"\"{derived.Name}\"";
+
+                for (int i = 0; i < names.Length; i++)
+                    src.Line.Write($"{names[i]},");
             }
 
             src.Write(';').Linebreak();

@@ -12,6 +12,9 @@ public readonly struct AttributeConstructorArgumentsDict
             if (attributeData is null)
                 return;
 
+            if (attributeData.ConstructorArguments.Length is 0)
+                return;
+
             var ctor = attributeData.AttributeConstructor ?? throw new("Attribute constructor is null");
             var ctorParams = ctor.Parameters;
             var ctorArgs = attributeData.ConstructorArguments;
