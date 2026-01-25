@@ -16,9 +16,9 @@ using static System.Reflection.BindingFlags;
 [SuppressMessage("ReSharper", "HeapView.BoxingAllocation")]
 public partial class UnmanagedAccessTests
 {
-    static bool HasIsReadOnlyAttribute(ParameterInfo parameterInfo)
-        => parameterInfo.GetRequiredCustomModifiers().Any(modifier => modifier.Name == "IsReadOnlyAttribute") ||
-           parameterInfo.GetCustomAttributes(inherit: false).Any(attribute => attribute.GetType().Name == "IsReadOnlyAttribute");
+    [SetUp]
+    public void Cleanup()
+        => TestUtility.DestroyAllGameObjects();
 
     [UnmanagedAccess]
     public partial class BasicFields
@@ -262,6 +262,10 @@ public partial class UnmanagedAccessTests
 
         Assert.That(accessRWWritableProperty, Is.Not.Null);
         Assert.That(HasIsReadOnlyAttribute(accessRWWritableProperty!.GetMethod!.ReturnParameter), Is.False);
+
+        static bool HasIsReadOnlyAttribute(ParameterInfo parameterInfo)
+            => parameterInfo.GetRequiredCustomModifiers().Any(modifier => modifier.Name == "IsReadOnlyAttribute") ||
+               parameterInfo.GetCustomAttributes(inherit: false).Any(attribute => attribute.GetType().Name == "IsReadOnlyAttribute");
 #else
         Assert.Inconclusive("Fails to compile under IL2CPP for some reason");
 #endif
