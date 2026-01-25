@@ -85,8 +85,9 @@ namespace Medicine
 #endif
 
         /// <summary>
-        /// Copies the tracked instance list to a pooled list.
-        /// It is up to the caller to call <c>Dispose()</c> on the returned PooledObject handle.
+        /// Copies the tracked instances to a pooled list.
+        /// <br/><br/>
+        /// Remember to call <c>Dispose()</c> <b>exactly once</b> to return the list to the pool.
         /// </summary>
         [MustDisposeResource]
         [MethodImpl(AggressiveInlining)]
@@ -96,6 +97,12 @@ namespace Medicine
             list.AddRange(Storage.Instances<T>.List);
             return handle;
         }
+
+        /// <inheritdoc cref="ToPooledList(out List{T})"/>
+        [MustDisposeResource]
+        [MethodImpl(AggressiveInlining)]
+        public PooledList<T> ToPooledList()
+            => ToPooledList(out _);
 
         public void CopyTo(List<T> destination, int extraCapacity = 16)
         {

@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -145,7 +146,7 @@ namespace Medicine
         /// Remember to call <see cref="Dispose"/> <b>exactly once</b> to return the list to the pool.
         /// </summary>
         [MustDisposeResource]
-        public static PooledList<T> ToPooledList<TEnumerator, T>(this ZLinq.ValueEnumerable<TEnumerator, T> source)
+        public static PooledList<T> ToPooledList<TEnumerator, T>(this ZLinq.ValueEnumerable<TEnumerator, T> source, out List<T> list)
             where TEnumerator : struct, ZLinq.IValueEnumerator<T>
 #if NET9_0_OR_GREATER
         , allows ref struct
@@ -153,7 +154,7 @@ namespace Medicine
         {
             using var enumerator = source.Enumerator;
             var pooledList = PooledList.Get<T>();
-            var list = pooledList.List;
+            list = pooledList.List;
 
             if (enumerator.TryGetNonEnumeratedCount(out var count))
             {
@@ -188,6 +189,16 @@ namespace Medicine
 
             return pooledList;
         }
+
+
+        /// <inheritdoc cref="ToPooledList{TEnumerator, T}(ZLinq.ValueEnumerable{TEnumerator, T}, out List{T})"/>
+        [MustDisposeResource]
+        public static PooledList<T> ToPooledList<TEnumerator, T>(this ZLinq.ValueEnumerable<TEnumerator, T> source)
+            where TEnumerator : struct, ZLinq.IValueEnumerator<T>
+#if NET9_0_OR_GREATER
+        , allows ref struct
+#endif
+            => source.ToPooledList(out _);
 #endif
     }
 }

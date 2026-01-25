@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using JetBrains.Annotations;
 using static System.ComponentModel.EditorBrowsableState;
+using static System.Runtime.CompilerServices.MethodImplOptions;
 
 namespace Medicine.Internal
 {
@@ -43,6 +46,30 @@ namespace Medicine.Internal
                     ? static (x, list, _) => (x as UnityEngine.GameObject).GetComponents(list)
                     : static (x, list, _) => (x as UnityEngine.Component).GetComponents(list),
             };
+
+        /// <summary>
+        /// Returns the components as a pooled list.
+        /// <br/><br/>
+        /// Remember to call <c>Dispose()</c> <b>exactly once</b> to return the list to the pool.
+        /// </summary>
+        [MustDisposeResource]
+        [MethodImpl(AggressiveInlining)]
+        public PooledList<T> ToPooledList(out List<T> list)
+        {
+            var handle = PooledList.Get(out list);
+            SearchFunc(Target, list, IncludeInactive);
+            return handle;
+        }
+
+        /// <inheritdoc cref="ToPooledList(out List{T})"/>
+        [MustDisposeResource]
+        [MethodImpl(AggressiveInlining)]
+        public PooledList<T> ToPooledList()
+        {
+            var handle = PooledList.Get<T>(out var list);
+            SearchFunc(Target, list, IncludeInactive);
+            return handle;
+        }
 
         public PooledListEnumerator<T> GetEnumerator()
         {

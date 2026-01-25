@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using JetBrains.Annotations;
 using UnityEngine;
 using UnityEngine.Assertions;
 using UnityEngine.SceneManagement;
@@ -30,6 +31,26 @@ namespace Medicine.Internal
         [EditorBrowsable(Never)]
         public ComponentsInSceneEnumerator<T> GetEnumerator()
             => new(scene, includeInactive);
+
+        /// <summary>
+        /// Copies the scene components to a pooled list.
+        /// <br/><br/>
+        /// Remember to call <c>Dispose()</c> <b>exactly once</b> to return the list to the pool.
+        /// </summary>
+        [MustDisposeResource]
+        public PooledList<T> ToPooledList(out List<T> list)
+        {
+            var handle = PooledList.Get<T>(out list);
+            foreach (var x in this)
+                list.Add(x);
+            return handle;
+        }
+
+        /// <inheritdoc cref="ToPooledList(out List{T})"/>
+        [MustDisposeResource]
+        [MethodImpl(AggressiveInlining)]
+        public PooledList<T> ToPooledList()
+            => ToPooledList(out _);
 
 #if MODULE_ZLINQ
         /// <summary>
