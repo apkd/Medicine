@@ -55,6 +55,39 @@ public partial class SingletonAttributePlayModeTests
     //////////////////////////////////////////////////////////////////////////////
 
     [Singleton]
+    interface ISingletonByInterface1 { }
+
+    [Singleton]
+    interface ISingletonByInterface2 { }
+
+    [Singleton]
+    sealed partial class MBSingletonByInterface1 : MonoBehaviour, ISingletonByInterface1, ISingletonByInterface2 { }
+
+    [Singleton]
+    sealed partial class MBSingletonByInterface2 : MonoBehaviour, ISingletonByInterface1 { }
+
+    [Test]
+    public void Singleton_ByInterface()
+    {
+        var go1 = new GameObject(null, typeof(MBSingletonByInterface1));
+        var singleton1 = go1.GetComponent<MBSingletonByInterface1>();
+        Assert.That(Find.Singleton<ISingletonByInterface1>(), Is.Not.Null.And.SameAs(singleton1));
+        Assert.That(Find.Singleton<ISingletonByInterface2>(), Is.Not.Null.And.SameAs(singleton1));
+        Assert.That(Find.Singleton<ISingletonByInterface1>(), Is.Not.Null.And.SameAs(Find.Singleton<MBSingletonByInterface1>()));
+        Assert.That(Find.Singleton<ISingletonByInterface2>(), Is.Not.Null.And.SameAs(Find.Singleton<MBSingletonByInterface1>()));
+        TestUtility.DestroyAllGameObjects();
+        Assert.That((bool)go1, Is.False);
+
+        var go2 = new GameObject(null, typeof(MBSingletonByInterface2));
+        var singleton2 = go2.GetComponent<MBSingletonByInterface2>();
+        Assert.That(Find.Singleton<ISingletonByInterface1>(), Is.Not.Null.And.SameAs(singleton2));
+        Assert.That(Find.Singleton<ISingletonByInterface1>(), Is.Not.Null.And.SameAs(Find.Singleton<MBSingletonByInterface2>()));
+        Assert.That(Find.Singleton<ISingletonByInterface2>(), Is.Null);
+    }
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    [Singleton]
     partial class SOSingleton : ScriptableObject { }
 
     [Test]

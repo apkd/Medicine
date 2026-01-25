@@ -524,8 +524,23 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             }
 
             src.Linebreak();
-            EmitRegistrationMethod("OnEnableINTERNAL", $"{m}Storage.Singleton<{input.TypeFQN}>.Register(this)");
-            EmitRegistrationMethod("OnDisableINTERNAL", $"{m}Storage.Singleton<{input.TypeFQN}>.Unregister(this)");
+            EmitRegistrationMethod(
+                methodName: "OnEnableINTERNAL",
+                methodCalls:
+                [
+                    $"{m}Storage.Singleton<{input.TypeFQN}>.Register(this)",
+                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Singleton<{x}>.Register(this)"),
+                ]
+            );
+
+            EmitRegistrationMethod(
+                methodName: "OnDisableINTERNAL",
+                methodCalls:
+                [
+                    $"{m}Storage.Singleton<{input.TypeFQN}>.Unregister(this)",
+                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Singleton<{x}>.Register(this)"),
+                ]
+            );
 
             if (input.Symbols.Has(UNITY_EDITOR))
             {

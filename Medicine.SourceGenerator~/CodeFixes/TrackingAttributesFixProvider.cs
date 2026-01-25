@@ -126,8 +126,9 @@ public sealed class TrackingAttributesFixProvider : CodeFixProvider
             .WithAttributeLists(SyntaxFactory.List(filteredAttributeLists))
             .AddAttributeLists(newAttrList);
 
-        if (!typeDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword))
-            newTypeDeclaration = newTypeDeclaration.AddModifiers(SyntaxFactory.Token(SyntaxKind.PartialKeyword));
+        if (!typeDeclaration.IsKind(SyntaxKind.InterfaceDeclaration))
+            if (!typeDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword))
+                newTypeDeclaration = newTypeDeclaration.AddModifiers(SyntaxFactory.Token(SyntaxKind.PartialKeyword));
 
         var newRoot = root.ReplaceNode(typeDeclaration, newTypeDeclaration);
 

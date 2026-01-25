@@ -53,6 +53,49 @@ public partial class TrackAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
+    [Track]
+    interface ITrackByInterface1 { }
+
+    [Track]
+    interface ITrackByInterface2 { }
+
+    [Track]
+    sealed partial class MBTrackByInterface1 : MonoBehaviour, ITrackByInterface1, ITrackByInterface2 { }
+
+    [Track]
+    sealed partial class MBTrackByInterface2 : MonoBehaviour, ITrackByInterface1 { }
+
+    [Test]
+    public void Track_ByInterface()
+    {
+        for (int i = 0; i < 5; ++i)
+            _ = new GameObject(null, typeof(MBTrackByInterface1));
+
+        using (Find.Instances<MBTrackByInterface1>().ToPooledList(out var listMB1))
+        using (Find.Instances<ITrackByInterface1>().ToPooledList(out var listI1))
+        using (Find.Instances<ITrackByInterface2>().ToPooledList(out var listI2))
+        {
+            Assert.That(listMB1, Is.EquivalentTo(listI1));
+            Assert.That(listMB1, Is.EquivalentTo(listI2));
+        }
+
+        for (int i = 0; i < 5; ++i)
+            _ = new GameObject(null, typeof(MBTrackByInterface2));
+
+        using (Find.Instances<MBTrackByInterface1>().ToPooledList(out var listMB1))
+        using (Find.Instances<MBTrackByInterface2>().ToPooledList(out var listMB2))
+        using (Find.Instances<ITrackByInterface1>().ToPooledList(out var listI1))
+        using (Find.Instances<ITrackByInterface2>().ToPooledList(out var listI2))
+        {
+            Assert.That(listMB1, Is.SubsetOf(listI1));
+            Assert.That(listMB2, Is.SubsetOf(listI1));
+            Assert.That(listI2, Is.Not.SubsetOf(listMB2));
+            Assert.That(listMB2, Is.Not.SubsetOf(listI2));
+        }
+    }
+
+    //////////////////////////////////////////////////////////////////////////////
+
     [Track(instanceIdArray: true, transformAccessArray: true)]
     sealed partial class MBTrackStressTest
         : MonoBehaviour,
