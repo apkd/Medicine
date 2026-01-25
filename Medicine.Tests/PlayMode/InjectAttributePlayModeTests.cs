@@ -1,3 +1,4 @@
+#nullable enable
 using System.Diagnostics.CodeAnalysis;
 using Medicine;
 using NUnit.Framework;
@@ -32,23 +33,69 @@ public partial class InjectAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    sealed partial class MBInjectLocalMethod : MonoBehaviour
+    sealed partial class MBInjectExpressionBodied : MonoBehaviour
     {
         void Awake()
         {
             [Inject]
-            void Init()
-                => Transform = GetComponent<Transform>();
+            void Init1()
+                => Transform1 = GetComponent<Transform>();
 
-            Init();
+            Init1();
         }
+
+        [Inject]
+        public void Init2()
+            => Transform2 = GetComponent<Transform>();
     }
 
     [Test]
     public void Inject_LocalMethod()
     {
-        var obj = new GameObject(null, typeof(MBInjectLocalMethod));
-        Assert.That(obj.GetComponent<MBInjectLocalMethod>().Transform, Is.Not.Null);
+        var obj = new GameObject(null, typeof(MBInjectExpressionBodied));
+        var mb = obj.GetComponent<MBInjectExpressionBodied>();
+        mb.Init2();
+        Assert.That(mb.Transform1, Is.Not.Null);
+        Assert.That(mb.Transform2, Is.Not.Null);
+    }
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    sealed partial class MBInjectOptional : MonoBehaviour
+    {
+        void Awake()
+        {
+            [Inject]
+            void Init1()
+                => RB1 = GetComponent<Rigidbody>().Optional();
+
+            [Inject]
+            void Init2()
+                => RB2 = GetComponent<Rigidbody>(); // optional
+
+            Init1();
+            Init2();
+        }
+
+        [Inject]
+        void Init3()
+            => RB3 = GetComponent<Rigidbody>(); // optional
+
+        [Inject]
+        void Init4()
+            => RB4 = GetComponent<Rigidbody>().Optional();
+    }
+
+    [Test]
+    public void Inject_Optional()
+    {
+        var obj = new GameObject(null, typeof(MBInjectOptional));
+        var mb = obj.GetComponent<MBInjectOptional>();
+        // accessing nonexistent component should not throw
+        Assert.That(mb.RB1, Is.Null);
+        Assert.That(mb.RB2, Is.Null);
+        Assert.That(mb.RB3, Is.Null);
+        Assert.That(mb.RB4, Is.Null);
     }
 
     //////////////////////////////////////////////////////////////////////////////
