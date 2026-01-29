@@ -23,8 +23,35 @@ namespace Medicine
         public readonly List<T> List;
         PooledObject<List<T>> disposable;
 
+#if DEBUG
+        public static long BorrowCounter;
+        public static long BorrowCounterWarningThreshold = 16384;
+
+        public static void CheckBorrowCounter()
+        {
+            if (BorrowCounter > BorrowCounterWarningThreshold)
+            {
+                UnityEngine.Debug.LogError(
+                    $"PooledList<{typeof(T).Name}> has been borrowed {BorrowCounter} times without being returned to the pool. " +
+                    $"This probably indicates an usage error and will result in a memory leak. " +
+                    $"Check use of borrowed lists, and APIs depending on them in your code."
+                );
+
+                BorrowCounterWarningThreshold *= 2;
+            }
+            else if (BorrowCounter < 0)
+            {
+                UnityEngine.Debug.LogError($"PooledList<{typeof(T).Name}> has been returned to the pool more times than it was borrowed. Huh.");
+            }
+        }
+#endif
+
         internal PooledList(List<T> list, PooledObject<List<T>> disposable)
         {
+#if DEBUG
+            BorrowCounter += 1;
+            CheckBorrowCounter();
+#endif
             List = list;
             this.disposable = disposable;
         }
@@ -41,9 +68,16 @@ namespace Medicine
             get => PooledList.IsDisposed(disposable);
         }
 
+        /// <summary>
+        /// Gets the number of elements in the borrowed underlying list.
+        /// </summary>
         public int Count
             => List.Count;
 
+        /// <summary>
+        /// Provides a span view over the elements of the pooled list.
+        /// </summary>
+        /// <warning> Do not add/remove elements while using the span! </warning>
         public Span<T> Span
             => List.AsSpanUnsafe();
 
@@ -59,6 +93,23 @@ namespace Medicine
 
     public static class PooledList
     {
+#if MEDICINE_EXTENSIONS_LIB
+        /// <summary>
+        /// Returns a shared, immutable, empty list of the specified type.
+        /// You can use this in APIs that expect a regular <see cref="List{T}">List&lt;T&gt;</see>, for example as a fallback in <c>foreach</c>.
+        /// <code> foreach (var item in myList ?? PooledList.Empty&lt;T&gt;()) </code>
+        /// </summary>
+        /// <returns>An empty list of type <typeparamref name="T"/> that can be used without allocation.</returns>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown in debug configurations if the returned list's capacity is found to be non-zero,
+        /// indicating unintended external modifications.
+        /// </exception>
+        /// <remarks> <inheritdoc cref="EmptyList{T}"/> </remarks>
+        [MethodImpl(AggressiveInlining)]
+        public static EmptyList<T> Empty<T>()
+            => EmptyList<T>.Instance;
+#endif
+
         /// <summary>
         /// Obtains a pooled <see cref="List{T}"/> instance from the shared Unity object pool.
         /// The returned wrapper object needs to be disposed of so that the list is returned to the pool.
@@ -115,6 +166,9 @@ namespace Medicine
         {
             if (IsDisposed(disposable))
                 return;
+#if DEBUG
+            PooledList<T>.BorrowCounter -= 1;
+#endif
 
 #if MEDICINE_NO_FUNSAFE
             disposable.InvokeDispose();
