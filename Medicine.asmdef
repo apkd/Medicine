@@ -1,38 +1,158 @@
 {
-    "name": "Medicine",
-    "rootNamespace": "",
-    "references": [
-        "GUID:e0cd26848372d4e5c891c569017e11f1",
-        "GUID:2665a8d13d1b3f18800f46e256720795"
-    ],
-    "includePlatforms": [],
-    "excludePlatforms": [],
-    "allowUnsafeCode": true,
-    "overrideReferences": false,
-    "precompiledReferences": [],
-    "autoReferenced": true,
-    "defineConstraints": [],
-    "versionDefines": [
-        {
-            "name": "com.cysharp.zlinq",
-            "expression": "",
-            "define": "MODULE_ZLINQ"
-        },
-        {
-            "name": "com.unity.burst",
-            "expression": "",
-            "define": "MODULE_BURST"
-        },
-        {
-            "name": "Unity",
-            "expression": "[0.0.0,2022.3.45f1)",
-            "define": "UNITY_OLDER_THAN_2022_3_45f1"
-        },
-        {
-            "name": "Unity",
-            "expression": "[0.0.0,6000.0.17f1)",
-            "define": "UNITY_OLDER_THAN_6000_0_17f"
-        }
-    ],
-    "noEngineReferences": false
+  "name": "Medicine",
+  "rootNamespace": "",
+  "references": [
+    "GUID:e0cd26848372d4e5c891c569017e11f1",
+    "GUID:2665a8d13d1b3f18800f46e256720795"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": true,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [
+    {
+      "name": "com.cysharp.zlinq",
+      "expression": "",
+      "define": "MODULE_ZLINQ"
+    },
+    {
+      "name": "com.unity.burst",
+      "expression": "",
+      "define": "MODULE_BURST"
+    },
+    {
+      "name": "Unity",
+      "expression": "[0.0.0,2022.3.45f1)",
+      "define": "UNITY_OLDER_THAN_2022_3_45f1"
+    },
+    {
+      "name": "Unity",
+      "expression": "[0.0.0,6000.0.17f1)",
+      "define": "UNITY_OLDER_THAN_6000_0_17f"
+    },
+    {
+      "name": "com.unity.visualeffectgraph",
+      "expression": "",
+      "define": "HAS_VISUALEFFECTGRAPH"
+    },
+    {
+      "name": "com.unity.ugui",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_UI"
+    },
+    {
+      "name": "com.unity.modules.ai",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_AIMODULE"
+    },
+    {
+      "name": "com.unity.modules.animation",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_ANIMATIONMODULE"
+    },
+    {
+      "name": "com.unity.modules.assetbundle",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_ASSETBUNDLEMODULE"
+    },
+    {
+      "name": "com.unity.modules.audio",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_AUDIOMODULE"
+    },
+    {
+      "name": "com.unity.modules.director",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_DIRECTORMODULE"
+    },
+    {
+      "name": "com.unity.modules.imageconversion",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_IMAGECONVERSIONMODULE"
+    },
+    {
+      "name": "com.unity.modules.imgui",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_IMGUIMODULE"
+    },
+    {
+      "name": "com.unity.modules.jsonserialize",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_JSONSERIALIZEMODULE"
+    },
+    {
+      "name": "com.unity.modules.particlesystem",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_PARTICLESYSTEMMODULE"
+    },
+    {
+      "name": "com.unity.modules.physics2d",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_PHYSICS2DMODULE"
+    },
+    {
+      "name": "com.unity.modules.physics",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_PHYSICSMODULE"
+    },
+    {
+      "name": "com.unity.modules.screencapture",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_SCREENCAPTUREMODULE"
+    },
+    {
+      "name": "com.unity.modules.terrain",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_TERRAINMODULE"
+    },
+    {
+      "name": "com.unity.modules.terrainphysics",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_TERRAINPHYSICSMODULE"
+    },
+    {
+      "name": "com.unity.modules.tilemap",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_TILEMAPMODULE"
+    },
+    {
+      "name": "com.unity.modules.uielements",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_UIELEMENTSMODULE"
+    },
+    {
+      "name": "com.unity.modules.unitywebrequest",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_UNITYWEBREQUESTMODULE"
+    },
+    {
+      "name": "com.unity.modules.video",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_VIDEOMODULE"
+    },
+    {
+      "name": "com.unity.modules.cloth",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_CLOTHMODULE"
+    },
+    {
+      "name": "com.unity.modules.vehicles",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_VEHICLESMODULE"
+    },
+    {
+      "name": "com.unity.modules.wind",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_WINDMODULE"
+    },
+    {
+      "name": "com.unity.modules.umbra",
+      "expression": "1.0.0",
+      "define": "HAS_UNITY_UMBRAMODULE"
+    }
+  ],
+  "noEngineReferences": false
 }

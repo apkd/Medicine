@@ -32,6 +32,11 @@
             "name": "com.unity.burst",
             "expression": "",
             "define": "MODULE_BURST"
+        },
+        {
+            "name": "com.unity.modules.physics",
+            "expression": "",
+            "define": "HAS_UNITY_PHYSICSMODULE"
         }
     ],
     "noEngineReferences": false
