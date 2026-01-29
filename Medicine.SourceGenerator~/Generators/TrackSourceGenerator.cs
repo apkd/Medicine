@@ -613,7 +613,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 methodCalls:
                 [
                     $"{m}Storage.Singleton<{input.TypeFQN}>.Unregister(this, {m}singletonStrategy)",
-                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Singleton<{x}>.Register(this, {m}singletonStrategy)"),
+                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Singleton<{x}>.Unregister(this, {m}singletonStrategy)"),
                 ]
             );
 
