@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using NUnit.Framework;
+using Medicine;
 using Medicine.Internal;
 
 [SuppressMessage("ReSharper", "ExpressionIsAlwaysNull")]
@@ -29,6 +30,27 @@ public class AsSpanUnsafeTests
         // write to second element
         span[1] = 42;
         Assert.That(list[1], Is.EqualTo(42));
+    }
+
+    [Test]
+    public void List_AsSpanUnsafe_CapacityGreaterThanCount_UsesCount()
+    {
+        var list = new List<int>(capacity: 8) { 1, 2, 3 };
+        var span = list.AsSpanUnsafe();
+
+        Assert.That(list.Capacity, Is.GreaterThan(list.Count));
+        Assert.That(span.Length, Is.EqualTo(list.Count));
+        Assert.That(span[2], Is.EqualTo(3));
+    }
+
+    [Test]
+    public void List_AsSpanUnsafe_ListEdits_ReflectedInSpan()
+    {
+        var list = new List<int> { 1, 2, 3 };
+        var span = list.AsSpanUnsafe();
+
+        list[1] = 99;
+        Assert.That(span[1], Is.EqualTo(99));
     }
 
     [Test]
@@ -96,6 +118,13 @@ public class AsSpanUnsafeTests
     }
 
     [Test]
+    public void Array_AsSpanUnsafe_StartPastArrayLength_ThrowsInDebug()
+    {
+        var array = new[] { 1, 2, 3 };
+        Assert.Throws<ArgumentOutOfRangeException>(() => array.AsSpanUnsafe(array.Length + 1));
+    }
+
+    [Test]
     public void Array_AsSpanUnsafe_LengthTooBig_ThrowsInDebug()
     {
         var array = new[] { 1, 2, 3 };
@@ -118,5 +147,36 @@ public class AsSpanUnsafeTests
         Assert.That(span[0], Is.EqualTo("b"));
         span[1] = "z";
         Assert.That(a[2], Is.EqualTo("z"));
+    }
+
+    sealed class Dummy { }
+
+    [Test]
+    public unsafe void List_AsUnsafeList_SameType_UsesBackingArray()
+    {
+        var list = new List<int> { 10, 20, 30 };
+        var unsafeList = list.AsUnsafeList<int>();
+
+        Assert.That(unsafeList.Length, Is.EqualTo(list.Count));
+
+        list[1] = 42;
+        Assert.That(unsafeList[1], Is.EqualTo(42));
+
+        unsafeList[2] = 99;
+        Assert.That(list[2], Is.EqualTo(99));
+    }
+
+    [Test]
+    public unsafe void List_AsUnsafeList_RefTypeToUnmanagedRef()
+    {
+        var a = new Dummy();
+        var b = new Dummy();
+        var list = new List<Dummy> { a, b };
+
+        var unsafeList = list.AsUnsafeList<Dummy, UnmanagedRef<Dummy>>();
+
+        Assert.That(unsafeList.Length, Is.EqualTo(list.Count));
+        Assert.That(unsafeList[0].Ptr, Is.EqualTo(new UnmanagedRef<Dummy>(a).Ptr));
+        Assert.That(unsafeList[1].Ptr, Is.EqualTo(new UnmanagedRef<Dummy>(b).Ptr));
     }
 }

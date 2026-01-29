@@ -14,6 +14,8 @@ namespace InheritedFromPlayMode
 
     public sealed class UnmanagedAccessTests : global::UnmanagedAccessTests { }
 
+    public sealed class PooledListTests : global::PooledListTests { }
+
 #if MODULE_ZLINQ
     public sealed class WrapValueEnumerableCompileTests : global::WrapValueEnumerableCompileTests { }
 #endif

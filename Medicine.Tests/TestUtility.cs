@@ -34,6 +34,22 @@ public static class TestUtility
         );
 #endif
     }
+
+    public static bool IsNull(this object obj)
+        => obj.IsDestroyed();
+
+    public static bool IsNotNull(this object obj)
+        => obj.IsDestroyed();
+
+    public static bool IsDestroyed(this object obj)
+        => obj is Object unityObject
+            ? Medicine.Internal.Utility.IsNativeObjectDead(unityObject)
+            : obj == null;
+
+    public static bool IsNotDestroyed(this object obj)
+        => obj is Object unityObject
+            ? Medicine.Internal.Utility.IsNativeObjectAlive(unityObject)
+            : obj != null;
 }
 
 #if UNITY_EDITOR
