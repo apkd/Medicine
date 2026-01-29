@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using static ActivePreprocessorSymbolNames;
 using static Constants;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 
@@ -201,7 +202,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
-        if (!input.MedicineSettings.PreprocessorSymbolNames.Has(ActivePreprocessorSymbolNames.DEBUG))
+        var symbols = input.MedicineSettings.PreprocessorSymbolNames;
+
+        if (!symbols.Has(DEBUG))
             input.AttributeSettings = input.AttributeSettings with { SafetyChecks = false };
 
         if (input.AttributeSettings.MemberNames is { Length: > 0 })
@@ -288,10 +291,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                src.Write("\n#if UNITY_EDITOR");
-                src.Line.Write("[global::UnityEditor.InitializeOnLoadMethodAttribute]");
-                src.Write("\n#endif");
-                src.Line.Write("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.BeforeSceneLoad)]");
+                if (symbols.Has(UNITY_EDITOR))
+                    src.Write(Alias.EditorInit);
+
+                src.Line.Write(Alias.RuntimeInit);
                 src.Line.Write("static void InitializeUnmanagedLayout()");
                 using (src.Indent)
                     src.Line.Write("=> unmanagedLayoutStorage.Data = new()");

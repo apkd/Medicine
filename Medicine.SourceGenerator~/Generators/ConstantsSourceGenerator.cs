@@ -125,13 +125,13 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
                 src.Line.Write("public enum Tag : uint");
                 using (src.Braces)
                     foreach (var (tag, i) in tags.Where(x => x is { Length: > 0 }).Select((x, i) => (x, i)))
-                        src.Line.Write($"{Sanitize(tag)} = {20000 + i}u,");
+                        src.Line.Write($"{tag.Sanitize('@')} = {20000 + i}u,");
 
                 src.Linebreak();
                 src.Line.Write("public enum Layer : uint");
                 using (src.Braces)
                     foreach (var (layer, i) in layers.Where(x => x is { Length: > 0 }).Select((x, i) => (x, i)))
-                        src.Line.Write($"{HideMaybe(layer)}{Sanitize(layer)} = {i:00},");
+                        src.Line.Write($"{HideMaybe(layer)}{layer.Sanitize('@')} = {i:00},");
 
                 src.Linebreak();
                 src.Line.Write("[System.Flags]");
@@ -141,7 +141,7 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
                     src.Line.Write("None = 0,");
                     src.Line.Write("All = 0xffffffff,");
                     foreach (var (layer, i) in layers.Select((x, i) => (x, i)))
-                        src.Line.Write($"{HideMaybe(layer)}{Sanitize(layer)} = 1u << {i:00},");
+                        src.Line.Write($"{HideMaybe(layer)}{layer.Sanitize('@')} = 1u << {i:00},");
                 }
             }
 
@@ -177,38 +177,4 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
         => name is ['_', >= '0' and <= '9', >= '0' and <= '9']
             ? "[EditorBrowsable(Never)] "
             : "";
-
-    static string Sanitize(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-            return "???";
-
-        Span<char> span = stackalloc char[name.Length + 1];
-        int i = 0;
-
-        // prepend @
-        {
-            span[i++] = '@';
-        }
-
-        // first char
-        {
-            char c = name[0];
-            if (char.IsLetter(c) || c == '_')
-                span[i++] = c;
-            else
-                span[i++] = '_';
-        }
-
-        // remaining chars
-        foreach (var c in name.AsSpan()[1..])
-        {
-            if (char.IsLetterOrDigit(c) || c == '_')
-                span[i++] = c;
-            else
-                span[i++] = '_';
-        }
-
-        return span.ToString();
-    }
 }

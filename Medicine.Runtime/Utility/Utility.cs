@@ -8,7 +8,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using JetBrains.Annotations;
 using Unity.Collections.LowLevel.Unsafe;
-using UnityEngine;
 using static System.ComponentModel.EditorBrowsableState;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 
@@ -36,7 +35,7 @@ namespace Medicine.Internal
     /// and might be changed in an update.
     /// </summary>
     [EditorBrowsable(Never)]
-    public static class Utility
+    public static partial class Utility
     {
 #if UNITY_EDITOR
         // We can do better than Application.isPlaying!
@@ -126,40 +125,23 @@ namespace Medicine.Internal
             where T : struct, IDisposable
             => disposable.Dispose();
 
+        [UsedImplicitly]
+        [StructLayout(LayoutKind.Sequential)]
+        sealed class UnityObjectInternals
+        {
+            public nint m_CachedPtr;
+        }
+
         [MethodImpl(AggressiveInlining)]
-        public static unsafe bool IsNativeObjectAlive([NotNullWhen(true)] UnityEngine.Object? obj)
-        {
-            nint ptr = UnsafeUtility.As<UnityEngine.Object?, nint>(ref obj);
-            nint nativePtr = ptr != 0
-                ? *(nint*)(ptr + sizeof(ulong) * 2)
-                : 0;
+        public static bool IsNativeObjectAlive([NotNullWhen(true)] UnityEngine.Object? obj)
+            => !ReferenceEquals(obj, null) && UnsafeUtility.As<UnityEngine.Object, UnityObjectInternals>(ref obj).m_CachedPtr != 0;
 
-            return nativePtr is not 0;
-        }
+        [MethodImpl(AggressiveInlining)]
+        public static bool IsNativeObjectDead([NotNullWhen(true)] UnityEngine.Object? obj)
+            => !ReferenceEquals(obj, null) && UnsafeUtility.As<UnityEngine.Object, UnityObjectInternals>(ref obj).m_CachedPtr == 0;
 
-        public static class TypeInfo<T>
-        {
-            public static bool IsValueType => (Flags & TypeFlags.IsValueType) != 0;
-
-            // public static bool IsUnityEngineObject => (Flags & TypeFlags.IsUnityEngineObject) != 0;
-            public static bool IsScriptableObject => (Flags & TypeFlags.IsScriptableObject) != 0;
-            // public static bool IsMonoBehaviour => (Flags & TypeFlags.IsMonoBehaviour) != 0;
-
-            public static readonly TypeFlags Flags
-                = 0
-                  | (typeof(T).IsValueType ? TypeFlags.IsValueType : 0)
-                  // | (typeof(UnityEngine.Object).IsAssignableFrom(typeof(T)) ? TypeFlags.IsUnityEngineObject : 0)
-                  | (typeof(ScriptableObject).IsAssignableFrom(typeof(T)) ? TypeFlags.IsScriptableObject : 0);
-                  // | (typeof(MonoBehaviour).IsAssignableFrom(typeof(T)) ? TypeFlags.IsMonoBehaviour : 0);
-        }
-
-        [Flags]
-        public enum TypeFlags : ushort
-        {
-            IsValueType = 1 << 0,
-            IsUnityEngineObject = 1 << 1,
-            IsScriptableObject = 1 << 2,
-            IsMonoBehaviour = 1 << 3,
-        }
+        [MethodImpl(AggressiveInlining)]
+        internal static bool Has(this SingletonAttribute.Strategy strategy, SingletonAttribute.Strategy flag)
+            => (strategy & flag) == flag;
     }
 }

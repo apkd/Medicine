@@ -1,19 +1,20 @@
-using System.Runtime.CompilerServices;
-
 static class Constants
 {
     public const string m = "ᵐ";
     public const string Namespace = "Medicine";
     public const string NamespaceWithGlobal = $"global::{Namespace}";
 
-    public const string MedicineSettingsAttributeFQN = $"{NamespaceWithGlobal}.MedicineSettingsAttribute";
+    public const string MedicineSettingsAttributeShort = "MedicineSettings";
+    public const string MedicineSettingsAttribute = $"{MedicineSettingsAttributeShort}Attribute";
+    public const string MedicineSettingsAttributeFQN = $"{NamespaceWithGlobal}.{MedicineSettingsAttribute}";
 
     public const string InjectAttributeNameShort = "Inject";
     public const string InjectAttributeName = $"{InjectAttributeNameShort}Attribute";
     public const string InjectAttributeMetadataName = $"{Namespace}.{InjectAttributeName}";
     public const string InjectAttributeFQN = $"{NamespaceWithGlobal}.{InjectAttributeName}";
 
-    public const string SingletonAttributeName = "SingletonAttribute";
+    public const string SingletonAttributeShort = "Singleton";
+    public const string SingletonAttributeName = $"{SingletonAttributeShort}Attribute";
     public const string SingletonAttributeMetadataName = $"{Namespace}.{SingletonAttributeName}";
     public const string SingletonAttributeFQN = $"{NamespaceWithGlobal}.{SingletonAttributeName}";
 
@@ -63,6 +64,8 @@ static class Constants
         public const string ObsoleteInternal = "[System.Obsolete(\"This is an internal generated Medicine API and should not be used directly.\")]";
         public const string Inline = $"[{m}Inline(256)]";
         public const string NoInline = $"[{m}Inline(8)]";
+        public const string EditorInit = "[global::UnityEditor.InitializeOnLoadMethodAttribute]";
+        public const string RuntimeInit = "[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]";
 
         public const string UsingInline = $"using {m}Inline = global::System.Runtime.CompilerServices.MethodImplAttribute;";
         public const string UsingUtility = $"using {m}Utility = global::Medicine.Internal.Utility;";

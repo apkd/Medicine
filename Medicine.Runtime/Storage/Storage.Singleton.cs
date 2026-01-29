@@ -4,12 +4,10 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using JetBrains.Annotations;
-using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
-using UnityEngine.Scripting;
 using static System.ComponentModel.EditorBrowsableState;
 using static System.Runtime.CompilerServices.MethodImplOptions;
+using static Medicine.SingletonAttribute.Strategy;
 using Object = UnityEngine.Object;
 
 // ReSharper disable UnusedType.Global
@@ -29,6 +27,9 @@ namespace Medicine.Internal
         [EditorBrowsable(Never)]
         public static class Singleton<T> where T : class
         {
+            public static SingletonAttribute.Strategy Strategy;
+            static bool autoInstantiateInProgress;
+
             static class StaticInit
             {
                 [MethodImpl(AggressiveInlining)]
@@ -56,11 +57,24 @@ namespace Medicine.Internal
 #endif
 
 #if MEDICINE_DISABLE_SINGLETON_DESTROYED_FILTER
+                    if (ReferenceEquals(RawInstance, null))
+                        if (Strategy.Has(AutoInstantiate))
+                            TryAutoInstantiate();
+
                     return RawInstance;
 #else
-                    return Utility.IsNativeObjectAlive(RawInstance as Object)
-                        ? RawInstance
-                        : null; // ensure pure null is returned for destroyed objects
+                    var instance = RawInstance;
+
+                    if (Utility.IsNativeObjectAlive(instance as Object))
+                        return instance;
+
+                    if (instance != null)
+                        RawInstance = null; // "purify" the reference to ensure actual null is returned
+
+                    if (Strategy.Has(AutoInstantiate))
+                        TryAutoInstantiate();
+
+                    return RawInstance;
 #endif
                 }
                 set => RawInstance = value;
@@ -69,9 +83,10 @@ namespace Medicine.Internal
             /// <summary>
             /// Registers the given object as the current active singleton instance of <paramref name="T"/>.
             /// </summary>
-            public static void Register(T? instance)
+            public static void Register(T? instance, SingletonAttribute.Strategy strategy)
             {
                 StaticInit.RunOnce();
+                Strategy = strategy;
 
                 if (instance == null)
                 {
@@ -81,14 +96,24 @@ namespace Medicine.Internal
                     return;
                 }
 
-                Instance = instance;
+                var existing = GetLiveInstance();
+
+                if (ReferenceEquals(existing, instance))
+                    return; // in theory, should never happen?
+
+                if (ReferenceEquals(existing, null))
+                    RawInstance = instance;
+                else
+                    ResolveConflict(existing, instance, strategy);
             }
 
             /// <summary>
             /// Unregisters the given object as the current active singleton instance of <paramref name="T"/>.
             /// </summary>
-            public static void Unregister(T? instance)
+            public static void Unregister(T? instance, SingletonAttribute.Strategy strategy)
             {
+                Strategy = strategy;
+
                 if (instance == null)
                 {
 #if DEBUG
@@ -97,10 +122,136 @@ namespace Medicine.Internal
                     return;
                 }
 
-                if (!ReferenceEquals(Instance, instance))
+                if (!ReferenceEquals(GetLiveInstance(), instance))
                     return;
 
-                Instance = null;
+                RawInstance = null;
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            static T? GetLiveInstance()
+            {
+                var instance = RawInstance;
+#if MEDICINE_DISABLE_SINGLETON_DESTROYED_FILTER
+                return instance;
+#else
+                if (Utility.IsNativeObjectAlive(instance as Object))
+                    return instance;
+
+                if (instance != null)
+                    RawInstance = null;
+
+                return null;
+#endif
+            }
+
+            static void ResolveConflict(T existing, T incoming, SingletonAttribute.Strategy strategy)
+            {
+                string BuildConflictMessage()
+                {
+                    string existingName = (existing as Object)?.name ?? existing.ToString();
+                    string incomingName = (incoming as Object)?.name ?? incoming.ToString();
+
+                    string action = (strategy.Has(Destroy), strategy.Has(KeepExisting)) switch
+                    {
+                        (true, true)   => $"Destroying the new instance ({incomingName}) and keeping the existing one ({existingName}).",
+                        (true, false)  => $"Destroying the previous instance ({existingName}) and keeping the new one ({incomingName}).",
+                        (false, true)  => $"Keeping the existing instance ({existingName}). (Discarding {incomingName})",
+                        (false, false) => $"Replacing the previous instance ({existingName}) with the new one ({incomingName}).",
+                    };
+
+                    return $"Singleton<{typeof(T).Name}> already has an active instance. {action}";
+                }
+
+                if (strategy.Has(ThrowException))
+                    throw new InvalidOperationException($"Singleton<{typeof(T).Name}> already has an active instance.");
+
+                if (strategy.Has(LogError))
+                    Debug.LogError(BuildConflictMessage(), existing as Object ?? incoming as Object);
+                else if (strategy.Has(LogWarning))
+                    Debug.LogWarning(BuildConflictMessage(), existing as Object ?? incoming as Object);
+
+                if (strategy.Has(KeepExisting))
+                {
+                    if (strategy.Has(Destroy))
+                        TryDestroy(incoming as Object);
+                }
+                else
+                {
+                    if (strategy.Has(Destroy))
+                        TryDestroy(existing as Object);
+
+                    RawInstance = incoming;
+                }
+            }
+
+            static void TryAutoInstantiate()
+            {
+                if (autoInstantiateInProgress || Utility.EditMode)
+                    return;
+
+                if (Utility.TypeInfo<T>.IsAbstract || Utility.TypeInfo<T>.IsInterface)
+                    return;
+
+                autoInstantiateInProgress = true;
+
+                try
+                {
+                    T? instance;
+                    var type = typeof(T);
+
+                    if (Utility.TypeInfo<T>.IsScriptableObject)
+                    {
+                        instance = ScriptableObject.CreateInstance(type) as T;
+                        if (instance == null)
+                            return;
+
+                        RawInstance = instance;
+                        return;
+                    }
+
+                    if (Utility.TypeInfo<T>.IsMonoBehaviour)
+                    {
+                        var go = new GameObject(type.Name);
+                        Object.DontDestroyOnLoad(go);
+                        try
+                        {
+                            instance = go.AddComponent(type) as T;
+                            if (instance == null)
+                            {
+                                TryDestroy(go);
+                                return;
+                            }
+
+                            RawInstance = instance;
+                        }
+                        catch (Exception ex)
+                        {
+                            TryDestroy(go);
+                            Debug.LogError($"Failed to auto-instantiate singleton {type.Name}: {ex.Message}");
+                        }
+                    }
+                }
+                finally
+                {
+                    autoInstantiateInProgress = false;
+                }
+            }
+
+            static void TryDestroy(Object? obj)
+            {
+                if (obj == null)
+                    return;
+
+#if UNITY_EDITOR
+                if (UnityEditor.EditorUtility.IsPersistent(obj))
+                    return;
+#endif
+
+                if (Utility.EditMode)
+                    Object.DestroyImmediate(obj);
+                else
+                    Object.Destroy(obj);
             }
 
 #if UNITY_EDITOR

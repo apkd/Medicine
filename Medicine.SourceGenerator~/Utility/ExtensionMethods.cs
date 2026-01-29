@@ -40,6 +40,7 @@ public static partial class ExtensionMethods
 
         public bool Is(string fqn)
             => self?.FQN.Equals(fqn, Ordinal) ?? false;
+
         public bool HasAttribute(string attributeFullyQualifiedName)
             => self?.GetAttributes().Any(x => x.AttributeClass.Is(attributeFullyQualifiedName)) is true;
 

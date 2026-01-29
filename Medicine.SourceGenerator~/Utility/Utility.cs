@@ -105,6 +105,40 @@ public static class Utility
         editor.InsertAfter(usings.Last(), usingDirective);
     }
 
+    /// <summary> Sanitizes an input string for use as a C# identifier. </summary>
+    /// <param name="prependAt">If true, prepend '@' to the identifier to make it a verbatim identifier.</param>
+    public static string Sanitize(this string name, char prepend = '\0')
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return "???";
+
+        Span<char> span = stackalloc char[name.Length + (prepend is '\0' ? 0 : 1)];
+        int i = 0;
+
+        if (prepend is not '\0')
+            span[i++] = prepend;
+
+        // first char
+        {
+            char c = name[0];
+            if (char.IsLetter(c) || c is '_')
+                span[i++] = c;
+            else
+                span[i++] = '_';
+        }
+
+        // remaining chars
+        foreach (var c in name.AsSpan()[1..])
+        {
+            if (char.IsLetterOrDigit(c) || c is '_')
+                span[i++] = c;
+            else
+                span[i++] = '_';
+        }
+
+        return span.ToString();
+    }
+
     /// <summary>
     /// Deconstructs a type declaration and retrieves its namespace and parent type hierarchy.
     /// </summary>

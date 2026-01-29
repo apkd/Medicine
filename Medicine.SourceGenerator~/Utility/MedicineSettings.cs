@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis;
 /// </summary>
 readonly record struct MedicineSettings
 {
+    public readonly SingletonStrategy SingletonStrategy;
     public readonly ActivePreprocessorSymbolNames PreprocessorSymbolNames;
     public readonly bool? MakePublic;
     public readonly bool AlwaysTrackInstanceIndices;
@@ -16,6 +17,7 @@ readonly record struct MedicineSettings
             .GetAttribute(Constants.MedicineSettingsAttributeFQN)
             .GetAttributeConstructorArguments(ct);
 
+        SingletonStrategy = args.Get("singletonStrategy", SingletonStrategy.Replace);
         MakePublic = args.Get("makePublic", true);
         AlwaysTrackInstanceIndices = args.Get("alwaysTrackInstanceIndices", false);
         PreprocessorSymbolNames = input.ParseOptions.GetActivePreprocessorSymbols();

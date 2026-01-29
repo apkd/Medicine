@@ -79,6 +79,7 @@ public readonly struct AttributeConstructorArgumentsDict
                     var p = parameterSymbols.FirstOrDefault(p => p.Name == name);
                     if (p is not null)
                         ordinals.Add(p.Ordinal);
+
                     continue;
                 }
 
@@ -138,8 +139,16 @@ public readonly struct AttributeConstructorArgumentsDict
     public T? Get<T>(string name, T? defaultValue) where T : struct
     {
         if (values.TryGetValue(name, out var value))
-            if (value is T typedValue)
-                return typedValue;
+        {
+            try
+            {
+                return (T)value;
+            }
+            catch
+            {
+                return defaultValue;
+            }
+        }
 
         return defaultValue;
     }
@@ -147,7 +156,6 @@ public readonly struct AttributeConstructorArgumentsDict
     public T Select<T>(Func<AttributeConstructorArgumentsDict, T> selector)
         => selector(this);
 }
-
 
 public static partial class ExtensionMethods
 {

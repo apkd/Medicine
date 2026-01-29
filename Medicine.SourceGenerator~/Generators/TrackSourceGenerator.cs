@@ -1,18 +1,58 @@
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 using static ActivePreprocessorSymbolNames;
 using static Constants;
+using static TrackSourceGenerator.TypeFlags;
 
-// ReSharper disable RedundantStringInterpolation
+[Flags]
+public enum SingletonStrategy : uint
+{
+    Replace = 0,
+    KeepExisting = 1 << 0,
+    ThrowException = 1 << 1,
+    LogWarning = 1 << 2,
+    LogError = 1 << 3,
+    Destroy = 1 << 4,
+    AutoInstantiate = 1 << 5,
+}
+
+static class TypeFlagsExtensions
+{
+    public static bool Has(this TrackSourceGenerator.TypeFlags self, TrackSourceGenerator.TypeFlags flag)
+        => (self & flag) != 0;
+}
 
 [Generator]
 public sealed class TrackSourceGenerator : IIncrementalGenerator
 {
+    static readonly SourceText staticInitClass
+        = SourceText.From(
+            $$"""
+              namespace Medicine.Internal
+              {
+                  {{Alias.Hidden}}
+                  static partial class {{m}}StaticInit            
+                  {
+              #if UNITY_EDITOR
+                      {{Alias.EditorInit}}
+              #endif
+                      {{Alias.RuntimeInit}}
+                      static void {{m}}Init() { }
+                  }
+              }
+              """,
+            Encoding.UTF8
+        );
+
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
         var medicineSettings = context.CompilationProvider
             .Combine(context.ParseOptionsProvider)
             .Select((x, ct) => new MedicineSettings(x, ct));
+
+        context.RegisterPostInitializationOutput((x => x.AddSource("Medicine.Internal.StaticInit.g.cs", staticInitClass)));
 
         foreach (var attributeName in new[] { SingletonAttributeMetadataName, TrackAttributeMetadataName })
         {
@@ -28,6 +68,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     .Combine(medicineSettings)
                     .Select((x, ct) => x.Left with
                         {
+                            EffectiveSingletonStrategy = x.Left.AttributeSettings.SingletonStrategy ?? x.Right.SingletonStrategy,
                             HasIInstanceIndex = x.Left.HasIInstanceIndex || x.Right.AlwaysTrackInstanceIndices,
                             EmitIInstanceIndex = x.Left.EmitIInstanceIndex || x.Right.AlwaysTrackInstanceIndices,
                             Symbols = x.Right.PreprocessorSymbolNames,
@@ -39,6 +80,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
     }
 
     readonly record struct TrackAttributeSettings(
+        SingletonStrategy? SingletonStrategy,
         bool TrackInstanceIDs,
         bool TrackTransforms,
         int InitialCapacity,
@@ -53,21 +95,36 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         public string? SourceGeneratorError { get; init; }
         public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
 
+        public bool HasIInstanceIndex;
+        public bool EmitIInstanceIndex;
+        public bool HasBaseDeclarationsWithAttribute;
         public string? Attribute;
+        public SingletonStrategy EffectiveSingletonStrategy;
         public TrackAttributeSettings AttributeSettings;
         public EquatableArray<string> ContainingTypeDeclaration;
+        public string? ContainingTypeFQN;
         public EquatableArray<string> InterfacesWithAttribute;
         public EquatableArray<string> UnmanagedDataFQNs;
         public EquatableArray<string> TrackingIdFQNs;
         public string? TypeFQN;
         public string? TypeDisplayName;
         public ActivePreprocessorSymbolNames Symbols;
-        public bool HasIInstanceIndex;
-        public bool EmitIInstanceIndex;
-        public bool IsSealed;
-        public bool HasBaseDeclarationsWithAttribute;
-        public bool IsComponent;
-        public bool IsGenericType;
+        public TypeFlags Flags;
+    }
+
+    internal enum TypeFlags : uint
+    {
+        IsAccessible = 1 << 0,
+        ContainingTypeIsAccessible = 1 << 1,
+        IsSealed = 1 << 2,
+        IsGenericType = 1 << 4,
+        IsUnityEngineObject = 1 << 5,
+        IsComponent = 1 << 6,
+        IsMonoBehaviour = 1 << 7,
+        IsScriptableObject = 1 << 8,
+        IsValueType = 1 << 9,
+        IsInterface = 1 << 10,
+        IsAbstract = 1 << 11,
     }
 
     static GeneratorInput TransformSyntaxContext(
@@ -89,6 +146,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         var attributeArguments = attributeData
             .GetAttributeConstructorArguments(ct)
             .Select(x => new TrackAttributeSettings(
+                    SingletonStrategy: x.Get<SingletonStrategy>("strategy", null),
                     TrackInstanceIDs: x.Get("instanceIdArray", false),
                     TrackTransforms: x.Get("transformAccessArray", false) && classSymbol.InheritsFrom("global::UnityEngine.MonoBehaviour"),
                     InitialCapacity: x.Get("transformInitialCapacity", 64),
@@ -98,6 +156,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 )
             );
 
+        bool hasIIndexInstance = classSymbol.HasInterface(IInstanceIndexInterfaceFQN);
+        bool emitIIndexInstance = hasIIndexInstance && !classSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false);
         return new()
         {
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
@@ -106,24 +166,23 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 label: attributeName,
                 includeFilename: false
             ),
+            HasIInstanceIndex = hasIIndexInstance,
+            EmitIInstanceIndex = emitIIndexInstance,
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration, context.SemanticModel, ct),
+            ContainingTypeFQN = classSymbol.ContainingType?.FQN,
             Attribute = attributeName,
             AttributeSettings = attributeArguments,
             UnmanagedDataFQNs = classSymbol.Interfaces
-                .Where(x => x.FQN?.StartsWith(UnmanagedDataInterfaceFQN) is true)
+                .Where(x => x.FQN.StartsWith(UnmanagedDataInterfaceFQN))
                 .Select(x => x.TypeArguments.FirstOrDefault()?.FQN ?? "")
                 .ToArray(),
             TrackingIdFQNs = classSymbol.Interfaces
-                .Where(x => x.FQN?.StartsWith(TrackingIdInterfaceFQN) is true)
+                .Where(x => x.FQN.StartsWith(TrackingIdInterfaceFQN))
                 .Select(x => x.TypeArguments.FirstOrDefault()?.FQN ?? "")
                 .ToArray(),
-            HasIInstanceIndex = classSymbol.HasInterface(IInstanceIndexInterfaceFQN),
-            EmitIInstanceIndex = classSymbol.HasInterface(IInstanceIndexInterfaceFQN) && !classSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false),
             TypeFQN = classSymbol.FQN,
             TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode(),
-            IsSealed = classSymbol.IsSealed,
-            IsGenericType = classSymbol.IsGenericType,
-            IsComponent = classSymbol.InheritsFrom("global::UnityEngine.Component"),
+            HasBaseDeclarationsWithAttribute = classSymbol.GetBaseTypes().Any(x => x.HasAttribute(attributeFQN)),
             InterfacesWithAttribute
                 = classSymbol.Interfaces
                     .Where(x => x.HasAttribute(attributeFQN))
@@ -131,10 +190,18 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     .Select(x => x.FQN)
                     .Where(x => x != null)
                     .ToArray(),
-            HasBaseDeclarationsWithAttribute
-                = classSymbol
-                    .GetBaseTypes()
-                    .Any(x => x.HasAttribute(attributeFQN)),
+            Flags = 0
+                    | (context.SemanticModel.IsAccessible(position: 0, classSymbol) ? IsAccessible : 0)
+                    | (classSymbol.ContainingSymbol is { } containing && context.SemanticModel.IsAccessible(position: 0, containing) ? ContainingTypeIsAccessible : 0)
+                    | (classSymbol.IsGenericType ? IsGenericType : 0)
+                    | (classSymbol.IsSealed ? IsSealed : 0)
+                    | (classSymbol.IsAbstract ? IsAbstract : 0)
+                    | (classSymbol.IsValueType ? IsValueType : 0)
+                    | (classSymbol.InheritsFrom("global::UnityEngine.Object") ? IsUnityEngineObject : 0)
+                    | (classSymbol.InheritsFrom("global::UnityEngine.Component") ? IsComponent : 0)
+                    | (classSymbol.InheritsFrom("global::UnityEngine.MonoBehaviour") ? IsMonoBehaviour : 0)
+                    | (classSymbol.InheritsFrom("global::UnityEngine.ScriptableObject") ? IsScriptableObject : 0)
+                    | (classSymbol.IsAbstract ? IsAbstract : 0)
         };
     }
 
@@ -148,6 +215,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         src.Line.Write(Alias.UsingNonSerialized);
         src.Linebreak();
 
+        src.Line.Write($"// strat: {input.EffectiveSingletonStrategy.ToString()}");
+
         if (input.Attribute is TrackAttributeMetadataName)
         {
             input.HasIInstanceIndex |= input.EmitIInstanceIndex;
@@ -158,7 +227,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             input.HasIInstanceIndex = false;
         }
 
-        string @protected = input.IsSealed ? "" : "protected ";
+        string @protected = input.Flags.Has(IsSealed) ? "" : "protected ";
         string @new = input.HasBaseDeclarationsWithAttribute ? "new " : "";
 
         var unmanagedDataInfo = input.UnmanagedDataFQNs.AsArray()
@@ -173,7 +242,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             {
                 if (input.Attribute is TrackAttributeMetadataName)
                 {
-                    string active = input.IsComponent ? "(enabled) instances of this component" : "instances of this class";
+                    string active = input.Flags.Has(IsComponent) ? "(enabled) instances of this component" : "instances of this class";
                     src.Line.Write($"/// <remarks>");
                     src.Line.Write($"/// Active {active} are tracked, and contain additional generated static properties:");
                     src.Line.Write($"/// <list type=\"bullet\">");
@@ -212,11 +281,10 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     src.Write($", {IInstanceIndexInterfaceFQN}");
             }
 
-            src.Line.Write('{');
-            src.IncreaseIndent();
+            src.OpenBrace();
         }
 
-        void EmitRegistrationMethod(string methodName, params string?[] methodCalls)
+        void EmitRegistrationMethod(string methodName, string? prependCall = null, params string?[] methodCalls)
         {
             if (!input.AttributeSettings.Manual)
             {
@@ -247,6 +315,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             using (src.Braces)
             {
+                if (prependCall is { Length: > 0 })
+                    src.Line.Write(prependCall);
+
                 if (input.HasBaseDeclarationsWithAttribute)
                     src.Line.Write($"base.{methodName}();");
 
@@ -339,12 +410,12 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     src.Line.Write($"return {m}Storage.TransformAccess<{input.TypeFQN}>.Transforms;");
                     src.Linebreak();
 
-                    if (!input.IsGenericType)
+                    if (!input.Flags.Has(IsGenericType))
                     {
                         if (input.Symbols.Has(UNITY_EDITOR))
-                            src.Line.Write("[global::UnityEditor.InitializeOnLoadMethod]");
+                            src.Line.Write(Alias.EditorInit);
 
-                        src.Line.Write("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
+                        src.Line.Write(Alias.RuntimeInit);
                         src.Line.Write($"static void {m}Init()");
 
                         using (src.Indent)
@@ -357,7 +428,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Linebreak();
         }
 
-        if (input is { IsGenericType: true, AttributeSettings.TrackTransforms: true })
+        if (input.Flags.Has(IsGenericType) && input.AttributeSettings is { TrackTransforms: true })
         {
             src.Line.Write($"public static void InitializeTransformAccessArray()");
 
@@ -523,22 +594,26 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"get => {m}Storage.Singleton<{input.TypeFQN}>.Instance;");
             }
 
+            const string StratFQN = $"{SingletonAttributeFQN}.Strategy";
+
             src.Linebreak();
             EmitRegistrationMethod(
                 methodName: "OnEnableINTERNAL",
+                prependCall: $"const {StratFQN} {m}singletonStrategy = ({StratFQN}){(ulong)input.EffectiveSingletonStrategy};",
                 methodCalls:
                 [
-                    $"{m}Storage.Singleton<{input.TypeFQN}>.Register(this)",
-                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Singleton<{x}>.Register(this)"),
+                    $"{m}Storage.Singleton<{input.TypeFQN}>.Register(this, {m}singletonStrategy)",
+                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Singleton<{x}>.Register(this, {m}singletonStrategy)"),
                 ]
             );
 
             EmitRegistrationMethod(
                 methodName: "OnDisableINTERNAL",
+                prependCall: $"const {StratFQN} {m}singletonStrategy = ({StratFQN}){(ulong)input.EffectiveSingletonStrategy};",
                 methodCalls:
                 [
-                    $"{m}Storage.Singleton<{input.TypeFQN}>.Unregister(this)",
-                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Singleton<{x}>.Register(this)"),
+                    $"{m}Storage.Singleton<{input.TypeFQN}>.Unregister(this, {m}singletonStrategy)",
+                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Singleton<{x}>.Register(this, {m}singletonStrategy)"),
                 ]
             );
 
@@ -657,11 +732,107 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         src.TrimEndWhitespace();
         foreach (var _ in declarations)
-        {
-            src.DecreaseIndent();
-            src.Line.Write('}');
-        }
+            src.CloseBrace();
 
         src.Linebreak();
+
+        if (input.Flags.Has(IsGenericType))
+            return;
+
+        void AssignTypeFlags()
+        {
+            using (src.Indent)
+            {
+                src.Line.Write($" = 0");
+                if (input.Flags.Has(IsValueType))
+                    src.Line.Write($" | {m}Utility.TypeFlags.IsValueType");
+                else
+                    src.Line.Write($" | {m}Utility.TypeFlags.IsReferenceType");
+
+                if (input.Flags.Has(IsInterface))
+                    src.Line.Write($" | {m}Utility.TypeFlags.IsInterface");
+
+                if (input.Flags.Has(IsAbstract))
+                    src.Line.Write($" | {m}Utility.TypeFlags.IsAbstract");
+
+                if (input.Flags.Has(IsUnityEngineObject))
+                    src.Line.Write($" | {m}Utility.TypeFlags.IsUnityEngineObject");
+
+                if (input.Flags.Has(IsComponent))
+                    src.Line.Write($" | {m}Utility.TypeFlags.IsComponent");
+
+                if (input.Flags.Has(IsMonoBehaviour))
+                    src.Line.Write($" | {m}Utility.TypeFlags.IsMonoBehaviour");
+
+                if (input.Flags.Has(IsScriptableObject))
+                    src.Line.Write($" | {m}Utility.TypeFlags.IsScriptableObject");
+
+                src.Write(";");
+            }
+        }
+
+        if (input.Flags.Has(IsAccessible))
+        {
+            src.Line.Write($"namespace Medicine.Internal");
+            using (src.Braces)
+            {
+                src.Line.Write($"static partial class {m}StaticInit");
+                using (src.Braces)
+                {
+                    src.Line.Write($"static {m}Utility.TypeFlags InitBakedTypeInfo_{input.TypeFQN!.Sanitize()}");
+                    using (src.Indent)
+                    {
+                        src.Line.Write($"= Medicine.Internal.Utility.BakedTypeInfo<{input.TypeFQN}>.Flags");
+                        AssignTypeFlags();
+                    }
+                }
+            }
+
+            src.Linebreak();
+        }
+        else if (input.Flags.Has(ContainingTypeIsAccessible))
+        {
+            string initMethodName = $"InitBakedTypeInfo_{input.TypeFQN!.Sanitize()}";
+
+            // fallback for private classes that are nested:
+            // we can't reference the tracked type's name from the assembly scope, so we need to emit this
+            // intermediate method in the containing type where the tracked type is accessible
+            {
+                foreach (var x in declarations[..^1])
+                    src.Line.Write(x).OpenBrace();
+
+
+                src.Line.Write(Alias.Hidden);
+                src.Line.Write($"internal static {m}Utility.TypeFlags {initMethodName}()");
+                using (src.Indent)
+                {
+                    src.Line.Write($"=> Medicine.Internal.Utility.BakedTypeInfo<{input.TypeFQN}>.Flags");
+                    AssignTypeFlags();
+                }
+
+                foreach (var _ in declarations[..^1])
+                    src.CloseBrace();
+            }
+
+            // assign the flags by calling the forward method
+            {
+                src.Linebreak();
+
+                string containingTypeFqn = input.ContainingTypeFQN ?? input.TypeFQN!;
+                src.Line.Write($"namespace Medicine.Internal");
+                using (src.Braces)
+                {
+                    src.Line.Write($"static partial class {m}StaticInit");
+                    using (src.Braces)
+                    {
+                        src.Line.Write($"static {m}Utility.TypeFlags {initMethodName}");
+                        using (src.Indent)
+                            src.Line.Write($"= {containingTypeFqn}.{initMethodName}();");
+                    }
+                }
+            }
+
+            src.Linebreak();
+        }
     }
 }

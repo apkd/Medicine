@@ -16,7 +16,7 @@ using Component = UnityEngine.Component;
 namespace Medicine
 {
     [EditorBrowsable(Never)]
-    public static class MedicineExtensions
+    public static partial class MedicineExtensions
     {
         /// <summary>
         /// Suppresses the null check and error log when initializing an object reference
@@ -138,6 +138,14 @@ namespace Medicine
             var pooledList = PooledList.Get<GameObject>();
             scene.GetRootGameObjects(pooledList.List);
             return pooledList;
+        }
+
+        [MustDisposeResource]
+        public static PooledListEnumerator<GameObject> EnumerateRootGameObjects(this Scene scene)
+        {
+            var pooledList = PooledList.Get<GameObject>();
+            scene.GetRootGameObjects(pooledList.List);
+            return new(pooledList);
         }
 
 #if MODULE_ZLINQ
