@@ -25,16 +25,6 @@ public static class TestUtility
                     Object.DestroyImmediate(gameObject);
     }
 
-    static void CopyTestResults(string filename)
-    {
-#if UNITY_6000_0_OR_NEWER
-        File.Copy(
-            $"{Application.persistentDataPath}/TestResults.xml",
-            $"test-results/{filename}"
-        );
-#endif
-    }
-
     public static bool IsNull(this object obj)
         => obj.IsDestroyed();
 

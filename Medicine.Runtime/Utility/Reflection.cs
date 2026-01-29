@@ -2,6 +2,7 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using JetBrains.Annotations;
 using UnityEngine;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 using Object = UnityEngine.Object;
@@ -10,20 +11,38 @@ namespace Medicine.Internal
 {
     public static partial class Utility
     {
-        [MethodImpl(AggressiveInlining)]
-        static void Set(this ref TypeFlags flags, TypeFlags flag, bool value)
-            => flags = value ? flags | flag : flags & ~flag;
+        /// <summary>
+        /// Flags representing cached information about a type.
+        /// </summary>
+        [Flags]
+        public enum TypeFlags : ushort
+        {
+            IsValueType = 1 << 0,
+            IsReferenceType = 1 << 1,
+            IsInterface = 1 << 2,
+            IsAbstract = 1 << 3,
+            IsUnityEngineObject = 1 << 4,
+            IsComponent = 1 << 5,
+            IsMonoBehaviour = 1 << 6,
+            IsScriptableObject = 1 << 7,
+        }
 
-        [MethodImpl(AggressiveInlining)]
-        static bool Has(this TypeFlags flags, TypeFlags flag)
-            => (flags & flag) != 0;
-
+        /// <summary>
+        /// Provides precomputed type information for a specific type.
+        /// Used to optimize operations that rely on type metadata, avoiding the
+        /// overhead of reflection by pre-caching common Unity type info,
+        /// as well as precomputing type metadata via Source Generators where possible.
+        /// </summary>
         [SuppressMessage("ReSharper", "UnusedTypeParameter")]
         public static class BakedTypeInfo<T>
         {
             public static TypeFlags Flags;
         }
 
+        /// <summary>
+        /// Provides fast access to type metadata via precomputed type information,
+        /// with fallback to cached reflection.
+        /// </summary>
         public static class TypeInfo<T>
         {
             public static readonly TypeFlags Flags = InitializeTypeFlags();
@@ -44,6 +63,9 @@ namespace Medicine.Internal
                 static TypeFlags GetFromReflection()
                 {
                     var type = typeof(T);
+
+                    // trying to use an optimal order here to minimize
+                    // the number of reflection calls
 
                     if (type.IsValueType)
                         return TypeFlags.IsValueType;
@@ -73,7 +95,6 @@ namespace Medicine.Internal
                     return flags;
                 }
 
-
 #if MEDICINE_DEBUG
                 Debug.Log($"Initializing from reflection: {typeof(T).Name}");
 #endif
@@ -81,14 +102,29 @@ namespace Medicine.Internal
                 return GetFromReflection();
             }
 
+            /// <summary> Returns whether the type is a value type. </summary>
             public static bool IsValueType => (Flags & TypeFlags.IsValueType) != 0;
+
+            /// <summary> Returns whether the type is a reference type. </summary>
             public static bool IsReferenceType => (Flags & TypeFlags.IsReferenceType) != 0;
-            public static bool IsComponent => (Flags & TypeFlags.IsComponent) != 0;
-            public static bool IsUnityEngineObject => (Flags & TypeFlags.IsUnityEngineObject) != 0;
-            public static bool IsScriptableObject => (Flags & TypeFlags.IsScriptableObject) != 0;
-            public static bool IsMonoBehaviour => (Flags & TypeFlags.IsMonoBehaviour) != 0;
+
+            /// <summary> Returns whether the type is an interface. </summary>
             public static bool IsInterface => (Flags & TypeFlags.IsInterface) != 0;
+
+            /// <summary> Returns whether the type is an abstract class. </summary>
             public static bool IsAbstract => (Flags & TypeFlags.IsAbstract) != 0;
+
+            /// <summary> Returns whether the type inherits from <see cref="UnityEngine.Object"/>. </summary>
+            public static bool IsUnityEngineObject => (Flags & TypeFlags.IsUnityEngineObject) != 0;
+
+            /// <summary> Returns whether the type inherits from <see cref="UnityEngine.Component"/> </summary>
+            public static bool IsComponent => (Flags & TypeFlags.IsComponent) != 0;
+
+            /// <summary> Returns whether the type inherits from <see cref="UnityEngine.Component"/> </summary>
+            public static bool IsScriptableObject => (Flags & TypeFlags.IsScriptableObject) != 0;
+
+            /// <summary> Returns whether the type inherits from <see cref="UnityEngine.MonoBehaviour"/> </summary>
+            public static bool IsMonoBehaviour => (Flags & TypeFlags.IsMonoBehaviour) != 0;
         }
 
 #if UNITY_EDITOR
@@ -97,27 +133,27 @@ namespace Medicine.Internal
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterAssembliesLoaded)]
         static void InitCommonUnityTypes()
         {
-            [MethodImpl(AggressiveInlining)]
+            [MethodImpl(AggressiveInlining), UsedImplicitly]
             static void InitVT<T>() where T : struct
                 => BakedTypeInfo<T>.Flags = TypeFlags.IsValueType;
 
-            [MethodImpl(AggressiveInlining)]
+            [MethodImpl(AggressiveInlining), UsedImplicitly]
             static void InitRT<T>(bool isAbstract = false) where T : class
                 => BakedTypeInfo<T>.Flags = TypeFlags.IsReferenceType | (isAbstract ? TypeFlags.IsAbstract : 0);
 
-            [MethodImpl(AggressiveInlining)]
+            [MethodImpl(AggressiveInlining), UsedImplicitly]
             static void InitUnityObject<T>(bool isAbstract = false) where T : Object
                 => BakedTypeInfo<T>.Flags = TypeFlags.IsReferenceType | TypeFlags.IsUnityEngineObject | (isAbstract ? TypeFlags.IsAbstract : 0);
 
-            [MethodImpl(AggressiveInlining)]
+            [MethodImpl(AggressiveInlining), UsedImplicitly]
             static void InitComponent<T>(bool isAbstract = false) where T : Component
                 => BakedTypeInfo<T>.Flags = TypeFlags.IsReferenceType | TypeFlags.IsUnityEngineObject | TypeFlags.IsComponent | (isAbstract ? TypeFlags.IsAbstract : 0);
 
-            [MethodImpl(AggressiveInlining)]
+            [MethodImpl(AggressiveInlining), UsedImplicitly]
             static void InitMonoBehaviour<T>(bool isAbstract = false) where T : Component
                 => BakedTypeInfo<T>.Flags = TypeFlags.IsReferenceType | TypeFlags.IsUnityEngineObject | TypeFlags.IsComponent | TypeFlags.IsMonoBehaviour | (isAbstract ? TypeFlags.IsAbstract : 0);
 
-            [MethodImpl(AggressiveInlining)]
+            [MethodImpl(AggressiveInlining), UsedImplicitly]
             static void InitScriptableObject<T>(bool isAbstract = false) where T : ScriptableObject
                 => BakedTypeInfo<T>.Flags = TypeFlags.IsReferenceType | TypeFlags.IsUnityEngineObject | TypeFlags.IsScriptableObject | (isAbstract ? TypeFlags.IsAbstract : 0);
 
@@ -398,19 +434,6 @@ namespace Medicine.Internal
 #if UNITY_2021_3_OR_NEWER
             InitScriptableObject<UnityEngine.Rendering.RenderPipelineGlobalSettings>(isAbstract: true);
 #endif
-        }
-
-        [Flags]
-        public enum TypeFlags : ushort
-        {
-            IsValueType = 1 << 0,
-            IsReferenceType = 1 << 1,
-            IsInterface = 1 << 2,
-            IsAbstract = 1 << 3,
-            IsUnityEngineObject = 1 << 4,
-            IsComponent = 1 << 5,
-            IsMonoBehaviour = 1 << 6,
-            IsScriptableObject = 1 << 7,
         }
     }
 }
