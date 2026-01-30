@@ -30,7 +30,6 @@ public partial class InjectAttributePlayModeTests
         Assert.That(obj.GetComponent<MBInjectBasic>().Transform, Is.Not.Null);
     }
 
-
     //////////////////////////////////////////////////////////////////////////////
 
     sealed partial class MBInjectExpressionBodied : MonoBehaviour
@@ -222,7 +221,6 @@ public partial class InjectAttributePlayModeTests
         Assert.That(StaticContainer.TrackedInstances, Has.Count.EqualTo(1));
     }
 
-
     //////////////////////////////////////////////////////////////////////////////
 
     [Singleton]
@@ -296,5 +294,67 @@ public partial class InjectAttributePlayModeTests
             Assert.That(mb.Variant3, Has.Count.EqualTo(i));
             Assert.That(mb.Variant4, Has.Count.EqualTo(i));
         }
+    }
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    sealed partial class MBReferToVar : MonoBehaviour
+    {
+        [Inject]
+        void Awake()
+        {
+            bool variable = true;
+            colliders = GetComponentsInChildren<Collider>(variable);
+        }
+    }
+
+    sealed partial class MBReferToVarDependent : MonoBehaviour
+    {
+        [Inject]
+        void Awake()
+        {
+            int childCount = transform.childCount;
+            bool includeInactive = childCount >= 0;
+            colliders = GetComponentsInChildren<Collider>(includeInactive);
+        }
+    }
+
+    sealed partial class MBReferToVarMultiDeclarator : MonoBehaviour
+    {
+        [Inject]
+        void Awake()
+        {
+            int min = 0, max = 1;
+            bool includeInactive = min < max;
+            colliders = GetComponentsInChildren<Collider>(includeInactive);
+        }
+    }
+
+    sealed partial class MBReferToVarChained : MonoBehaviour
+    {
+        [Inject]
+        void Awake()
+        {
+            var includeInactive = transform.childCount > 0;
+            var includeInactiveOrSelf = includeInactive || gameObject.activeSelf;
+            colliders = GetComponentsInChildren<Collider>(includeInactiveOrSelf);
+        }
+    }
+
+    [Test]
+    public void Inject_ReferToVar()
+    {
+        T Spawn<T>() where T : Component
+        {
+            var go = new GameObject(typeof(T).Name);
+            go.AddComponent<BoxCollider>();
+            go.AddComponent<SphereCollider>();
+            return go.AddComponent<T>();
+        }
+
+        Assert.That(Spawn<MBReferToVar>().colliders, Has.Length.EqualTo(2));
+        Assert.That(Spawn<MBReferToVarDependent>().colliders, Has.Length.EqualTo(2));
+        Assert.That(Spawn<MBReferToVarMultiDeclarator>().colliders, Has.Length.EqualTo(2));
+        Assert.That(Spawn<MBReferToVarChained>().colliders, Has.Length.EqualTo(2));
     }
 }

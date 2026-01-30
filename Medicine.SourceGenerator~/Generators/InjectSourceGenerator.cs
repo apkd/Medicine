@@ -76,6 +76,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
     {
         public string PropertyName;
         public string InitExpression;
+        public string[] EditModeLocalDeclarations;
         public string? TypeFQN;
         public string TypeDisplayName;
         public string? CleanupExpression;
@@ -251,6 +252,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     var typeSymbolForDisplayName = typeSymbol;
                     var flags = default(ExpressionFlags);
                     var expression = assignment.Right.ToString().Replace("\r", "").Replace("\n", "").AsSpan().Trim();
+                    var editModeLocalDeclarations = GetEditModeLocalDeclarations(assignment);
 
                     if (assignment.Right is ImplicitObjectCreationExpressionSyntax { ArgumentList.Arguments: [{ Expression: { } expr }, ..] })
                     {
@@ -560,6 +562,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     {
                         PropertyName = assignment.Left.ToString().Trim(),
                         InitExpression = expression.MakeString(),
+                        EditModeLocalDeclarations = editModeLocalDeclarations,
                         CleanupExpression = cleanupExpression,
                         TypeFQN = typeFQN,
                         TypeDisplayName = typeDisplayName,
@@ -567,6 +570,81 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         Location = new LocationInfo(assignment.GetLocation()),
                         Flags = flags,
                     };
+                }
+
+                string[] GetEditModeLocalDeclarations(AssignmentExpressionSyntax assignment)
+                {
+                    var declarations = new List<(int SpanStart, string Statement)>();
+                    var seen = new HashSet<int>();
+                    var visitedLocals = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+
+                    void AddDeclaration(int spanStart, string statement)
+                    {
+                        if (seen.Add(spanStart))
+                            declarations.Add((spanStart, statement));
+                    }
+
+                    void AddDependencies(Expression expr)
+                    {
+                        foreach (var identifier in expr.DescendantNodesAndSelf().OfType<Identifier>())
+                        {
+                            if (context.SemanticModel.GetSymbolInfo(identifier, ct).Symbol is not ILocalSymbol localSymbol)
+                                continue;
+
+                            AddLocal(localSymbol);
+                        }
+                    }
+
+                    void AddLocal(ILocalSymbol localSymbol)
+                    {
+                        if (!visitedLocals.Add(localSymbol))
+                            return;
+
+                        foreach (var syntaxRef in localSymbol.DeclaringSyntaxReferences)
+                        {
+                            var declSyntax = syntaxRef.GetSyntax(ct);
+
+                            if (!methodDecl.Span.Contains(declSyntax.SpanStart))
+                                continue;
+
+                            if (declSyntax is VariableDeclaratorSyntax varDeclarator)
+                            {
+                                if (varDeclarator.FirstAncestorOrSelf<LocalDeclarationStatementSyntax>() is { } localDeclStmt)
+                                    AddDeclaration(localDeclStmt.SpanStart, localDeclStmt.ToString());
+                                else if (varDeclarator.Parent is VariableDeclarationSyntax varDecl)
+                                    AddDeclaration(varDecl.SpanStart, $"{varDecl};");
+
+                                if (varDeclarator.Initializer?.Value is { } initExpr)
+                                    AddDependencies(initExpr);
+
+                                continue;
+                            }
+
+                            if (declSyntax is LocalDeclarationStatementSyntax localDecl)
+                            {
+                                AddDeclaration(localDecl.SpanStart, localDecl.ToString());
+
+                                var declarator = localDecl.Declaration.Variables
+                                    .FirstOrDefault(x => x.Identifier.ValueText == localSymbol.Name);
+
+                                if (declarator?.Initializer?.Value is { } initExpr)
+                                    AddDependencies(initExpr);
+                            }
+                        }
+                    }
+
+                    AddDependencies(assignment.Right);
+
+                    if (declarations.Count == 0)
+                        return [];
+
+                    declarations.Sort(static (a, b) => a.SpanStart.CompareTo(b.SpanStart));
+
+                    var result = new string[declarations.Count];
+                    for (int i = 0; i < declarations.Count; i++)
+                        result[i] = declarations[i].Statement.Replace("\r\n", "").Replace("\r", "").Replace("\n", " ").Trim();
+
+                    return result;
                 }
             }
         );
@@ -812,7 +890,22 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         {
                             if (input.Symbols.Has(UNITY_EDITOR) && !x.Flags.Has(IsDisposable))
                             {
-                                src.Line.Write($"{Alias.NoInline} void {m}Expr() => {storagePropName}._{m}{x.PropertyName} = {x.InitExpression};");
+                                if (x.EditModeLocalDeclarations is { Length: > 0 })
+                                {
+                                    src.Line.Write($"{Alias.NoInline} void {m}Expr()");
+                                    using (src.Braces)
+                                    {
+                                        foreach (var declaration in x.EditModeLocalDeclarations)
+                                            src.Line.Write(declaration);
+
+                                        src.Line.Write($"{storagePropName}._{m}{x.PropertyName} = {x.InitExpression};");
+                                    }
+                                }
+                                else
+                                {
+                                    src.Line.Write($"{Alias.NoInline} void {m}Expr() => {storagePropName}._{m}{x.PropertyName} = {x.InitExpression};");
+                                }
+
                                 src.Line.Write($"if ({m}Utility.EditMode)");
                                 using (src.Indent)
                                     src.Line.Write($"{m}Expr();"); // in edit mode, always call initializer
@@ -832,7 +925,22 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         {
                             if (input.Symbols.Has(UNITY_EDITOR) && !x.Flags.Has(IsDisposable))
                             {
-                                src.Line.Write($"{Alias.NoInline} {x.TypeFQN}{opt} {m}Expr() => {x.InitExpression};");
+                                if (x.EditModeLocalDeclarations is { Length: > 0 })
+                                {
+                                    src.Line.Write($"{Alias.NoInline} {x.TypeFQN}{opt} {m}Expr()");
+                                    using (src.Braces)
+                                    {
+                                        foreach (var declaration in x.EditModeLocalDeclarations)
+                                            src.Line.Write(declaration);
+
+                                        src.Line.Write($"return {x.InitExpression};");
+                                    }
+                                }
+                                else
+                                {
+                                    src.Line.Write($"{Alias.NoInline} {x.TypeFQN}{opt} {m}Expr() => {x.InitExpression};");
+                                }
+
                                 src.Line.Write($"if ({m}Utility.EditMode)");
                                 using (src.Indent)
                                     src.Line.Write($"return {m}Expr();"); // in edit mode, always call initializer
