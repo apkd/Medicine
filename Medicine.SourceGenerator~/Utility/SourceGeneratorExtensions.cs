@@ -149,12 +149,14 @@ public static class SourceGeneratorExtensions
     static TResult ErrorResult<TResult>(Exception exception, object? locationSource) where TResult : IGeneratorTransformOutput, new()
         => locationSource switch
         {
-            IGeneratorTransformOutput { SourceGeneratorErrorLocation.Value.IsInSource: true } output
-                => new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = output.SourceGeneratorErrorLocation },
-            Location location
+            IGeneratorTransformOutput { SourceGeneratorErrorLocation: { } location } output when location.IsInSource
                 => new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = location },
+            Location location
+                => new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = new LocationInfo(location) },
+            LocationInfo locationInfo when locationInfo.IsInSource
+                => new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = locationInfo },
             _
-                => new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = Location.None },
+                => new() { SourceGeneratorError = $"{exception}" },
         };
 
     static void GenerateSource<TInput>(
@@ -194,7 +196,8 @@ public static class SourceGeneratorExtensions
         // handle errors/exceptions
         try
         {
-            context.ReportDiagnostic(Diagnostic.Create(descriptor: Utility.ExceptionDiagnosticDescriptor, location: input.SourceGeneratorErrorLocation.Value, messageArgs: error));
+            var errorLocation = input.SourceGeneratorErrorLocation?.ToLocation();
+            context.ReportDiagnostic(Diagnostic.Create(descriptor: Utility.ExceptionDiagnosticDescriptor, location: errorLocation, messageArgs: error));
 
             string filename = input.SourceGeneratorOutputFilename ?? Utility.GetErrorOutputFilename(input.SourceGeneratorErrorLocation, error);
             AddOutputSourceTextToCompilation(filename, context, writer);

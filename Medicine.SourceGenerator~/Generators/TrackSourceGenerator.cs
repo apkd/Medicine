@@ -46,6 +46,16 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             Encoding.UTF8
         );
 
+    static readonly DiagnosticDescriptor MED029 = new(
+        id: nameof(MED029),
+        title: "Mixed manual/automatic registration in inheritance",
+        messageFormat:
+        "Type '{0}' mixes manual and automatic [{1}] registration in its inheritance chain. Use the same 'manual' setting on all [{1}] types.",
+        category: "Medicine",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
         var medicineSettings = context.CompilationProvider
@@ -93,11 +103,12 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
 
         public bool HasIInstanceIndex;
         public bool EmitIInstanceIndex;
         public bool HasBaseDeclarationsWithAttribute;
+        public bool ManualInheritanceMismatch;
         public string? Attribute;
         public SingletonStrategy EffectiveSingletonStrategy;
         public TrackAttributeSettings AttributeSettings;
@@ -156,6 +167,30 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 )
             );
 
+        bool hasBaseDeclarationsWithAttribute = false;
+        bool manualInheritanceMismatch = false;
+        foreach (var baseType in classSymbol.GetBaseTypes())
+        {
+            var baseAttribute = baseType.GetAttribute(attributeFQN);
+            if (baseAttribute is null)
+                continue;
+
+            if (baseAttribute.ConstructorArguments.Length is 0)
+                if (attributeData.ConstructorArguments.Length is 0)
+                    continue;
+
+            hasBaseDeclarationsWithAttribute = true;
+            manualInheritanceMismatch = baseAttribute
+                .GetAttributeConstructorArguments(ct)
+                .Select(x => x.Get("manual", false)) != attributeArguments.Manual;
+
+            if (manualInheritanceMismatch)
+                break;
+        }
+
+        var sourceLocation = attributeData.ApplicationSyntaxReference.GetLocation()
+            ?? typeDeclaration.Identifier.GetLocation();
+
         bool hasIIndexInstance = classSymbol.HasInterface(IInstanceIndexInterfaceFQN);
         bool emitIIndexInstance = hasIIndexInstance && !classSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false);
         return new()
@@ -168,6 +203,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             ),
             HasIInstanceIndex = hasIIndexInstance,
             EmitIInstanceIndex = emitIIndexInstance,
+            SourceGeneratorErrorLocation = new LocationInfo(sourceLocation),
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration, context.SemanticModel, ct),
             ContainingTypeFQN = classSymbol.ContainingType?.FQN,
             Attribute = attributeName,
@@ -182,7 +218,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 .ToArray(),
             TypeFQN = classSymbol.FQN,
             TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode(),
-            HasBaseDeclarationsWithAttribute = classSymbol.GetBaseTypes().Any(x => x.HasAttribute(attributeFQN)),
+            HasBaseDeclarationsWithAttribute = hasBaseDeclarationsWithAttribute,
+            ManualInheritanceMismatch = manualInheritanceMismatch,
             InterfacesWithAttribute
                 = classSymbol.Interfaces
                     .Where(x => x.HasAttribute(attributeFQN))
@@ -215,8 +252,6 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         src.Line.Write(Alias.UsingNonSerialized);
         src.Linebreak();
 
-        src.Line.Write($"// strat: {input.EffectiveSingletonStrategy.ToString()}");
-
         if (input.Attribute is TrackAttributeMetadataName)
         {
             input.HasIInstanceIndex |= input.EmitIInstanceIndex;
@@ -227,8 +262,18 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             input.HasIInstanceIndex = false;
         }
 
+        if (input.ManualInheritanceMismatch)
+        {
+            string attributeShortName = input.Attribute is SingletonAttributeMetadataName ? SingletonAttributeShort : "Track";
+            string typeName = input.TypeFQN ?? "type";
+            var location = input.SourceGeneratorErrorLocation?.ToLocation() ?? Location.None;
+            context.ReportDiagnostic(Diagnostic.Create(MED029, location, typeName, attributeShortName));
+        }
+
         string @protected = input.Flags.Has(IsSealed) ? "" : "protected ";
         string @new = input.HasBaseDeclarationsWithAttribute ? "new " : "";
+        bool hasBaseRegistrationMethod = input.HasBaseDeclarationsWithAttribute && !input.ManualInheritanceMismatch;
+        string registrationNew = hasBaseRegistrationMethod ? "new " : "";
 
         var unmanagedDataInfo = input.UnmanagedDataFQNs.AsArray()
             .Select(x => (dataType: x, dataTypeShort: x.Split('.', ':').Last().HtmlEncode()))
@@ -311,14 +356,14 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 }
             }
 
-            src.Line.Write($"{@protected}{@new}void {methodName}()");
+            src.Line.Write($"{@protected}{registrationNew}void {methodName}()");
 
             using (src.Braces)
             {
                 if (prependCall is { Length: > 0 })
                     src.Line.Write(prependCall);
 
-                if (input.HasBaseDeclarationsWithAttribute)
+                if (hasBaseRegistrationMethod)
                     src.Line.Write($"base.{methodName}();");
 
                 foreach (var methodCall in methodCalls)
@@ -736,6 +781,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         src.Linebreak();
 
+        bool isAutoInstantiate = input.Attribute is SingletonAttributeMetadataName
+                                 && (input.EffectiveSingletonStrategy & SingletonStrategy.AutoInstantiate) != 0;
+
         if (input.Flags.Has(IsGenericType))
             return;
 
@@ -766,6 +814,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
                 if (input.Flags.Has(IsScriptableObject))
                     src.Line.Write($" | {m}Utility.TypeFlags.IsScriptableObject");
+
+                if (isAutoInstantiate)
+                    src.Line.Write($" | {m}Utility.TypeFlags.IsAutoInstantiate");
 
                 src.Write(";");
             }

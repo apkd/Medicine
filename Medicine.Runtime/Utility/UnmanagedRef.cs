@@ -93,6 +93,10 @@ namespace Medicine
         public static nint GetNativeObjectPtr<TClass>(this UnmanagedRef<TClass> classRef) where TClass : UnityEngine.Object
             => *(nint*)(classRef.Ptr + sizeof(nint) * 2);
 
+        [MethodImpl(AggressiveInlining)]
+        internal static void SetNativeObjectPtr<TClass>(this UnmanagedRef<TClass> classRef, nint value) where TClass : UnityEngine.Object
+            => *(nint*)(classRef.Ptr + sizeof(nint) * 2) = value;
+
         /// <summary>
         /// Equivalent of the <see cref="UnityEngine.Object.GetInstanceID"/> method.
         /// Assumes that the referenced object is not null or destroyed.

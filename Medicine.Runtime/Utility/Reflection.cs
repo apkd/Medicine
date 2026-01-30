@@ -25,6 +25,7 @@ namespace Medicine.Internal
             IsComponent = 1 << 5,
             IsMonoBehaviour = 1 << 6,
             IsScriptableObject = 1 << 7,
+            IsAutoInstantiate = 1 << 8,
         }
 
         /// <summary>
@@ -54,7 +55,8 @@ namespace Medicine.Internal
 #if MEDICINE_DEBUG
                     var a = BakedTypeInfo<T>.Flags;
                     var b = GetFromReflection();
-                    if (a != b)
+                    const TypeFlags mask = ~TypeFlags.IsAutoInstantiate;
+                    if ((a & mask) != (b & mask))
                         Debug.LogError($"Cached type info mismatch: {typeof(T).Name}\nCached: {a}\nReflection: {b}");
 #endif
                     return BakedTypeInfo<T>.Flags;
@@ -125,6 +127,9 @@ namespace Medicine.Internal
 
             /// <summary> Returns whether the type inherits from <see cref="UnityEngine.MonoBehaviour"/> </summary>
             public static bool IsMonoBehaviour => (Flags & TypeFlags.IsMonoBehaviour) != 0;
+
+            /// <summary> Returns whether the type is configured to auto-instantiate as a singleton. </summary>
+            public static bool IsAutoInstantiate => (Flags & TypeFlags.IsAutoInstantiate) != 0;
         }
 
 #if UNITY_EDITOR

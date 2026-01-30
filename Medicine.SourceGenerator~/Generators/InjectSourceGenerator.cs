@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 using static System.StringComparison;
 using static ActivePreprocessorSymbolNames;
 using static Constants;
@@ -54,7 +55,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
 
         public ActivePreprocessorSymbolNames Symbols;
         public string? InjectMethodName;
@@ -79,7 +80,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         public string TypeDisplayName;
         public string? CleanupExpression;
         public string? TypeXmlDocId;
-        public EquatableIgnore<Location> Location;
+        public LocationInfo Location;
         public ExpressionFlags Flags;
     }
 
@@ -563,7 +564,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         TypeFQN = typeFQN,
                         TypeDisplayName = typeDisplayName,
                         TypeXmlDocId = typeSymbol?.GetDocumentationCommentId(),
-                        Location = assignment.GetLocation(),
+                        Location = new LocationInfo(assignment.GetLocation()),
                         Flags = flags,
                     };
                 }
@@ -610,7 +611,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             context.ReportDiagnostic(
                 Diagnostic.Create(
                     descriptor: MED006,
-                    location: x.Location,
+                    location: x.Location.ToLocation(),
                     group.Key
                 )
             );
@@ -673,7 +674,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
             void AppendInjectionDeclaredIn()
             {
-                int line = x.Location.Value.GetLineSpan().StartLinePosition.Line + 1;
+                int line = x.Location.FileLineSpan.StartLinePosition.Line + 1;
                 src.Line.Write($"[{m}DeclaredAt(method: nameof({input.InjectMethodName}), line: {line})] ");
             }
 
@@ -718,7 +719,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                 context.ReportDiagnostic(
                     Diagnostic.Create(
                         descriptor: MED014,
-                        location: x.Location,
+                        location: x.Location.ToLocation(),
                         x.PropertyName
                     )
                 );

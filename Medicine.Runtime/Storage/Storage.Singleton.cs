@@ -51,14 +51,9 @@ namespace Medicine.Internal
                 [MethodImpl(AggressiveInlining)]
                 get
                 {
-#if UNITY_EDITOR
-                    if (Utility.EditMode)
-                        EditMode.Refresh();
-#endif
-
 #if MEDICINE_DISABLE_SINGLETON_DESTROYED_FILTER
                     if (ReferenceEquals(RawInstance, null))
-                        if (Strategy.Has(AutoInstantiate))
+                        if (Utility.TypeInfo<T>.IsAutoInstantiate)
                             TryAutoInstantiate();
 
                     return RawInstance;
@@ -68,13 +63,17 @@ namespace Medicine.Internal
                     if (Utility.IsNativeObjectAlive(instance as Object))
                         return instance;
 
-                    if (instance != null)
-                        RawInstance = null; // "purify" the reference to ensure actual null is returned
+                    if (Utility.TypeInfo<T>.IsAutoInstantiate)
+                        instance = TryAutoInstantiate();
+#if UNITY_EDITOR
+                    if (Utility.EditMode)
+                        if (Utility.IsNativeObjectDead(instance as Object))
+                            instance = EditMode.Refresh();
+#endif
+                    if (Utility.IsNativeObjectDead(instance as Object))
+                        instance = null; // "purify" the reference to ensure actual null is returned
 
-                    if (Strategy.Has(AutoInstantiate))
-                        TryAutoInstantiate();
-
-                    return RawInstance;
+                    return RawInstance = instance;
 #endif
                 }
                 set => RawInstance = value;
@@ -96,7 +95,7 @@ namespace Medicine.Internal
                     return;
                 }
 
-                var existing = GetLiveInstance();
+                var existing = GetFilteredLiveInstance();
 
                 if (ReferenceEquals(existing, instance))
                     return; // in theory, should never happen?
@@ -122,14 +121,14 @@ namespace Medicine.Internal
                     return;
                 }
 
-                if (!ReferenceEquals(GetLiveInstance(), instance))
+                if (!ReferenceEquals(RawInstance, instance))
                     return;
 
                 RawInstance = null;
             }
 
             [MethodImpl(AggressiveInlining)]
-            static T? GetLiveInstance()
+            static T? GetFilteredLiveInstance()
             {
                 var instance = RawInstance;
 #if MEDICINE_DISABLE_SINGLETON_DESTROYED_FILTER
@@ -138,9 +137,7 @@ namespace Medicine.Internal
                 if (Utility.IsNativeObjectAlive(instance as Object))
                     return instance;
 
-                if (instance != null)
-                    RawInstance = null;
-
+                RawInstance = null;
                 return null;
 #endif
             }
@@ -173,25 +170,43 @@ namespace Medicine.Internal
 
                 if (strategy.Has(KeepExisting))
                 {
-                    if (strategy.Has(Destroy))
-                        TryDestroy(incoming as Object);
+                    if (strategy.Has(Destroy) && incoming is Object obj)
+                    {
+#if UNITY_EDITOR
+                        if (Utility.EditMode)
+                        {
+                            // need to delay the call - using DestroyImmediate in OnEnable crashes the editor
+                            UnityEditor.EditorApplication.delayCall += () => TryDestroy(obj);
+
+                            // a bit of a hack: reset the m_CachedPtr to mark the object as dead
+                            new UnmanagedRef<Object>(obj).SetNativeObjectPtr(0);
+                        }
+                        else
+#endif
+                        {
+                            TryDestroy(obj);
+                        }
+                    }
                 }
                 else
                 {
-                    if (strategy.Has(Destroy))
-                        TryDestroy(existing as Object);
+                    if (strategy.Has(Destroy) && existing is Object obj)
+                        TryDestroy(obj);
 
                     RawInstance = incoming;
                 }
             }
 
-            static void TryAutoInstantiate()
+            static T? TryAutoInstantiate()
             {
-                if (autoInstantiateInProgress || Utility.EditMode)
-                    return;
+                if (autoInstantiateInProgress)
+                    return null;
 
-                if (Utility.TypeInfo<T>.IsAbstract || Utility.TypeInfo<T>.IsInterface)
-                    return;
+                if (Utility.TypeInfo<T>.IsAbstract)
+                    return null;
+
+                if (Utility.TypeInfo<T>.IsInterface)
+                    return null;
 
                 autoInstantiateInProgress = true;
 
@@ -204,26 +219,32 @@ namespace Medicine.Internal
                     {
                         instance = ScriptableObject.CreateInstance(type) as T;
                         if (instance == null)
-                            return;
+                            return null;
 
-                        RawInstance = instance;
-                        return;
+                        StaticInit.RunOnce();
+                        return instance;
                     }
 
                     if (Utility.TypeInfo<T>.IsMonoBehaviour)
                     {
                         var go = new GameObject(type.Name);
-                        Object.DontDestroyOnLoad(go);
+
+                        if (Utility.EditMode)
+                            go.hideFlags = HideFlags.HideAndDontSave;
+                        else
+                            Object.DontDestroyOnLoad(go);
+
                         try
                         {
                             instance = go.AddComponent(type) as T;
                             if (instance == null)
                             {
                                 TryDestroy(go);
-                                return;
+                                return null;
                             }
 
-                            RawInstance = instance;
+                            StaticInit.RunOnce();
+                            return instance;
                         }
                         catch (Exception ex)
                         {
@@ -236,11 +257,13 @@ namespace Medicine.Internal
                 {
                     autoInstantiateInProgress = false;
                 }
+
+                return null;
             }
 
             static void TryDestroy(Object? obj)
             {
-                if (obj == null)
+                if (Utility.IsNativeObjectDead(obj))
                     return;
 
 #if UNITY_EDITOR
@@ -264,7 +287,7 @@ namespace Medicine.Internal
                     => editModeVersion = int.MinValue;
 
                 static bool InstanceBecameInvalid()
-                    => RawInstance as Object == null ||                        // destroyed
+                    => Utility.IsNativeObjectDead(RawInstance as Object) ||                        // destroyed
                        RawInstance is Behaviour { isActiveAndEnabled: false }; // deactivated;
 
                 static T? Search()
@@ -272,26 +295,27 @@ namespace Medicine.Internal
                     if (Utility.TypeInfo<T>.IsScriptableObject)
                         return Find.ObjectsByTypeAll<T>().FirstOrDefault();
 
-                    foreach (var obj in Find.ObjectsByType<T>())
-                        if (obj is Behaviour { enabled: true })
-                            return obj;
+                    if (Utility.TypeInfo<T>.IsMonoBehaviour)
+                        foreach (var obj in Find.ObjectsByType<T>())
+                            if (obj is Behaviour { enabled: true })
+                                return obj;
 
                     return null;
                 }
 
                 [MethodImpl(NoInlining)]
-                internal static void Refresh()
+                internal static T? Refresh()
                 {
                     int frameCount = Time.frameCount;
 
 #if !MEDICINE_EDITMODE_ALWAYS_REFRESH
                     if (editModeVersion == frameCount) // refresh once per frame
                         if (!InstanceBecameInvalid())  // refresh more often if we detect changes
-                            return;
+                            return RawInstance;
 #endif
 
                     editModeVersion = frameCount;
-                    Instance = Search();
+                    return Search();
                 }
             }
 #endif

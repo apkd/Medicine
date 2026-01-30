@@ -39,7 +39,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 
         public string? SourceGeneratorOutputFilename { get; set; }
         public string? SourceGeneratorError { get; init; }
-        public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
 
         // explicitly avoid regenerating code unless this property has changed.
         // - this generator is fairly slow and can potentially depend on a lot of unpredictable context
@@ -59,7 +59,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
 
         public EquatableArray<string> Declaration;
         public string? WrapperName;

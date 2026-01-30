@@ -31,7 +31,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
 
         public LanguageVersion LangVersion { get; init; }
         public EquatableArray<string> BaseDeclaration;
@@ -51,7 +51,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
 
         public string DerivedFQN { get; init; }
         public string DerivedName { get; init; }

@@ -1,10 +1,12 @@
 #nullable enable
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using static System.Runtime.CompilerServices.MethodImplOptions;
+using static UnityEngine.FindObjectsInactive;
 using Object = UnityEngine.Object;
 
 // ReSharper disable UnusedMember.Global
@@ -120,12 +122,33 @@ namespace Medicine
         /// <p>Consider using <see cref="Instances{T}"/> instead when possible.</p>
         /// </remarks>
         [MethodImpl(AggressiveInlining)]
-        public static T[] ObjectsByType<T>(bool includeInactive = false, FindObjectsSortMode sortMode = FindObjectsSortMode.None)
+        public static T[] ObjectsByType<T>(bool includeInactive = false, FindObjectsSortMode sortMode = 0)
             where T : class
         {
+            if (Utility.TypeInfo<T>.IsInterface)
+            {
+                // extremely inefficient path for finding objects by interface...
+                // this is sad to look at, but it's sometimes necessary for editor
+                // tooling, and FindObjectsByType does not work for interfaces.
+
+                var temp = Object.FindObjectsByType(
+                    type: typeof(Object),
+                    includeInactive ? Include : Exclude,
+                    sortMode
+                );
+
+                var list = new List<T>(capacity: 16);
+
+                foreach (var x in temp)
+                    if (x is T t)
+                        list.Add(t);
+
+                return list.ToArray();
+            }
+
             var array = Object.FindObjectsByType(
                 type: typeof(T),
-                includeInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude,
+                includeInactive ? Include : Exclude,
                 sortMode
             );
 
@@ -155,7 +178,7 @@ namespace Medicine
 
             var any = Object.FindAnyObjectByType(
                 type: typeof(T),
-                findObjectsInactive: includeInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude
+                findObjectsInactive: includeInactive ? Include : Exclude
             ) as T;
 
             if (Utility.IsNativeObjectAlive(any))

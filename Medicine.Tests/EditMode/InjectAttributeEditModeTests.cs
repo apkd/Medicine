@@ -24,7 +24,7 @@ public partial class InjectAttributeEditModeTests
     public void InjectBasic()
     {
         var obj = new GameObject(null, typeof(MBInjectBasic));
-        Assert.That(obj.GetComponent<MBInjectBasic>().Transform, Is.Not.Null);
+        Assert.That(obj.GetComponent<MBInjectBasic>().Transform.IsAlive());
     }
 
     //////////////////////////////////////////////////////////////////////////////
@@ -41,7 +41,7 @@ public partial class InjectAttributeEditModeTests
     public void InjectSingleton()
     {
         var obj = new GameObject(null, typeof(MBSingleton));
-        Assert.That(obj.GetComponent<MBSingleton>().SingletonInstance, Is.Not.Null);
+        Assert.That(obj.GetComponent<MBSingleton>().SingletonInstance.IsAlive());
     }
 
     //////////////////////////////////////////////////////////////////////////////

@@ -138,7 +138,7 @@ namespace Medicine.Internal
 
         [MethodImpl(AggressiveInlining)]
         public static bool IsNativeObjectDead([NotNullWhen(true)] UnityEngine.Object? obj)
-            => !ReferenceEquals(obj, null) && UnsafeUtility.As<UnityEngine.Object, UnityObjectInternals>(ref obj).m_CachedPtr == 0;
+            => ReferenceEquals(obj, null) || UnsafeUtility.As<UnityEngine.Object, UnityObjectInternals>(ref obj).m_CachedPtr == 0;
 
         [MethodImpl(AggressiveInlining)]
         internal static bool Has(this SingletonAttribute.Strategy strategy, SingletonAttribute.Strategy flag)

@@ -13,7 +13,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public EquatableIgnore<Location?> SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
         public EquatableArray<string> ContainingTypeDeclaration;
         public string ClassName;
         public string ClassFQN;
@@ -171,7 +171,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             return output with
             {
                 SourceGeneratorError = "Class marked with [UnmanagedAccess] has no instance fields or properties with backing fields.",
-                SourceGeneratorErrorLocation = typeDecl.Identifier.GetLocation(),
+                SourceGeneratorErrorLocation = new LocationInfo(typeDecl.Identifier.GetLocation()),
             };
         }
 

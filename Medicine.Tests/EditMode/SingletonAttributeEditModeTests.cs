@@ -16,7 +16,7 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton]
+    [Singleton, ExecuteAlways]
     sealed partial class MBSingletonBasic : MonoBehaviour { }
 
     [Test]
@@ -49,18 +49,18 @@ public partial class SingletonAttributePlayModeTests
         var go = new GameObject(null, typeof(MBSingletonManual));
         var component = go.GetComponent<MBSingletonManual>();
 
-        Assert.That(Find.Singleton<MBSingletonManual>().IsDead());
+        Assert.That(Medicine.Internal.Storage.Singleton<MBSingletonManual>.RawInstance.IsDead());
 
         component.Register();
-        Assert.That(Find.Singleton<MBSingletonManual>(), Is.EqualTo(component));
+        Assert.That(Medicine.Internal.Storage.Singleton<MBSingletonManual>.RawInstance, Is.EqualTo(component));
 
         component.Unregister();
-        Assert.That(Find.Singleton<MBSingletonManual>().IsDead());
+        Assert.That(Medicine.Internal.Storage.Singleton<MBSingletonManual>.RawInstance.IsNull());
     }
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton(strategy: Strategy.KeepExisting)]
+    [Singleton(strategy: Strategy.KeepExisting), ExecuteAlways]
     sealed partial class MBSingletonKeepExisting : MonoBehaviour { }
 
     [Test]
@@ -79,7 +79,7 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton(strategy: Strategy.LogWarning)]
+    [Singleton(strategy: Strategy.LogWarning), ExecuteAlways]
     sealed partial class MBSingletonLogWarning : MonoBehaviour { }
 
     [Test]
@@ -101,7 +101,7 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton(strategy: Strategy.Recommended)]
+    [Singleton(strategy: Strategy.Recommended), ExecuteAlways]
     sealed partial class MBSingletonLogError : MonoBehaviour { }
 
     [Test]
@@ -120,7 +120,7 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton(strategy: Strategy.ThrowException, manual: true)]
+    [Singleton(strategy: Strategy.ThrowException, manual: true), ExecuteAlways]
     sealed partial class MBSingletonThrowException : MonoBehaviour
     {
         public void Register() => RegisterInstance();
@@ -144,7 +144,7 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton(strategy: Strategy.Destroy)]
+    [Singleton(strategy: Strategy.Destroy), ExecuteAlways]
     sealed partial class MBSingletonDestroyReplace : MonoBehaviour { }
 
     [UnityTest]
@@ -166,7 +166,9 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton(strategy: Strategy.KeepExisting | Strategy.Destroy)]
+    // todo: this fails because destroying the object during OnEnableINTERNAL
+    // causes an edit mode crash (need some sort of deferred destruction?)
+    [Singleton(strategy: Strategy.KeepExisting | Strategy.Destroy), ExecuteAlways]
     sealed partial class MBSingletonDestroyKeepExisting : MonoBehaviour { }
 
     [UnityTest]
@@ -188,7 +190,7 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton(strategy: Strategy.AutoInstantiate)]
+    [Singleton(strategy: Strategy.AutoInstantiate), ExecuteAlways]
     sealed partial class MBSingletonAutoInstantiate : MonoBehaviour { }
 
     [Test]
@@ -210,7 +212,7 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton(strategy: Strategy.AutoInstantiate)]
+    [Singleton(strategy: Strategy.AutoInstantiate), ExecuteAlways]
     sealed partial class MBSingletonAutoInstantiateFirstAccess : MonoBehaviour { }
 
     [Test]
@@ -229,10 +231,10 @@ public partial class SingletonAttributePlayModeTests
     [Singleton]
     interface ISingletonByInterface2 { }
 
-    [Singleton]
+    [Singleton, ExecuteAlways]
     sealed partial class MBSingletonByInterface1 : MonoBehaviour, ISingletonByInterface1, ISingletonByInterface2 { }
 
-    [Singleton]
+    [Singleton, ExecuteAlways]
     sealed partial class MBSingletonByInterface2 : MonoBehaviour, ISingletonByInterface1 { }
 
     [Test]
@@ -256,7 +258,7 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton]
+    [Singleton, ExecuteAlways]
     partial class SOSingleton : ScriptableObject { }
 
     [Test]
@@ -274,7 +276,7 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton(strategy: Strategy.AutoInstantiate)]
+    [Singleton(strategy: Strategy.AutoInstantiate), ExecuteAlways]
     partial class SOSingletonAutoInstantiate : ScriptableObject { }
 
     [Test]
@@ -295,7 +297,7 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton(strategy: Strategy.AutoInstantiate)]
+    [Singleton(strategy: Strategy.AutoInstantiate), ExecuteAlways]
     partial class SOSingletonAutoInstantiateFirstAccess : ScriptableObject { }
 
     [Test]
@@ -308,10 +310,10 @@ public partial class SingletonAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Singleton]
+    [Singleton, ExecuteAlways]
     partial class MBSingletonBase : MonoBehaviour { }
 
-    [Singleton]
+    [Singleton, ExecuteAlways]
     sealed partial class MBSingletonDerived : MBSingletonBase { }
 
     [Test]

@@ -6,11 +6,13 @@ using static UnityEditor.EnterPlayModeOptions;
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Medicine;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using static System.Runtime.CompilerServices.MethodImplOptions;
 using Object = UnityEngine.Object;
 
 public static class TestUtility
@@ -25,21 +27,25 @@ public static class TestUtility
                     Object.DestroyImmediate(gameObject);
     }
 
+    [MethodImpl(AggressiveInlining)]
     public static bool IsNull(this object obj)
-        => obj.IsDestroyed();
+        => ReferenceEquals(obj, null);
 
+    [MethodImpl(AggressiveInlining)]
     public static bool IsNotNull(this object obj)
-        => obj.IsDestroyed();
+        => !ReferenceEquals(obj, null);
 
-    public static bool IsDestroyed(this object obj)
-        => obj is Object unityObject
-            ? Medicine.Internal.Utility.IsNativeObjectDead(unityObject)
-            : obj == null;
-
-    public static bool IsNotDestroyed(this object obj)
+    [MethodImpl(AggressiveInlining)]
+    public static bool IsAlive(this object obj)
         => obj is Object unityObject
             ? Medicine.Internal.Utility.IsNativeObjectAlive(unityObject)
-            : obj != null;
+            : obj.IsNotNull();
+
+    [MethodImpl(AggressiveInlining)]
+    public static bool IsDead(this object obj)
+        => obj is Object unityObject
+            ? Medicine.Internal.Utility.IsNativeObjectDead(unityObject)
+            : obj.IsNull();
 }
 
 #if UNITY_EDITOR

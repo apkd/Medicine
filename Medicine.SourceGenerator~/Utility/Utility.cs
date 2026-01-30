@@ -16,9 +16,11 @@ public static class Utility
         isEnabledByDefault: true
     );
 
-    public static string GetErrorOutputFilename(Location? location, string error)
+    public static string GetErrorOutputFilename(LocationInfo? location, string error)
     {
-        string filename = Path.GetFileNameWithoutExtension(location?.SourceTree?.FilePath) ?? "Unknown";
+        string filename = Path.GetFileNameWithoutExtension(location?.FileLineSpan.Path);
+        if (string.IsNullOrEmpty(filename))
+            filename = "Unknown";
         string result = $"{filename}.Exception.{Hash():x8}.g.cs";
         return result;
 
