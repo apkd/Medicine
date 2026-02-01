@@ -143,5 +143,48 @@ namespace Medicine.Internal
         [MethodImpl(AggressiveInlining)]
         internal static bool Has(this SingletonAttribute.Strategy strategy, SingletonAttribute.Strategy flag)
             => (strategy & flag) == flag;
+
+        /// <summary> Sets the type of managed object. </summary>
+        /// <remarks> Mono runtime hack. Use with high caution. </remarks>
+        [EditorBrowsable(Never)]
+        [MethodImpl(AggressiveInlining)]
+        public static unsafe T? SetManagedObjectType<T>(object? obj) where T : class
+        {
+            if (obj is null)
+                return null;
+
+            var ptr = UnsafeUtility.As<object, IntPtr>(ref obj);
+            UnsafeUtility.AsRef<ObjectHeader>((void*)ptr) = TypeHeaders<T>.Header;
+            return obj as T;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct ObjectHeader
+        {
+            readonly IntPtr data0;
+            readonly IntPtr data1;
+        }
+
+        static unsafe class TypeHeaders<T>
+        {
+            public static readonly ObjectHeader Header = Make();
+
+            static ObjectHeader Make()
+            {
+                // create a temporary instance of a managed type to read the type header
+                // this is done once per type in the lifetime of the program
+
+                var tempInstance = typeof(T).IsArray
+                    // create an array of length 0
+                    ? Array.CreateInstance(typeof(T).GetElementType()!, 0)
+                    // create an object instance without calling the ctor
+                    : System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(T));
+
+                var ptr = UnsafeUtility.PinGCObjectAndGetAddress(tempInstance, out ulong gcHandle);
+                var value = UnsafeUtility.AsRef<ObjectHeader>(ptr);
+                UnsafeUtility.ReleaseGCObject(gcHandle);
+                return value;
+            }
+        }
     }
 }

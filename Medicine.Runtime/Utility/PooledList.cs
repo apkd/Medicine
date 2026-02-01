@@ -137,8 +137,8 @@ namespace Medicine
                 var disposableGeneric = ListPool<object>.Get(out var listGeneric);
                 disposable = UnsafeUtility.As<PooledObject<List<object>>, PooledObject<List<T>>>(ref disposableGeneric);
                 var array = listGeneric.AsInternalsView().Array;
-                SetManagedObjectType<T[]>(array);
-                list = SetManagedObjectType<List<T>>(listGeneric)!;
+                Utility.SetManagedObjectType<T[]>(array);
+                list = Utility.SetManagedObjectType<List<T>>(listGeneric)!;
             }
 #endif
             return new(list, disposable);
@@ -180,53 +180,12 @@ namespace Medicine
             else // restore the list/array type before dispose
             {
                 var array = list.AsInternalsView().Array;
-                SetManagedObjectType<object[]>(array);
-                SetManagedObjectType<List<object>>(list);
+                Utility.SetManagedObjectType<object[]>(array);
+                Utility.SetManagedObjectType<List<object>>(list);
                 UnsafeUtility.As<PooledObject<List<T>>, PooledObject<List<object>>>(ref disposable).InvokeDispose();
             }
 #endif
             disposable = default;
-        }
-
-        /// <summary> Sets the type of managed object. </summary>
-        [MethodImpl(AggressiveInlining)]
-        static unsafe T? SetManagedObjectType<T>(object? obj) where T : class
-        {
-            if (obj is null)
-                return null;
-
-            var ptr = UnsafeUtility.As<object, IntPtr>(ref obj);
-            UnsafeUtility.AsRef<ObjectHeader>((void*)ptr) = TypeHeaders<T>.Header;
-            return obj as T;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        struct ObjectHeader
-        {
-            readonly IntPtr data0;
-            readonly IntPtr data1;
-        }
-
-        static unsafe class TypeHeaders<T>
-        {
-            public static readonly ObjectHeader Header = Make();
-
-            static ObjectHeader Make()
-            {
-                // create a temporary instance of a managed type to read the type header
-                // this is done once per type in the lifetime of the program
-
-                var tempInstance = typeof(T).IsArray
-                    // create an array of length 0
-                    ? Array.CreateInstance(typeof(T).GetElementType()!, 0)
-                    // create an object instance without calling the ctor
-                    : FormatterServices.GetUninitializedObject(typeof(T));
-
-                var ptr = UnsafeUtility.PinGCObjectAndGetAddress(tempInstance, out ulong gcHandle);
-                var value = UnsafeUtility.AsRef<ObjectHeader>(ptr);
-                UnsafeUtility.ReleaseGCObject(gcHandle);
-                return value;
-            }
         }
     }
 }
