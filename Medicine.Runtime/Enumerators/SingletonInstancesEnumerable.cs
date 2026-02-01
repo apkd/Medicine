@@ -12,60 +12,49 @@ namespace Medicine.Internal
 
     [EditorBrowsable(EditorBrowsableState.Never)]
     public struct SingletonInstancesEnumerable
-        : ILinqFallbackEnumerable<SingletonInstancesEnumerator, Object>
+        : ILinqFallbackEnumerable<SingletonInstancesEnumerator, (Type, Object)>
     {
         public SingletonInstancesEnumerator GetEnumerator()
-            => new()
-            {
-                DictEnumerator = Storage.Singleton.UntypedAccess.Values.GetEnumerator(),
-                DistinctInstances = PooledList.Get<object>(),
-            };
+            => new() { DictEnumerator = Storage.Singleton.UntypedAccess.GetEnumerator() };
 
 #if MODULE_ZLINQ
         /// <summary>
         /// Returns a ValueEnumerable struct that allows chaining of ZLinq operators.
         /// </summary>
-        public ValueEnumerable<SingletonInstancesEnumerator, Object> AsValueEnumerable()
+        public ValueEnumerable<SingletonInstancesEnumerator, (Type, Object)> AsValueEnumerable()
             => new(GetEnumerator());
 #endif
     }
 
     [EditorBrowsable(EditorBrowsableState.Never)]
     public struct SingletonInstancesEnumerator
-        : IValueEnumerator<Object>
+        : IValueEnumerator<(Type, Object)>
     {
-        internal Dictionary<Type, Func<Object?>>.ValueCollection.Enumerator DictEnumerator;
-        internal PooledList<object> DistinctInstances;
+        internal Dictionary<Type, Func<Object?>>.Enumerator DictEnumerator;
 
         void IDisposable.Dispose()
-        {
-            DistinctInstances.Dispose();
-            DictEnumerator.Dispose();
-        }
+            => DictEnumerator.Dispose();
 
-        public Object Current { get; private set; }
+        public (Type, Object) Current { get; private set; }
 
         public bool MoveNext()
         {
             while (DictEnumerator.MoveNext())
             {
-                var instance = DictEnumerator.Current();
+                var current = DictEnumerator.Current;
+                var instance = current.Value.Invoke();
 
                 if (Utility.IsNativeObjectDead(instance))
                     continue;
 
-                if (DistinctInstances.List.Contains(instance))
-                    continue;
-
-                DistinctInstances.List.Add(instance);
-                Current = instance;
+                Current = (current.Key, instance);
                 return true;
             }
 
             return false;
         }
 
-        bool IValueEnumerator<Object>.TryGetNext(out Object current)
+        bool IValueEnumerator<(Type, Object)>.TryGetNext(out (Type, Object) current)
         {
             if (MoveNext())
             {
@@ -73,23 +62,23 @@ namespace Medicine.Internal
                 return true;
             }
 
-            current = null!;
+            current = default;
             return false;
         }
 
-        bool IValueEnumerator<Object>.TryGetNonEnumeratedCount(out int count)
+        bool IValueEnumerator<(Type, Object)>.TryGetNonEnumeratedCount(out int count)
         {
             count = 0;
             return false;
         }
 
-        bool IValueEnumerator<Object>.TryGetSpan(out ReadOnlySpan<Object> span)
+        bool IValueEnumerator<(Type, Object)>.TryGetSpan(out ReadOnlySpan<(Type, Object)> span)
         {
             span = default;
             return false;
         }
 
-        bool IValueEnumerator<Object>.TryCopyTo(Span<Object> destination, Index offset)
+        bool IValueEnumerator<(Type, Object)>.TryCopyTo(Span<(Type, Object)> destination, Index offset)
             => false;
     }
 }

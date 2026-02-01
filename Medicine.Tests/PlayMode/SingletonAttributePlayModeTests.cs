@@ -351,8 +351,8 @@ public partial class SingletonAttributePlayModeTests
         c2.Register();
 
         var activeSingletons = new System.Collections.Generic.List<Object>();
-        foreach (var singleton in Find.AllActiveSingletons())
-            activeSingletons.Add(singleton);
+        foreach (var (type, instance) in Find.AllActiveSingletons())
+            activeSingletons.Add(instance);
 
         Assert.That(activeSingletons, Contains.Item(c1));
         Assert.That(activeSingletons, Contains.Item(c2));
