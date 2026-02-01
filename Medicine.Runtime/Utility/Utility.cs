@@ -137,7 +137,7 @@ namespace Medicine.Internal
             => !ReferenceEquals(obj, null) && UnsafeUtility.As<UnityEngine.Object, UnityObjectInternals>(ref obj).m_CachedPtr != 0;
 
         [MethodImpl(AggressiveInlining)]
-        public static bool IsNativeObjectDead([NotNullWhen(true)] UnityEngine.Object? obj)
+        public static bool IsNativeObjectDead([NotNullWhen(false)] UnityEngine.Object? obj)
             => ReferenceEquals(obj, null) || UnsafeUtility.As<UnityEngine.Object, UnityObjectInternals>(ref obj).m_CachedPtr == 0;
 
         [MethodImpl(AggressiveInlining)]
