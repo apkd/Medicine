@@ -152,7 +152,8 @@ namespace Medicine
                 sortMode
             );
 
-            // todo: actually mutate the array type?
+            // the array type returned by the API is actually already T[]; it turns out that in the generic
+            // version of the method, Unity seemingly copies the array around for no reason whatsoever
             return UnsafeUtility.As<Object[], T[]>(ref array);
         }
 
@@ -220,7 +221,8 @@ namespace Medicine
         {
             var array = Resources.FindObjectsOfTypeAll(typeof(T));
 
-            // todo: actually mutate the array type?
+            // the array type returned by the API is actually already T[]; it turns out that in the generic
+            // version of the method, Unity seemingly copies the array around for no reason whatsoever
             return UnsafeUtility.As<Object[], T[]>(ref array);
         }
     }
