@@ -16,6 +16,8 @@ namespace InheritedFromPlayMode
 
     public sealed class PooledListTests : global::PooledListTests { }
 
+    public sealed class FindByTypeTests : global::FindByTypeTests { }
+
 #if MODULE_ZLINQ
     public sealed class WrapValueEnumerableCompileTests : global::WrapValueEnumerableCompileTests { }
 #endif
