@@ -598,15 +598,15 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"public static {input.TypeFQN}? FindByID({idType} id)");
 
                 using (src.Indent)
-                    src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Map.TryGetValue(id, out var result) ? result : null;");
+                    src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Find(id);");
 
                 src.Linebreak();
 
                 src.Line.Write(Alias.Inline);
-                src.Line.Write($"public static bool TryFindByID({idType} id, out {input.TypeFQN} result)");
+                src.Line.Write($"public static bool TryFindByID({idType} id, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {input.TypeFQN}? result)");
 
                 using (src.Indent)
-                    src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Map.TryGetValue(id, out result);");
+                    src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.TryFind(id, out result);");
 
                 src.Linebreak();
             }
