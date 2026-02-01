@@ -133,7 +133,7 @@ rm -rf "$DEST/Editor/Data/MonoEmbedRuntime" || true
 rm -rf "$DEST/Editor/BugReporter" || true
 rm -rf "$DEST/Editor/*_s.debug" || true
 find "$DEST/Editor/Data/Resources/PackageManager/Editor/" ! -name 'manifest.json' -type f -exec rm -f {} + || true
-find "$DEST" -type f \( -name '*.mdb' -o -name '*.xml' -o -name '*.dbg' \) -delete || true
+find "$DEST" -type f \( -name '*.mdb' -o -name '*.dbg' \) -delete || true
 find "$DEST" -type f \( -name '*.a' -o -name '*.la' -o -name '*.pdb' \) -delete || true
 find "$DEST" -type f -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true
 strip --strip-unneeded "$DEST/Editor/Unity" 2>/dev/null || true
