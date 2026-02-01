@@ -15,7 +15,11 @@ namespace Medicine.Internal
         : ILinqFallbackEnumerable<SingletonInstancesEnumerator, Object>
     {
         public SingletonInstancesEnumerator GetEnumerator()
-            => new() { DictEnumerator = Storage.Singleton.UntypedAccess.Values.GetEnumerator() };
+            => new()
+            {
+                DictEnumerator = Storage.Singleton.UntypedAccess.Values.GetEnumerator(),
+                DistinctInstances = PooledList.Get<object>(),
+            };
 
 #if MODULE_ZLINQ
         /// <summary>
@@ -31,8 +35,13 @@ namespace Medicine.Internal
         : IValueEnumerator<Object>
     {
         internal Dictionary<Type, Func<Object?>>.ValueCollection.Enumerator DictEnumerator;
+        internal PooledList<object> DistinctInstances;
 
-        void IDisposable.Dispose() => DictEnumerator.Dispose();
+        void IDisposable.Dispose()
+        {
+            DistinctInstances.Dispose();
+            DictEnumerator.Dispose();
+        }
 
         public Object Current { get; private set; }
 
@@ -41,11 +50,16 @@ namespace Medicine.Internal
             while (DictEnumerator.MoveNext())
             {
                 var instance = DictEnumerator.Current();
-                if (Utility.IsNativeObjectAlive(instance))
-                {
-                    Current = instance;
-                    return true;
-                }
+
+                if (Utility.IsNativeObjectDead(instance))
+                    continue;
+
+                if (DistinctInstances.List.Contains(instance))
+                    continue;
+
+                DistinctInstances.List.Add(instance);
+                Current = instance;
+                return true;
             }
 
             return false;
