@@ -759,7 +759,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             void OpenListAndAppendOptionalDescription(string nullIf)
             {
                 if (x.Flags.Has(IsOptional))
-                    src.Line.Write($"/// This code-generated property is marked as <c>.Optional()</c>:");
+                    src.Line.Write($"/// This code-generated property is marked as <b>optional</b>:");
                 else if (x.Flags.Has(NeedsNullCheck))
                     src.Line.Write($"/// This code-generated property is checked for <c>null</c>:");
 
@@ -878,7 +878,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                 }
 
                 if (!x.Flags.Has(IsOptional))
-                    src.Line.Write("[global::System.Diagnostics.CodeAnalysis.AllowNull, global::JetBrains.Annotations.CanBeNull]");
+                    src.Line.Write("[global::System.Diagnostics.CodeAnalysis.AllowNull]");
 
                 if (x.Flags.Has(IsValueType))
                 {
