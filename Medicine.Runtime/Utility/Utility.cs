@@ -144,6 +144,10 @@ namespace Medicine.Internal
         internal static bool Has(this SingletonAttribute.Strategy strategy, SingletonAttribute.Strategy flag)
             => (strategy & flag) == flag;
 
+        [MethodImpl(AggressiveInlining)]
+        public static T[] FallbackToEmpty<T>(this T[]? array)
+            => array ?? Array.Empty<T>();
+
         /// <summary> Sets the type of managed object. </summary>
         /// <remarks> Mono runtime hack. Use with high caution. </remarks>
         [EditorBrowsable(Never)]

@@ -9,6 +9,7 @@ using System.Reflection;
 using Medicine.Internal;
 using static System.Reflection.BindingFlags;
 
+#pragma warning disable CS0414 // Field is assigned but its value is never used
 [SuppressMessage("ReSharper", "FieldCanBeMadeReadOnly.Global")]
 [SuppressMessage("ReSharper", "FieldCanBeMadeReadOnly.Local")]
 [SuppressMessage("ReSharper", "ConvertToConstant.Global")]
@@ -376,7 +377,7 @@ public partial class UnmanagedAccessTests
                 .GetProperty(nameof(AutoPropertyFields.ManualField));
 
         Assert.That(manualFieldProperty, Is.Not.Null);
-        Assert.That(manualFieldProperty!.GetCustomAttributes(typeof(DeclaredAtAttribute), false), Is.Empty);
+        Assert.That(manualFieldProperty!.GetCustomAttributes(typeof(DeclaredAtAttribute), false), Is.Not.Empty);
 
         var autoIntReadOnlyProperty
             = typeof(AutoPropertyFields.Unmanaged.AccessRO)

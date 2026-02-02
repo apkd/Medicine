@@ -566,8 +566,10 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         CleanupExpression = cleanupExpression,
                         TypeFQN = typeFQN,
                         TypeDisplayName = typeDisplayName,
-                        TypeXmlDocId = typeSymbol?.GetDocumentationCommentId(),
-                        Location = new LocationInfo(assignment.GetLocation()),
+                        TypeXmlDocId = flags.Has(IsArray)
+                            ? (typeSymbol as IArrayTypeSymbol)?.ElementType.GetDocumentationCommentId()
+                            : typeSymbol?.GetDocumentationCommentId(),
+                        Location = new(assignment.GetLocation()),
                         Flags = flags,
                     };
                 }
@@ -766,7 +768,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"/// <list type=\"bullet\">");
                 if (x.Flags.Has(IsOptional))
                 {
-                    src.Line.Write($"/// <item>This property will <b>silently</b> return <c>null</c> if {nullIf}.</item>");
+                    src.Line.Write($"/// <item>The getter will <b>silently</b> return <c>null</c> if {nullIf}.</item>");
                     if (x.Flags.Has(IsOptionalViaComment))
                         src.Line.Write($"/// <item>Remove <c>// optional</c> comment from the end of the assignment to re-enable the null check + error log. </item>");
                     else
@@ -774,12 +776,12 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                 }
                 else if (x.Flags.Has(NeedsNullCheck))
                 {
-                    src.Line.Write($"/// <item>This property <b>will log an error</b> and return <c>null</c> if {nullIf}.</item>");
+                    src.Line.Write($"/// <item>The getter <b>will log an error</b> and return <c>null</c> if {nullIf}.</item>");
                     src.Line.Write($"/// <item>Append <c>.Optional()</c> call or a <c>// optional</c> comment at the end of the assignment to suppress the null check + error log. </item>");
                 }
                 else if (x.Flags.Has(IsArray))
                 {
-                    src.Line.Write($"/// <item>This property will never return <c>null</c> - will always fall back to an empty array.</item>");
+                    src.Line.Write($"/// <item>The getter will never return <c>null</c> - will always fall back to an empty array.</item>");
                 }
             }
 
@@ -858,6 +860,10 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     _         => "instance",
                 };
 
+                string WithFallback(string expr) => x.Flags.Has(IsArray)
+                    ? $"{m}Utility.FallbackToEmpty({expr})"
+                    : expr;
+
                 if (input.Symbols.Has(UNITY_EDITOR))
                 {
                     src.Line.Write($"/// <summary> Cached <see cref=\"{x.TypeXmlDocId}\"/> {label}.");
@@ -933,20 +939,20 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                                         foreach (var declaration in x.EditModeLocalDeclarations)
                                             src.Line.Write(declaration);
 
-                                        src.Line.Write($"return {x.InitExpression};");
+                                        src.Line.Write($"return {x.InitExpression}!;");
                                     }
                                 }
                                 else
                                 {
-                                    src.Line.Write($"{Alias.NoInline} {x.TypeFQN}{opt} {m}Expr() => {x.InitExpression};");
+                                    src.Line.Write($"{Alias.NoInline} {x.TypeFQN}{opt} {m}Expr() => {x.InitExpression}!;");
                                 }
 
                                 src.Line.Write($"if ({m}Utility.EditMode)");
                                 using (src.Indent)
-                                    src.Line.Write($"return {m}Expr();"); // in edit mode, always call initializer
+                                    src.Line.Write($"return {WithFallback($"{m}Expr()")};"); // in edit mode, always call initializer
                             }
 
-                            src.Line.Write($"return {storagePropName}._{m}{x.PropertyName}!;");
+                            src.Line.Write($"return {WithFallback($"{storagePropName}._{m}{x.PropertyName}")}!;");
                         }
 
                         src.Line.Write($"{Alias.Inline} {@private}set");

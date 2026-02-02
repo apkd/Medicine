@@ -357,4 +357,27 @@ public partial class InjectAttributePlayModeTests
         Assert.That(Spawn<MBReferToVarMultiDeclarator>().colliders, Has.Length.EqualTo(2));
         Assert.That(Spawn<MBReferToVarChained>().colliders, Has.Length.EqualTo(2));
     }
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    sealed partial class MBInjectArrayFallback : MonoBehaviour
+    {
+        [Inject]
+        void Awake()
+        {
+            colliders = GetNullArray();
+        }
+
+        static Collider[]? GetNullArray()
+            => null;
+    }
+
+    [Test]
+    public void Inject_ArrayFallbacksToEmpty()
+    {
+        var obj = new GameObject(null, typeof(MBInjectArrayFallback));
+        var mb = obj.GetComponent<MBInjectArrayFallback>();
+        Assert.That(mb.colliders, Is.Not.Null);
+        Assert.That(mb.colliders, Is.Empty);
+    }
 }
