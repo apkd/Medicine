@@ -219,8 +219,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         if (!input.AttributeSettings.IncludePrivate)
             input.Fields = input.Fields.AsArray().Where(x => x.Visibility != "NonPublic").ToArray();
 
-        src.Line.Write($"// {input.AttributeSettings.ToString()}");
-
+        src.Line.Write($"#pragma warning disable CS0108");
         src.Line.Write(Alias.UsingStorage);
         src.Line.Write(Alias.UsingInline);
         src.Line.Write(Alias.UsingUtility);
@@ -478,8 +477,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         if (x.IsUnmanagedType || x.IsReferenceType)
                         {
                             src.Line.Write($"/// <inheritdoc cref=\"{m}Self.{x.Name}\" />");
-                            if (x.IsPropertyBackingField)
-                                src.Line.Write($"[{m}DeclaredAt(nameof({m}Self.{x.Name}))]");
+                            src.Line.Write($"[{m}DeclaredAt(nameof({m}Self.{x.Name}))]");
                         }
 
                         if (x.IsUnmanagedType)

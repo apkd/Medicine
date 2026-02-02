@@ -931,21 +931,23 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         {
                             if (input.Symbols.Has(UNITY_EDITOR) && !x.Flags.Has(IsDisposable))
                             {
+                                src.Line.Write($"#nullable disable");
                                 if (x.EditModeLocalDeclarations is { Length: > 0 })
                                 {
-                                    src.Line.Write($"{Alias.NoInline} {x.TypeFQN}{opt} {m}Expr()");
+                                    src.Line.Write($"{Alias.NoInline} {x.TypeFQN} {m}Expr()");
                                     using (src.Braces)
                                     {
                                         foreach (var declaration in x.EditModeLocalDeclarations)
                                             src.Line.Write(declaration);
 
-                                        src.Line.Write($"return {x.InitExpression}!;");
+                                        src.Line.Write($"return {x.InitExpression};");
                                     }
                                 }
                                 else
                                 {
-                                    src.Line.Write($"{Alias.NoInline} {x.TypeFQN}{opt} {m}Expr() => {x.InitExpression}!;");
+                                    src.Line.Write($"{Alias.NoInline} {x.TypeFQN} {m}Expr() => {x.InitExpression};");
                                 }
+                                src.Line.Write($"#nullable enable");
 
                                 src.Line.Write($"if ({m}Utility.EditMode)");
                                 using (src.Indent)

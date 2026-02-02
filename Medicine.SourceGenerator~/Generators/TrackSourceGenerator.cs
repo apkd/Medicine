@@ -529,7 +529,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"/// <codegen>Generated because of the implemented interface{s}: {origin}</codegen>");
             }
 
-            src.Line.Write($"public static partial class Unmanaged");
+            src.Line.Write($"public static {@new}partial class Unmanaged");
             using (src.Braces)
             {
                 foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
@@ -631,7 +631,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"/// </remarks>");
             }
 
-            src.Line.Write($"public static {input.TypeFQN}? Instance");
+            src.Line.Write($"public static {@new}{input.TypeFQN}? Instance");
 
             using (src.Braces)
             {
@@ -691,7 +691,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"/// </remarks>");
             }
 
-            src.Line.Write($"public static global::Medicine.TrackedInstances<{input.TypeFQN}> Instances");
+            src.Line.Write($"public {@new}static global::Medicine.TrackedInstances<{input.TypeFQN}> Instances");
             using (src.Braces)
             {
                 src.Line.Write($"{Alias.Inline} get => default;");
