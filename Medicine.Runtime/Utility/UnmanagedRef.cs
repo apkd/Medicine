@@ -39,6 +39,17 @@ namespace Medicine
         public static implicit operator UnmanagedRef<TClass>(TClass ptr)
             => new(ptr);
 
+        [MethodImpl(AggressiveInlining)]
+        public static implicit operator TClass(UnmanagedRef<TClass> unmanagedRef)
+            => unmanagedRef.Resolve();
+
+        [MethodImpl(AggressiveInlining)]
+        public TClass Resolve()
+        {
+            var ptr = Ptr;
+            return UnsafeUtility.As<nint, TClass>(ref ptr);
+        }
+
         /// <summary>
         /// Returns a ref to an unmanaged value of type <typeparamref name="T"/> located at a specified memory offset.
         /// </summary>
