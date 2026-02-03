@@ -171,7 +171,8 @@ namespace Medicine
                     return singleton;
 
             if (Storage.Instances<T>.TypeIsRegistered)
-                return Storage.Instances<T>.List[0];
+                if (Storage.Instances<T>.List is { Count: > 0 } list)
+                    return list[0];
 
             if (Storage.AnyObject<T>.WeakReference?.TryGetTarget(out var cached) is true)
                 if (Utility.IsNativeObjectAlive(cached))

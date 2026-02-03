@@ -2,6 +2,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using Medicine;
+using Medicine.Internal;
 using Object = UnityEngine.Object;
 
 public class FindByTypeTests
@@ -9,6 +10,7 @@ public class FindByTypeTests
     sealed class TestComponentA : MonoBehaviour { }
     sealed class TestComponentB : MonoBehaviour { }
     sealed class TestScriptableObject : ScriptableObject { }
+    sealed class AnyObjectTestComponent : MonoBehaviour { }
 
     static void CreateWithComponent<T>(string name, bool active)
         where T : Component
@@ -103,5 +105,23 @@ public class FindByTypeTests
         Assert.That(results, Is.Not.Null);
         Assert.That(results.GetType(), Is.EqualTo(typeof(TestComponentA[])));
         Assert.That(results.Length, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void AnyObjectByType_DoesNotThrow_WhenTypeRegisteredButNoInstances()
+    {
+        var go = new GameObject();
+        var component = go.AddComponent<AnyObjectTestComponent>();
+
+        Storage.Instances<AnyObjectTestComponent>.Register(component);
+        Storage.Instances<AnyObjectTestComponent>.Unregister(component);
+        Storage.Instances<AnyObjectTestComponent>.List.Clear();
+
+        Object.DestroyImmediate(go);
+
+        AnyObjectTestComponent? result = null;
+
+        Assert.DoesNotThrow(() => result = Find.AnyObjectByType<AnyObjectTestComponent>());
+        Assert.That(result, Is.Null);
     }
 }
