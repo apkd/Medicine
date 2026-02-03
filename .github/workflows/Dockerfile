@@ -149,6 +149,31 @@ printf '%s\n' \
   "m_EditorVersionWithRevision: ${UNITY_VERSION} (${REV})" \
   > "${PROJECT}/ProjectSettings/ProjectVersion.txt"
 
+# disable Unity Connect
+cat > "${PROJECT}/ProjectSettings/UnityConnectSettings.asset" <<'YAML'
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!310 &1
+UnityConnectSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 1
+  m_Enabled: 0
+  CrashReportingSettings:
+    m_Enabled: 0
+    m_LogBufferSize: 10
+    m_CaptureEditorExceptions: 0
+  UnityPurchasingSettings:
+    m_Enabled: 0
+  UnityAnalyticsSettings:
+    m_Enabled: 0
+    m_InitializeOnStartup: 0
+  UnityAdsSettings:
+    m_Enabled: 0
+    m_InitializeOnStartup: 0
+  PerformanceReportingSettings:
+    m_Enabled: 0
+YAML
+
 apt-get purge --autoremove -y xz-utils binutils axel
 
 install -d /usr/local/bin
@@ -171,6 +196,18 @@ printf '%s\n' '#!/usr/bin/env bash' \
   'mkdir -p "${XDG_CACHE_HOME}/unity3d" "${XDG_CONFIG_HOME}/unity3d" "/root/.local/share/unity3d"' \
   'ulimit -n 65535' \
   'ulimit -u 16384' \
+  '' \
+  'LOGIN=0; ARGS=()' \
+  'for a in "$@"; do' \
+  '  if [ "$a" = "-login" ]; then LOGIN=1; else ARGS+=("$a"); fi' \
+  'done' \
+  '' \
+  '# No -login => do NOT inject credentials' \
+  'if [ "$LOGIN" -eq 0 ]; then' \
+  '  exec with-xvfb "$EDITOR_PATH" -silent-crashes -batchmode -nographics -logFile - "${ARGS[@]}"' \
+  'fi' \
+  '' \
+  '# -login present => require + inject credentials' \
   'SERIAL="${UNITY_SERIAL:-}"' \
   'USERN="${UNITY_USER:-}"' \
   'PASSW="${UNITY_PASSWORD:-}"' \
@@ -180,7 +217,7 @@ printf '%s\n' '#!/usr/bin/env bash' \
   ': "${SERIAL:?UNITY serial is required}"' \
   ': "${USERN:?UNITY username is required}"' \
   ': "${PASSW:?UNITY password is required}"' \
-  'exec with-xvfb "$EDITOR_PATH"  -serial "${SERIAL}" -username "${USERN}" -password "${PASSW}" -silent-crashes -batchmode -nographics -logFile - "$@"' \
+  'exec with-xvfb "$EDITOR_PATH" -serial "${SERIAL}" -username "${USERN}" -password "${PASSW}" -silent-crashes -batchmode -nographics -logFile - "${ARGS[@]}"' \
   > /usr/local/bin/unity-editor && chmod +x /usr/local/bin/unity-editor
 
 rm -rf "/root/.cache/unity3d" "/root/.config/unity3d" "/root/.local/share/unity3d" "${PROJECT}/Temp" || true
