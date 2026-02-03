@@ -4,6 +4,7 @@ using ZLinq;
 using System.Linq;
 #endif
 using System;
+using System.Collections.Generic;
 using Medicine;
 using NUnit.Framework;
 using UnityEngine;
@@ -251,6 +252,33 @@ public partial class TrackAttributePlayModeTests
         TestUtility.DestroyAllGameObjects();
         Assert.That(MBTrackManual.Instances, Has.Count.EqualTo(0));
         Assert.That(Find.Instances<MBTrackManual>(), Has.Count.EqualTo(0));
+    }
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    [Track]
+    sealed partial class MBTrackCopyTo : MonoBehaviour { }
+
+    [Test]
+    public void Track_CopyTo_DoesNotNullOutElements()
+    {
+        const int count = 32;
+        var created = new List<MBTrackCopyTo>(count);
+
+        for (int i = 0; i < count; i++)
+        {
+            var go = new GameObject(null, typeof(MBTrackCopyTo));
+            created.Add(go.GetComponent<MBTrackCopyTo>());
+        }
+
+        var destination = new List<MBTrackCopyTo>();
+        Find.Instances<MBTrackCopyTo>().CopyTo(destination);
+
+        Assert.That(destination.Count, Is.EqualTo(count));
+        foreach (var entry in destination)
+            Assert.That(entry, Is.Not.Null);
+
+        CollectionAssert.AreEquivalent(created, destination);
     }
 
     //////////////////////////////////////////////////////////////////////////////

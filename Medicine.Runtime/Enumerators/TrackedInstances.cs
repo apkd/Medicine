@@ -106,25 +106,30 @@ namespace Medicine
 
         public void CopyTo(List<T> destination, int extraCapacity = 16)
         {
-            if (Count is 0)
+            int count = Count;
+            if (count is 0)
                 return;
 
-            if (destination.Capacity < Count)
-                destination.Capacity = Count + extraCapacity;
+            if (destination.Capacity < count)
+                destination.Capacity = count + extraCapacity;
 
             var destinationListView = destination.AsInternalsView();
-            destinationListView.Count = Count;
+            destinationListView.Count = count;
 
             Storage.Instances<T>.List.CopyTo(
                 array: destinationListView.Array!,
                 arrayIndex: 0
             );
 
-            Array.Clear(
-                array: destinationListView.Array!,
-                index: destinationListView.Array!.Length - Count,
-                length: Count
-            );
+            int clearLength = destinationListView.Array!.Length - count;
+            if (clearLength > 0)
+            {
+                Array.Clear(
+                    array: destinationListView.Array!,
+                    index: count,
+                    length: clearLength
+                );
+            }
         }
 
         /// <summary>
