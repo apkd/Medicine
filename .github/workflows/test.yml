@@ -103,36 +103,6 @@ jobs:
           printf '%s' '${{ secrets.UNITY_USER }}' > "$RUNNER_TEMP/unity-secrets/unity_user"
           printf '%s' '${{ secrets.UNITY_PASSWORD }}' > "$RUNNER_TEMP/unity-secrets/unity_password"
 
-      - name: Disable Unity Connect
-        run: |
-          set -euo pipefail
-          PS_FILE="$RUNNER_TEMP/unity-projectsettings/UnityConnectSettings.asset"
-          mkdir -p "$(dirname "$PS_FILE")"
-          cat > "$PS_FILE" <<'YAML'
-          %YAML 1.1
-          %TAG !u! tag:unity3d.com,2011:
-          --- !u!310 &1
-          UnityConnectSettings:
-            m_ObjectHideFlags: 0
-            serializedVersion: 1
-            m_Enabled: 0
-            CrashReportingSettings:
-              m_Enabled: 0
-              m_LogBufferSize: 10
-              m_CaptureEditorExceptions: 0
-            UnityPurchasingSettings:
-              m_Enabled: 0
-            UnityAnalyticsSettings:
-              m_Enabled: 0
-              m_InitializeOnStartup: 0
-            UnityAdsSettings:
-              m_Enabled: 0
-              m_InitializeOnStartup: 0
-            PerformanceReportingSettings:
-              m_Enabled: 0
-          YAML
-          echo "UNITYCONNECT_ASSET=$PS_FILE" >> "$GITHUB_ENV"
-
       - name: Run tests
         run: |
           set -euo pipefail
@@ -145,7 +115,6 @@ jobs:
             -v "$RUNNER_TEMP/test-results:$PROJECT/test-results" \
             -v "$LIC_DIR:/root/.local/share/unity3d" \
             -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
-            -v "$UNITYCONNECT_ASSET:$PROJECT/ProjectSettings/UnityConnectSettings.asset" \
             -w $PROJECT \
             "${{ env.IMAGE_TAG }}" \
             unity-editor \
@@ -162,7 +131,6 @@ jobs:
             -v "$RUNNER_TEMP/test-results:$PROJECT/test-results" \
             -v "$LIC_DIR:/root/.local/share/unity3d" \
             -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
-            -v "$UNITYCONNECT_ASSET:$PROJECT/ProjectSettings/UnityConnectSettings.asset" \
             -w $PROJECT \
             "${{ env.IMAGE_TAG }}" \
             unity-editor \
@@ -171,20 +139,20 @@ jobs:
               -testPlatform StandaloneLinux64 \
               -testResults "$PROJECT/test-results/Standalone tests.xml"
 
-      #        doesn't work for now - `unity-editor` command embedded in the Dockerfile
-      #        runs with `-serial` which is incompatible with `-returnlicense`
-      #      - name: Return Unity license
-      #        if: ${{ always() }}
-      #        run: |
-      #          set -euo pipefail
-      #          docker run --rm \
-      #            -v "$LIC_DIR:/root/.local/share/unity3d" \
-      #            -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
-      #            "${{ env.IMAGE_TAG }}" \
-      #            unity-editor \
-      #              -quit -batchmode -returnlicense \
-      #              -username "$(cat /run/secrets/unity_user)" \
-      #              -password "$(cat /run/secrets/unity_password)"
+#        doesn't work for now - `unity-editor` command embedded in the Dockerfile
+#        runs with `-serial` which is incompatible with `-returnlicense`
+#      - name: Return Unity license
+#        if: ${{ always() }}
+#        run: |
+#          set -euo pipefail
+#          docker run --rm \
+#            -v "$LIC_DIR:/root/.local/share/unity3d" \
+#            -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
+#            "${{ env.IMAGE_TAG }}" \
+#            unity-editor \
+#              -quit -batchmode -returnlicense \
+#              -username "$(cat /run/secrets/unity_user)" \
+#              -password "$(cat /run/secrets/unity_password)"
 
       - uses: dorny/test-reporter@v2
         if: ${{ !cancelled() }}
