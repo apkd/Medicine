@@ -34,6 +34,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public bool IsUnmanagedType;
         public bool IsReferenceType;
         public bool IsPropertyBackingField;
+        public bool IsPrivateInBaseType;
     }
 
     record struct AttributeSettings(
@@ -159,10 +160,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         }
 
         foreach (var member in typeSymbol.GetMembers().AsArray())
-            CollectField(member);
+            CollectField(member, isFromBaseType: false);
 
         foreach (var member in typeSymbol.GetBaseTypes().SelectMany(x => x.GetMembers().AsArray()))
-            CollectField(member);
+            CollectField(member, isFromBaseType: true);
 
         output.Fields = fields.ToArray();
 
@@ -177,7 +178,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
         return output;
 
-        void CollectField(ISymbol member)
+        void CollectField(ISymbol member, bool isFromBaseType)
         {
             if (member is not IFieldSymbol { IsStatic: false } field)
                 return;
@@ -195,6 +196,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     IsReadOnly = field.IsReadOnly,
                     IsUnmanagedType = field.Type.IsUnmanagedType,
                     IsReferenceType = field.Type.IsReferenceType,
+                    IsPrivateInBaseType = isFromBaseType && field.DeclaredAccessibility is Accessibility.Private,
                 }
             );
         }
@@ -477,7 +479,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         if (x.IsUnmanagedType || x.IsReferenceType)
                         {
                             src.Line.Write($"/// <inheritdoc cref=\"{m}Self.{x.Name}\" />");
-                            src.Line.Write($"[{m}DeclaredAt(nameof({m}Self.{x.Name}))]");
+
+                            // base-private fields aren't accessible from here, so we omit `DeclaredAt`
+                            if (!x.IsPrivateInBaseType)
+                                src.Line.Write($"[{m}DeclaredAt(nameof({m}Self.{x.Name}))]");
                         }
 
                         if (x.IsUnmanagedType)
