@@ -109,6 +109,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         public bool EmitIInstanceIndex;
         public bool HasBaseDeclarationsWithAttribute;
         public bool ManualInheritanceMismatch;
+        public bool HasFindByAssetId;
         public string? Attribute;
         public SingletonStrategy EffectiveSingletonStrategy;
         public TrackAttributeSettings AttributeSettings;
@@ -189,10 +190,30 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         }
 
         var sourceLocation = attributeData.ApplicationSyntaxReference.GetLocation()
-            ?? typeDeclaration.Identifier.GetLocation();
+                             ?? typeDeclaration.Identifier.GetLocation();
 
         bool hasIIndexInstance = classSymbol.HasInterface(IInstanceIndexInterfaceFQN);
         bool emitIIndexInstance = hasIIndexInstance && !classSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false);
+
+        // gather tracking IDs
+        bool hasFindByAssetId = false;
+        var trackingIdFQNs = new List<string>();
+        {
+            foreach (var x in classSymbol.Interfaces)
+            {
+                if (!x.FQN.StartsWith(TrackingIdInterfaceFQN))
+                {
+                    if (x.Is(FindByAssetIdInterfaceFQN))
+                        hasFindByAssetId = true;
+                    else
+                        continue;
+                }
+
+                if ((x.TypeArguments.FirstOrDefault()?.FQN ?? AssetIdTypeFQN) is { Length: > 0 } trackingIdFqn)
+                    trackingIdFQNs.Add(trackingIdFqn);
+            }
+        }
+
         return new()
         {
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
@@ -203,6 +224,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             ),
             HasIInstanceIndex = hasIIndexInstance,
             EmitIInstanceIndex = emitIIndexInstance,
+            HasFindByAssetId = hasFindByAssetId,
             SourceGeneratorErrorLocation = new LocationInfo(sourceLocation),
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration, context.SemanticModel, ct),
             ContainingTypeFQN = classSymbol.ContainingType?.FQN,
@@ -212,10 +234,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 .Where(x => x.FQN.StartsWith(UnmanagedDataInterfaceFQN))
                 .Select(x => x.TypeArguments.FirstOrDefault()?.FQN ?? "")
                 .ToArray(),
-            TrackingIdFQNs = classSymbol.Interfaces
-                .Where(x => x.FQN.StartsWith(TrackingIdInterfaceFQN))
-                .Select(x => x.TypeArguments.FirstOrDefault()?.FQN ?? "")
-                .ToArray(),
+            TrackingIdFQNs = trackingIdFQNs.ToArray(),
             TypeFQN = classSymbol.FQN,
             TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode(),
             HasBaseDeclarationsWithAttribute = hasBaseDeclarationsWithAttribute,
@@ -329,12 +348,14 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.OpenBrace();
         }
 
-        void EmitRegistrationMethod(string methodName, string? prependCall = null, params string?[] methodCalls)
+        void EmitRegistrationMethod(string methodName, string? prependCall = null, Action? emitPreBody = null, params string?[] methodCalls)
         {
             if (!input.AttributeSettings.Manual)
             {
                 src.Line.Write(Alias.Hidden);
-                src.Line.Write(Alias.ObsoleteInternal);
+
+                if (!input.Flags.Has(IsSealed))
+                    src.Line.Write(Alias.ObsoleteInternal);
             }
             else
             {
@@ -366,12 +387,27 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 if (hasBaseRegistrationMethod)
                     src.Line.Write($"base.{methodName}();");
 
+                emitPreBody?.Invoke();
+
                 foreach (var methodCall in methodCalls)
                     if (methodCall is not null)
                         src.Line.Write(methodCall).Write(';');
             }
 
             src.Linebreak();
+        }
+
+        void EmitAssetIdRefresh()
+        {
+            if (!input.HasFindByAssetId)
+                return;
+
+            if (!input.Symbols.Has(UNITY_EDITOR))
+                return;
+
+            src.Line.Write($"if ({m}Utility.TryGetAssetID(this, out {AssetIdTypeFQN} {m}AssetId))");
+            using (src.Indent)
+                src.Line.Write($"{m}MedicineAssetId = {m}AssetId;");
         }
 
         void WriteGeneratedArraysComment()
@@ -434,6 +470,27 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             src.Line.Write(Alias.Hidden);
             src.Line.Write($"int {m}MedicineInternalInstanceIndex = -1;");
+            src.Linebreak();
+        }
+
+        if (input.HasFindByAssetId)
+        {
+            src.Line.Write(Alias.Hidden);
+            src.Line.Write("[global::UnityEngine.SerializeField]");
+            src.Line.Write("[global::UnityEngine.HideInInspector]");
+            src.Line.Write($"{AssetIdTypeFQN} {m}MedicineAssetId;");
+            src.Linebreak();
+
+            src.Line.Write($"{AssetIdTypeFQN} {TrackingIdInterfaceFQN}<{AssetIdTypeFQN}>.ID");
+            using (src.Braces)
+                src.Line.Write($"{Alias.Inline} get => {m}MedicineAssetId;");
+
+            src.Linebreak();
+
+            src.Line.Write($"public {AssetIdTypeFQN} AssetID");
+            using (src.Braces)
+                src.Line.Write($"{Alias.Inline} get => {m}MedicineAssetId;");
+
             src.Linebreak();
         }
 
@@ -639,12 +696,12 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"get => {m}Storage.Singleton<{input.TypeFQN}>.Instance;");
             }
 
-            const string StratFQN = $"{SingletonAttributeFQN}.Strategy";
+            const string stratFQN = $"{SingletonAttributeFQN}.Strategy";
 
             src.Linebreak();
             EmitRegistrationMethod(
                 methodName: "OnEnableINTERNAL",
-                prependCall: $"const {StratFQN} {m}singletonStrategy = ({StratFQN}){(ulong)input.EffectiveSingletonStrategy};",
+                prependCall: $"const {stratFQN} {m}singletonStrategy = ({stratFQN}){(ulong)input.EffectiveSingletonStrategy};",
                 methodCalls:
                 [
                     $"{m}Storage.Singleton<{input.TypeFQN}>.Register(this, {m}singletonStrategy)",
@@ -654,7 +711,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             EmitRegistrationMethod(
                 methodName: "OnDisableINTERNAL",
-                prependCall: $"const {StratFQN} {m}singletonStrategy = ({StratFQN}){(ulong)input.EffectiveSingletonStrategy};",
+                prependCall: $"const {stratFQN} {m}singletonStrategy = ({stratFQN}){(ulong)input.EffectiveSingletonStrategy};",
                 methodCalls:
                 [
                     $"{m}Storage.Singleton<{input.TypeFQN}>.Unregister(this, {m}singletonStrategy)",
@@ -702,6 +759,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             EmitRegistrationMethod(
                 methodName: "OnEnableINTERNAL",
+                emitPreBody: EmitAssetIdRefresh,
                 methodCalls:
                 [
                     // keep first
@@ -851,7 +909,6 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             {
                 foreach (var x in declarations[..^1])
                     src.Line.Write(x).OpenBrace();
-
 
                 src.Line.Write(Alias.Hidden);
                 src.Line.Write($"internal static {m}Utility.TypeFlags {initMethodName}()");

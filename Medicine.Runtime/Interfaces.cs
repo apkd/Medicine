@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using Unity.Mathematics;
 
 namespace Medicine
 {
@@ -39,6 +40,11 @@ namespace Medicine
     {
         public T ID { get; }
     }
+
+    /// <summary>
+    /// Provides a <see cref="TrackAttribute"/>-marked ScriptableObject with a generated asset GUID ID.
+    /// </summary>
+    public interface IFindByAssetID : IFindByID<uint4> { }
 
     /// <summary>
     /// Provides a <see cref="TrackAttribute"/>-marked class with an array of unmanaged structs,

@@ -1,5 +1,7 @@
 #nullable enable
+using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Unity.Collections.LowLevel.Unsafe;
@@ -81,6 +83,24 @@ namespace Medicine
         public static TrackedInstances<T> Instances<T>()
             where T : class
             => default;
+
+        /// <summary>
+        /// Allows looking up instances of tracked objects by their identifier.
+        /// The instance must implement <see cref="IFindByID{T}"/> (or <see cref="IFindByAssetID"/>).
+        /// </summary>
+        /// <param name="id">The identifier associated with the object to locate.</param>
+        /// <typeparam name="TID">
+        /// The type of the identifier used in <see cref="IFindByID{TID}"/>.
+        /// Must be unmanaged and implement <see cref="System.IEquatable{TID}"/>.
+        /// </typeparam>
+        /// <returns>
+        /// An API that allows finding the object associated with the given identifier.
+        /// Follow up with <see cref="FindByIdAPI{TID}.OfType{T}()">.OfType&lt;T&gt;()</see> to retrieve the object instance.
+        /// </returns>
+        [MethodImpl(AggressiveInlining)]
+        public static FindByIdAPI<TID> ByID<TID>(in TID id)
+            where TID : unmanaged, IEquatable<TID>
+            => new(id);
 
         /// <summary>
         /// Allocation-free iterator over all components of type <typeparamref name="T"/> in the given scene.
@@ -225,6 +245,34 @@ namespace Medicine
             // the array type returned by the API is actually already T[]; it turns out that in the generic
             // version of the method, Unity seemingly copies the array around for no reason whatsoever
             return UnsafeUtility.As<Object[], T[]>(ref array);
+        }
+
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public readonly struct FindByIdAPI<TID> where TID : unmanaged, IEquatable<TID>
+        {
+            readonly TID id;
+
+            [MethodImpl(AggressiveInlining)]
+            public FindByIdAPI(in TID id)
+                => this.id = id;
+
+            /// <summary> Returns the tracked object instance with the provided ID, or null if not found. </summary>
+            /// <typeparam name="T">
+            /// Type of tracked object to find. Must be tagged with <c>[Track]</c> and implement <see cref="IFindByID{TID}"/>.
+            /// </typeparam>
+            [MethodImpl(AggressiveInlining)]
+            public T? OfType<T>() where T : class, IEquatable<TID>, IFindByID<TID>
+                => Storage.LookupByID<T, TID>.Map.GetValueOrDefault(id);
+
+            /// <summary> Finds the tracked object instance with the provided ID. </summary>
+            /// <param name="instance"> The found instance will be assigned here if found. </param>
+            /// <typeparam name="T">
+            /// Type of tracked object to find. Must be tagged with <c>[Track]</c> and implement <see cref="IFindByID{TID}"/>.
+            /// </typeparam>
+            /// <returns> True when an instance was found; otherwise, false. </returns>
+            [MethodImpl(AggressiveInlining)]
+            public bool OfType<T>(out T instance) where T : class, IFindByID<TID>
+                => Storage.LookupByID<T, TID>.Map.TryGetValue(id, out instance);
         }
     }
 }

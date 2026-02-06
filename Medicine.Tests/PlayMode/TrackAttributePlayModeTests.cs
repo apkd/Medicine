@@ -5,10 +5,18 @@ using System.Linq;
 #endif
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using JetBrains.Annotations;
 using Medicine;
 using NUnit.Framework;
+using Unity.Mathematics;
 using UnityEngine;
 using static System.Reflection.BindingFlags;
+using Object = UnityEngine.Object;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public partial class TrackAttributePlayModeTests
 {
@@ -364,8 +372,42 @@ public partial class TrackAttributePlayModeTests
         {
             Assert.That(instance, Is.EqualTo(MBTrackFindByID.FindByID(instance.ID)));
             Assert.That(instance, Is.EqualTo(MBTrackFindByID.FindByID(instance.GetHashCode())));
+
+            Assert.That(Find.ByID(instance.ID).OfType<MBTrackFindByID>(out var byUlong), Is.True);
+            Assert.That(byUlong, Is.EqualTo(instance));
+
+            Assert.That(Find.ByID(instance.GetHashCode()).OfType<MBTrackFindByID>(out var byInt), Is.True);
+            Assert.That(byInt, Is.EqualTo(instance));
+
+            Assert.That(MBTrackFindByID.TryFindByID(instance.ID, out byUlong), Is.True);
+            Assert.That(byUlong, Is.EqualTo(instance));
+
+            Assert.That(MBTrackFindByID.TryFindByID(instance.GetHashCode(), out byInt), Is.True);
+            Assert.That(byInt, Is.EqualTo(instance));
+        }
+
+        Assert.That(Find.ByID(ulong.MaxValue).OfType<MBTrackFindByID>(out _), Is.False);
+        Assert.That(Find.ByID(int.MinValue).OfType<MBTrackFindByID>(out _), Is.False);
+        Assert.That(MBTrackFindByID.TryFindByID(ulong.MaxValue, out _), Is.False);
+        Assert.That(MBTrackFindByID.TryFindByID(int.MinValue, out _), Is.False);
+    }
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    [Track]
+    sealed partial class SOTrackFindByAssetID : MonoBehaviour, IFindByAssetID
+    {
+        [UsedImplicitly]
+        public uint4 GetID()
+        {
+            Assert.That(AssetID, Is.EqualTo((this as IFindByID<uint4>).ID));
+            return AssetID;
         }
     }
+
+    [Test]
+    public void Track_FindByAssetID_CompileTests()
+        => _ = new GameObject().AddComponent<SOTrackFindByAssetID>().GetID();
 
     //////////////////////////////////////////////////////////////////////////////
 
