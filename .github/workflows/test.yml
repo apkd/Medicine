@@ -123,7 +123,7 @@ jobs:
               -executeMethod CI.RunTests
 
       - name: Run tests in standalone player
-        if: contains(fromJSON('["6000.0", "6000.1", "6000.2", "6000.3", "6000.4", "6000.5"]'), steps.vars.outputs.unity_v_mm)
+#        if: contains(fromJSON('["6000.0", "6000.1", "6000.2", "6000.3", "6000.4", "6000.5"]'), steps.vars.outputs.unity_v_mm)
         run: |
           set -euo pipefail
 
