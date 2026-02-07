@@ -114,20 +114,21 @@ namespace Medicine
                 destination.Capacity = count + extraCapacity;
 
             var destinationListView = destination.AsInternalsView();
+            int previousCount = destinationListView.Count;
             destinationListView.Count = count;
+            var destinationArray = destinationListView.Array!;
 
             Storage.Instances<T>.List.CopyTo(
-                array: destinationListView.Array!,
+                array: destinationArray,
                 arrayIndex: 0
             );
 
-            int clearLength = destinationListView.Array!.Length - count;
-            if (clearLength > 0)
+            if (previousCount > count)
             {
                 Array.Clear(
-                    array: destinationListView.Array!,
+                    array: destinationArray,
                     index: count,
-                    length: clearLength
+                    length: previousCount - count
                 );
             }
         }
