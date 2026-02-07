@@ -7,10 +7,10 @@
 [![Latest version number](https://img.shields.io/github/package-json/version/apkd/medicine?labelColor=2C3439&label=Version&logo=unity
 )](https://github.com/apkd/Medicine/releases/tag/latest)
 [![MIT License](https://img.shields.io/github/license/apkd/medicine?style=flat&label=License&logo=listmonk&labelColor=2C3439&color=fff)](https://github.com/apkd/Medicine/blob/master/LICENSE)
+[![Wiki page count](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fgithub.com%2Fapkd%2FMedicine%2Fwiki&logo=wikipedia&color=00A67C&labelColor=2C3439&label=Wiki%20pages&search=Pages%5B%5Cs%5CS%5D%2A%3FCounter--primary%5B%5E%3E%5D%2A%3E(%5B0-9%5D%2B)%3C&replace=%241&cacheSeconds=86400)](https://github.com/apkd/Medicine/wiki)
 [![Test status badge](https://github.com/apkd/Medicine/actions/workflows/test.yml/badge.svg?branch=master&event=push)](https://github.com/apkd/Medicine/actions/workflows/test.yml)
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/y/apkd/Medicine?authorFilter=apkd&label=Commits&labelColor=2C3439&color=EBFF65&logo=git)](https://github.com/apkd/Medicine/commits/master)
 [![GitHub last commit](https://img.shields.io/github/last-commit/apkd/Medicine?labelColor=2C3439&color=f97&logoColor=f96&logo=tinder&label=Last%20commit)](https://github.com/apkd/Medicine/commit/HEAD~1) 
-
 
 Medicine is a Unity toolkit that combines Roslyn source generators with fast runtime helpers to eliminate common component boilerplate, improve prototyping velocity, and unlock new high-performance programming patterns.
 
