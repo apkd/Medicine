@@ -36,7 +36,7 @@ namespace Medicine.Internal
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static bool TryFind(TId id, [NotNullWhen(true)] out T? result)
+            public static bool TryFind(TId id, out T result)
             {
                 bool ok = Map.TryGetValue(id, out result);
 #if DEBUG

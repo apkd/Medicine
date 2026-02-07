@@ -262,7 +262,7 @@ namespace Medicine
             /// </typeparam>
             [MethodImpl(AggressiveInlining)]
             public T? OfType<T>() where T : class, IEquatable<TID>, IFindByID<TID>
-                => Storage.LookupByID<T, TID>.Map.GetValueOrDefault(id);
+                => Storage.LookupByID<T, TID>.Find(id);
 
             /// <summary> Finds the tracked object instance with the provided ID. </summary>
             /// <param name="instance"> The found instance will be assigned here if found. </param>
@@ -272,7 +272,7 @@ namespace Medicine
             /// <returns> True when an instance was found; otherwise, false. </returns>
             [MethodImpl(AggressiveInlining)]
             public bool OfType<T>(out T instance) where T : class, IFindByID<TID>
-                => Storage.LookupByID<T, TID>.Map.TryGetValue(id, out instance);
+                => Storage.LookupByID<T, TID>.TryFind(id, out instance);
         }
     }
 }
