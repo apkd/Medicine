@@ -63,8 +63,20 @@ public sealed class OptionalUsageAnalyzer : DiagnosticAnalyzer
 
             var symbolInfo = context.SemanticModel.GetSymbolInfo(invocation, context.CancellationToken);
 
-            var symbol = symbolInfo.Symbol as IMethodSymbol
-                         ?? symbolInfo.CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
+
+            var symbol = symbolInfo.Symbol as IMethodSymbol;
+
+            if (symbol is null)
+            {
+                foreach (var methodSymbol in symbolInfo.CandidateSymbols)
+                {
+                    if (methodSymbol is IMethodSymbol x)
+                    {
+                        symbol = x;
+                        break;
+                    }
+                }
+            }
 
             return symbol is
             {

@@ -74,12 +74,6 @@ public static class Utility
         }
     }
 
-    public static unsafe string MakeString(this ReadOnlySpan<char> chars)
-    {
-        var ptr = (char*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(chars));
-        return new(ptr, 0, chars.Length);
-    }
-
     public static string AsRefString(this RefKind refKind)
         => refKind switch
         {

@@ -30,7 +30,7 @@ public readonly struct EquatableArray<T>(T[]? array) : IEquatable<EquatableArray
         => array ?? [];
 
     public Span<T> AsSpan()
-        => array.AsSpan();
+        => (array ?? []).AsSpan();
 
     public Span<T>.Enumerator GetEnumerator()
         => AsSpan().GetEnumerator();

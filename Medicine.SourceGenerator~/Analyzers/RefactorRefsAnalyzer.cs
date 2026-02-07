@@ -36,17 +36,8 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
         isEnabledByDefault: true
     );
 
-    public static readonly DiagnosticDescriptor TESTESTES = new(
-        id: "TESTESTES",
-        title: "Exception",
-        messageFormat: "Exception: {0}",
-        category: "Exception",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true
-    );
-
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; }
-        = ImmutableArray.Create(MED007, MED008, MED009, TESTESTES);
+        = ImmutableArray.Create(MED007, MED008, MED009);
 
     static readonly ImmutableHashSet<string> TargetMethodNames
         = ImmutableHashSet.Create(

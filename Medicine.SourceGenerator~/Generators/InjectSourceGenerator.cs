@@ -569,7 +569,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     return new()
                     {
                         PropertyName = assignment.Left.ToString().Trim(),
-                        InitExpression = expression.MakeString(),
+                        InitExpression = expression.ToString(),
                         EditModeLocalDeclarations = editModeLocalDeclarations,
                         CleanupExpression = cleanupExpression,
                         TypeFQN = typeFQN,

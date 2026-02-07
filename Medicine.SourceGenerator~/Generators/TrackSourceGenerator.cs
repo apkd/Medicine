@@ -276,7 +276,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode(),
             HasBaseDeclarationsWithAttribute = hasBaseDeclarationsWithAttribute,
             ManualInheritanceMismatch = manualInheritanceMismatch,
-            InterfacesWithAttribute
+                InterfacesWithAttribute
                 = classSymbol.Interfaces
                     .Where(x => x.HasAttribute(attributeSymbol))
                     .Where(x => !classSymbol.GetBaseTypes().Any(y => y.Interfaces.Contains(x))) // skip interfaces already registered via base class
