@@ -29,7 +29,7 @@ namespace Medicine
 #if DEBUG
             Profiler.BeginSample($"[Benchmark] {name}");
 #endif
-            return new Benchmark(name, Stopwatch.GetTimestamp());
+            return new(name, Stopwatch.GetTimestamp());
         }
 
         /// <summary> Start a new benchmark with given name. </summary>
@@ -38,7 +38,7 @@ namespace Medicine
 #if DEBUG
             Profiler.BeginSample("[Benchmark] " + name);
 #endif
-            return new Benchmark(name, Stopwatch.GetTimestamp());
+            return new(name, Stopwatch.GetTimestamp());
         }
 
         long ElapsedTicks
@@ -50,7 +50,7 @@ namespace Medicine
                 : ElapsedTicks;
 
         TimeSpan Elapsed
-            => new TimeSpan(GetElapsedDateTimeTicks());
+            => new(GetElapsedDateTimeTicks());
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Dispose()
@@ -62,7 +62,7 @@ namespace Medicine
 #if UNITY_EDITOR
             Debug.Log($"<b>[Benchmark] <i>{name}</i></b>: {elapsed:0.00}ms");
 #else
-                Debug.Log($"[Benchmark] {name}: {elapsed:0.00}ms");
+            Debug.Log($"[Benchmark] {name}: {elapsed:0.00}ms");
 #endif
         }
     }

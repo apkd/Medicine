@@ -49,41 +49,47 @@ namespace Medicine.Internal
 
             public static void Register(T target)
             {
+                var id = target.ID;
 #if DEBUG
-                if (Map.TryGetValue(target.ID, out T? other))
-                    LogError($"Duplicate instance with ID {target.ID} for {typeof(T).Name}: '{target}' vs '{other}'");
+                if (Map.TryGetValue(id, out T? other))
+                    LogError($"Duplicate instance with ID {id} for {typeof(T).Name}: '{target}' vs '{other}'");
 #endif
-                Map[target.ID] = target;
+                Map[id] = target;
             }
 
             public static void Unregister(T target)
             {
+                var id = target.ID;
 #if DEBUG
-                if (!Map.TryGetValue(target.ID, out var stored) || stored is null)
+                if (!Map.TryGetValue(id, out var stored) || stored is null)
                 {
-                    LogError($"Trying to unregister a missing instance: {typeof(T).Name} with ID {target.ID} not found.");
+                    LogError($"Trying to unregister a missing instance: {typeof(T).Name} with ID {id} not found.");
                 }
                 else
                 {
                     // detect that the target's ID changed after registration
-                    if (!stored.ID.Equals(target.ID))
-                        LogIdMismatch(target.ID, stored);
+                    if (!stored.ID.Equals(id))
+                        LogIdMismatch(id, stored);
 
                     // detect that a different instance is stored under the target's ID
                     if (!ReferenceEquals(stored, target))
                     {
                         var type = typeof(T).Name;
-                        LogError($"Instance mismatch for {type} with ID {target.ID}: map has '{stored}', tried to unregister '{target}'.");
+                        LogError($"Instance mismatch for {type} with ID {id}: map has '{stored}', tried to unregister '{target}'.");
                     }
                 }
 #endif
-                Map.Remove(target.ID);
+                Map.Remove(id);
             }
 
             public static void Reinitialize()
             {
+                var instances = Medicine.Find.Instances<T>();
+
                 Map.Clear();
-                foreach (var instance in Medicine.Find.Instances<T>())
+                Map.EnsureCapacity(instances.Count);
+
+                foreach (var instance in instances)
                     Map[instance.ID] = instance;
             }
         }
