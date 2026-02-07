@@ -99,6 +99,11 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         bool Manual
     );
 
+    readonly record struct TrackingIdRegistration(
+        string LookupTypeFQN,
+        string IDTypeFQN
+    );
+
     record struct GeneratorInput : IGeneratorTransformOutput
     {
         public string? SourceGeneratorOutputFilename { get; init; }
@@ -109,7 +114,6 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         public bool EmitIInstanceIndex;
         public bool HasBaseDeclarationsWithAttribute;
         public bool ManualInheritanceMismatch;
-        public bool HasFindByAssetId;
         public string? Attribute;
         public SingletonStrategy EffectiveSingletonStrategy;
         public TrackAttributeSettings AttributeSettings;
@@ -117,7 +121,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         public string? ContainingTypeFQN;
         public EquatableArray<string> InterfacesWithAttribute;
         public EquatableArray<string> UnmanagedDataFQNs;
-        public EquatableArray<string> TrackingIdFQNs;
+        public EquatableArray<TrackingIdRegistration> TrackingIdRegistrations;
         public string? TypeFQN;
         public string? TypeDisplayName;
         public ActivePreprocessorSymbolNames Symbols;
@@ -195,22 +199,43 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         bool hasIIndexInstance = classSymbol.HasInterface(IInstanceIndexInterfaceFQN);
         bool emitIIndexInstance = hasIIndexInstance && !classSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false);
 
-        // gather tracking IDs
-        bool hasFindByAssetId = false;
-        var trackingIdFQNs = new List<string>();
+        var allInterfaces = classSymbol.AllInterfaces;
+        string classTypeFQN = classSymbol.FQN;
+
+        var trackingIdRegistrations = new List<TrackingIdRegistration>();
+
+        // gather IFindByID interface usages
         {
-            foreach (var x in classSymbol.Interfaces)
+            foreach (var interfaceType in allInterfaces)
             {
-                if (!x.FQN.StartsWith(TrackingIdInterfaceFQN))
+                AddTrackingIdFromSymbol(interfaceType, interfaceType.FQN);
+
+                foreach (var inheritedInterface in interfaceType.AllInterfaces)
+                    AddTrackingIdFromSymbol(inheritedInterface, interfaceType.FQN);
+            }
+
+            void AddTrackingIdFromSymbol(INamedTypeSymbol type, string lookupTypeFQN)
+            {
+                if (!TryGetTrackingIdType(type, out var idTypeFQN))
+                    return;
+
+                if (!trackingIdRegistrations.Contains(new(classTypeFQN, idTypeFQN)))
+                    trackingIdRegistrations.Add(new(classTypeFQN, idTypeFQN));
+
+                if (!trackingIdRegistrations.Contains(new(lookupTypeFQN, idTypeFQN)))
+                    trackingIdRegistrations.Add(new(lookupTypeFQN, idTypeFQN));
+            }
+
+            static bool TryGetTrackingIdType(INamedTypeSymbol type, out string idTypeFQN)
+            {
+                if (!type.FQN.StartsWith(TrackingIdInterfaceFQN))
                 {
-                    if (x.Is(FindByAssetIdInterfaceFQN))
-                        hasFindByAssetId = true;
-                    else
-                        continue;
+                    idTypeFQN = "";
+                    return false;
                 }
 
-                if ((x.TypeArguments.FirstOrDefault()?.FQN ?? AssetIdTypeFQN) is { Length: > 0 } trackingIdFqn)
-                    trackingIdFQNs.Add(trackingIdFqn);
+                idTypeFQN = type.TypeArguments.FirstOrDefault()?.FQN ?? "";
+                return idTypeFQN.Length > 0;
             }
         }
 
@@ -224,7 +249,6 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             ),
             HasIInstanceIndex = hasIIndexInstance,
             EmitIInstanceIndex = emitIIndexInstance,
-            HasFindByAssetId = hasFindByAssetId,
             SourceGeneratorErrorLocation = new LocationInfo(sourceLocation),
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration, context.SemanticModel, ct),
             ContainingTypeFQN = classSymbol.ContainingType?.FQN,
@@ -234,7 +258,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 .Where(x => x.FQN.StartsWith(UnmanagedDataInterfaceFQN))
                 .Select(x => x.TypeArguments.FirstOrDefault()?.FQN ?? "")
                 .ToArray(),
-            TrackingIdFQNs = trackingIdFQNs.ToArray(),
+            TrackingIdRegistrations = trackingIdRegistrations.ToArray(),
             TypeFQN = classSymbol.FQN,
             TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode(),
             HasBaseDeclarationsWithAttribute = hasBaseDeclarationsWithAttribute,
@@ -297,6 +321,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         var unmanagedDataInfo = input.UnmanagedDataFQNs.AsArray()
             .Select(x => (dataType: x, dataTypeShort: x.Split('.', ':').Last().HtmlEncode()))
             .ToArray();
+
+        bool hasFindByAssetId = input.TrackingIdRegistrations.AsArray()
+            .Any(x => x is { LookupTypeFQN: FindByAssetIdInterfaceFQN, IDTypeFQN: AssetIdTypeFQN });
 
         var declarations = input.ContainingTypeDeclaration.AsSpan();
         int lastDeclaration = declarations.Length - 1;
@@ -399,13 +426,13 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         void EmitAssetIdRefresh()
         {
-            if (!input.HasFindByAssetId)
+            if (!hasFindByAssetId)
                 return;
 
             if (!input.Symbols.Has(UNITY_EDITOR))
                 return;
 
-            src.Line.Write($"if ({m}Utility.TryGetAssetID(this, out {AssetIdTypeFQN} {m}AssetId))");
+            src.Line.Write($"if ({m}Utility.TryGetAssetID(this, out var {m}AssetId))");
             using (src.Indent)
                 src.Line.Write($"{m}MedicineAssetId = {m}AssetId;");
         }
@@ -473,7 +500,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Linebreak();
         }
 
-        if (input.HasFindByAssetId)
+        if (hasFindByAssetId)
         {
             src.Line.Write(Alias.Hidden);
             src.Line.Write("[global::UnityEngine.SerializeField]");
@@ -647,26 +674,23 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Linebreak();
         }
 
-        if (input.TrackingIdFQNs is { Length: > 0 })
+        foreach (var idType in input.TrackingIdRegistrations.AsArray().Select(x => x.IDTypeFQN).Distinct())
         {
-            foreach (var idType in input.TrackingIdFQNs)
-            {
-                src.Line.Write(Alias.Inline);
-                src.Line.Write($"public static {input.TypeFQN}? FindByID({idType} id)");
+            src.Line.Write(Alias.Inline);
+            src.Line.Write($"public static {input.TypeFQN}? FindByID({idType} id)");
 
-                using (src.Indent)
-                    src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Find(id);");
+            using (src.Indent)
+                src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Find(id);");
 
-                src.Linebreak();
+            src.Linebreak();
 
-                src.Line.Write(Alias.Inline);
-                src.Line.Write($"public static bool TryFindByID({idType} id, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {input.TypeFQN}? result)");
+            src.Line.Write(Alias.Inline);
+            src.Line.Write($"public static bool TryFindByID({idType} id, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {input.TypeFQN}? result)");
 
-                using (src.Indent)
-                    src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.TryFind(id, out result);");
+            using (src.Indent)
+                src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.TryFind(id, out result);");
 
-                src.Linebreak();
-            }
+            src.Linebreak();
         }
 
         if (input.Attribute is SingletonAttributeMetadataName)
@@ -769,7 +793,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     input.AttributeSettings.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Register(transform)" : null,
                     ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Register(this)"),
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Register(this)"),
-                    ..input.TrackingIdFQNs.AsArray().Select(x => $"{m}Storage.LookupByID<{input.TypeFQN}, {x}>.Register(this)"),
+                    ..input.TrackingIdRegistrations.AsArray().Select(x => $"{m}Storage.LookupByID<{x.LookupTypeFQN}, {x.IDTypeFQN}>.Register(this)"),
                 ]
             );
 
@@ -781,7 +805,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     input.AttributeSettings.CacheEnabledState ? $"{m}MedicineInternalCachedEnabledState = false" : null,
                     $"int index = {m}Storage.Instances<{input.TypeFQN}>.Unregister{withId}(this)",
                     // rest in reverse
-                    ..input.TrackingIdFQNs.AsArray().Select(x => $"{m}Storage.LookupByID<{input.TypeFQN}, {x}>.Unregister(this)").Reverse(),
+                    ..input.TrackingIdRegistrations.AsArray().Select(x => $"{m}Storage.LookupByID<{x.LookupTypeFQN}, {x.IDTypeFQN}>.Unregister(this)").Reverse(),
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Unregister(this, index)").Reverse(),
                     ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Unregister(this)").Reverse(),
                     input.AttributeSettings.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Unregister(index)" : null,

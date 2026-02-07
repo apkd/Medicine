@@ -395,19 +395,43 @@ public partial class TrackAttributePlayModeTests
     //////////////////////////////////////////////////////////////////////////////
 
     [Track]
-    sealed partial class SOTrackFindByAssetID : MonoBehaviour, IFindByAssetID
+    interface IFindByIDWithInterface : IFindByID<int> { }
+
+    [Track]
+    sealed partial class MBTrackFindByIDWithInterface : MonoBehaviour, IFindByIDWithInterface
     {
-        [UsedImplicitly]
-        public uint4 GetID()
-        {
-            Assert.That(AssetID, Is.EqualTo((this as IFindByID<uint4>).ID));
-            return AssetID;
-        }
+        public int ID => GetHashCode();
     }
 
     [Test]
+    public void Track_FindByIDWithInterface()
+    {
+        for (int i = 1; i < 5; ++i)
+        {
+            var go = new GameObject(null, typeof(MBTrackFindByIDWithInterface));
+            var mb = go.GetComponent<MBTrackFindByIDWithInterface>();
+            Assert.That(MBTrackFindByIDWithInterface.Instances, Has.Count.EqualTo(i));
+        }
+
+        foreach (var instance in MBTrackFindByIDWithInterface.Instances)
+        {
+            Assert.That(Find.ByID(instance.ID).OfType<IFindByIDWithInterface>(out var byUlong), Is.True);
+            Assert.That(byUlong, Is.EqualTo(instance));
+        }
+    }
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    [Track]
+    sealed partial class SOTrackFindByAssetID : MonoBehaviour, IFindByAssetID { }
+
+    [Test]
     public void Track_FindByAssetID_CompileTests()
-        => _ = new GameObject().AddComponent<SOTrackFindByAssetID>().GetID();
+    {
+        var component = new GameObject().AddComponent<SOTrackFindByAssetID>();
+        var assetId = component.AssetID;
+        Assert.That(assetId, Is.EqualTo(((IFindByID<uint4>)component).ID));
+    }
 
     //////////////////////////////////////////////////////////////////////////////
 
