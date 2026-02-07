@@ -280,9 +280,15 @@ namespace Medicine.Internal
 
                 static bool AnyInstanceBecameInvalid()
                 {
-                    // this method is theoretically burstable, but not sure if it's worth it for edit mode code
-                    foreach (var instance in List.AsInternalsView().Array ?? Array.Empty<T>())
+                    var (array, n) = List.AsInternalsView();
+
+                    if (array is null)
+                        return false;
+
+                    for (int i = 0; i < n; i++)
                     {
+                        var instance = array[i];
+
                         // any instance was destroyed
                         if (!Utility.IsNativeObjectAlive(instance as Object))
                             return true;
