@@ -44,7 +44,21 @@ public static class Utility
     public static string GetOutputFilename(string filePath, string targetFQN, string label, string shadowTargetFQN = "", bool includeFilename = true)
     {
         string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(filePath);
-        string typename = new string(targetFQN.Select(x => char.IsLetterOrDigit(x) ? x : '_').ToArray());
+        string typename;
+        {
+            var source = targetFQN.AsSpan();
+            Span<char> sanitized = source.Length <= 1024
+                ? stackalloc char[source.Length]
+                : new char[source.Length];
+
+            for (int i = 0; i < source.Length; i++)
+            {
+                char c = source[i];
+                sanitized[i] = char.IsLetterOrDigit(c) ? c : '_';
+            }
+
+            typename = sanitized.ToString();
+        }
 
         var result = includeFilename
             ? $"{fileNameWithoutExtension}.{typename}.{label}.{Hash():x8}.g.cs"
