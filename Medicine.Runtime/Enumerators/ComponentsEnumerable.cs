@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -14,8 +13,15 @@ namespace Medicine.Internal
     [EditorBrowsable(Never)]
     public readonly struct ComponentsEnumerable<T> : ILinqFallbackEnumerable<PooledListEnumerator<T>, T> where T : class
     {
+        enum SearchMode : byte
+        {
+            Self,
+            Parents,
+            Children,
+        }
+
         UnityEngine.Object Target { get; init; }
-        Action<UnityEngine.Object, List<T>, bool> SearchFunc { get; init; }
+        SearchMode Mode { get; init; }
         bool IncludeInactive { get; init; }
 
         public static ComponentsEnumerable<T> InChildren(UnityEngine.Object target, bool includeInactive)
@@ -23,9 +29,7 @@ namespace Medicine.Internal
             {
                 Target = target,
                 IncludeInactive = includeInactive,
-                SearchFunc = target is UnityEngine.GameObject
-                    ? static (x, list, includeInactive) => (x as UnityEngine.GameObject).GetComponentsInChildren(includeInactive, list)
-                    : static (x, list, includeInactive) => (x as UnityEngine.Component).GetComponentsInChildren(includeInactive, list),
+                Mode = SearchMode.Children,
             };
 
         public static ComponentsEnumerable<T> InParents(UnityEngine.Object target, bool includeInactive)
@@ -33,19 +37,49 @@ namespace Medicine.Internal
             {
                 Target = target,
                 IncludeInactive = includeInactive,
-                SearchFunc = target is UnityEngine.GameObject
-                    ? static (x, list, includeInactive) => (x as UnityEngine.GameObject).GetComponentsInParent(includeInactive, list)
-                    : static (x, list, includeInactive) => (x as UnityEngine.Component).GetComponentsInParent(includeInactive, list),
+                Mode = SearchMode.Parents,
             };
 
         public static ComponentsEnumerable<T> InSelf(UnityEngine.Object target)
             => new()
             {
                 Target = target,
-                SearchFunc = target is UnityEngine.GameObject
-                    ? static (x, list, _) => (x as UnityEngine.GameObject).GetComponents(list)
-                    : static (x, list, _) => (x as UnityEngine.Component).GetComponents(list),
+                Mode = SearchMode.Self,
             };
+
+        [MethodImpl(AggressiveInlining)]
+        void Search(List<T> list)
+        {
+            if (Target is UnityEngine.GameObject gameObject)
+            {
+                switch (Mode)
+                {
+                    case SearchMode.Self:
+                        gameObject.GetComponents(list);
+                        return;
+                    case SearchMode.Parents:
+                        gameObject.GetComponentsInParent(IncludeInactive, list);
+                        return;
+                    case SearchMode.Children:
+                        gameObject.GetComponentsInChildren(IncludeInactive, list);
+                        return;
+                }
+            }
+
+            var component = Target as UnityEngine.Component;
+            switch (Mode)
+            {
+                case SearchMode.Self:
+                    component.GetComponents(list);
+                    return;
+                case SearchMode.Parents:
+                    component.GetComponentsInParent(IncludeInactive, list);
+                    return;
+                case SearchMode.Children:
+                    component.GetComponentsInChildren(IncludeInactive, list);
+                    return;
+            }
+        }
 
         /// <summary>
         /// Returns the components as a pooled list.
@@ -57,7 +91,7 @@ namespace Medicine.Internal
         public PooledList<T> ToPooledList(out List<T> list)
         {
             var handle = PooledList.Get(out list);
-            SearchFunc(Target, list, IncludeInactive);
+            Search(list);
             return handle;
         }
 
@@ -67,14 +101,14 @@ namespace Medicine.Internal
         public PooledList<T> ToPooledList()
         {
             var handle = PooledList.Get<T>(out var list);
-            SearchFunc(Target, list, IncludeInactive);
+            Search(list);
             return handle;
         }
 
         public PooledListEnumerator<T> GetEnumerator()
         {
             var pooled = PooledList.Get<T>(out var list);
-            SearchFunc(Target, list, IncludeInactive);
+            Search(list);
             return new(pooled);
         }
 
