@@ -1,6 +1,5 @@
 #nullable enable
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
@@ -157,13 +156,20 @@ namespace Medicine
                     sortMode
                 );
 
-                var list = new List<T>(capacity: 16);
+                int count = 0;
+                for (int i = 0; i < temp.Length; i++)
+                    if (temp[i] is T)
+                        count++;
 
-                foreach (var x in temp)
-                    if (x is T t)
-                        list.Add(t);
+                if (count is 0)
+                    return Array.Empty<T>();
 
-                return list.ToArray();
+                var result = new T[count];
+                for (int i = 0, resultIndex = 0; i < temp.Length; i++)
+                    if (temp[i] is T match)
+                        result[resultIndex++] = match;
+
+                return result;
             }
 
             var array = Object.FindObjectsByType(
