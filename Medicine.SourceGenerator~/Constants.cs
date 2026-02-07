@@ -47,7 +47,9 @@ static class Constants
     public const string UnmanagedDataInterfaceFQN = $"{NamespaceWithGlobal}.{UnmanagedDataInterfaceName}";
 
     public const string TrackingIdInterfaceName = "IFindByID";
+    public const string TrackingIdInterfaceMetadataName = $"{Namespace}.{TrackingIdInterfaceName}";
     public const string TrackingIdInterfaceFQN = $"{NamespaceWithGlobal}.{TrackingIdInterfaceName}";
+
     public const string FindByAssetIdInterfaceName = "IFindByAssetID";
     public const string FindByAssetIdInterfaceFQN = $"{NamespaceWithGlobal}.{FindByAssetIdInterfaceName}";
     public const string AssetIdTypeFQN = "global::Unity.Mathematics.uint4";

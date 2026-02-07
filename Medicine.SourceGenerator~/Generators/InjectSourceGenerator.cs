@@ -107,6 +107,8 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
+        var knownSymbolsProvider = context.GetKnownSymbolsProvider();
+
         var medicineSettings = context.CompilationProvider
             .Combine(context.ParseOptionsProvider)
             .Select((x, ct) => new MedicineSettings(x, ct));
@@ -121,8 +123,10 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         LocalFunctionDecl x => !x.Modifiers.Any(SyntaxKind.AbstractKeyword),
                         _                   => false,
                     },
-                transform: TransformSyntaxContext
-            );
+                transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
+            )
+            .Combine(knownSymbolsProvider)
+            .SelectEx((x, ct) => TransformSyntaxContext(x.Left.Context.Value, x.Right, ct));
 
         context.RegisterSourceOutputEx(
             source: syntaxProvider.Combine(medicineSettings)
@@ -138,7 +142,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         );
     }
 
-    static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, CT ct)
+    static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, KnownSymbols knownSymbols, CT ct)
     {
         var targetNode = context.TargetNode;
 
@@ -147,6 +151,8 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
         if (targetNode.FirstAncestorOrSelf<MethodDecl>() is not { } methodDecl)
             return default;
+
+        var containingClassSymbol = context.SemanticModel.GetDeclaredSymbol(classDecl, ct);
 
         var (injectMethodName, injectMethodModifiers) = targetNode switch
         {
@@ -258,9 +264,11 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     {
                         if (GetDelegateReturnType(expr) is { } exprType)
                         {
-                            // todo: cache types per-compilation
-                            string lazyExpr = exprType.IsValueType ? "Medicine.LazyVal`1" : "Medicine.LazyRef`1";
-                            typeSymbol = context.SemanticModel.Compilation.GetTypeByMetadataName(lazyExpr)?.Construct(exprType);
+                            var lazyType = exprType.IsValueType
+                                ? knownSymbols.LazyVal
+                                : knownSymbols.LazyRef;
+
+                            typeSymbol = lazyType?.Construct(exprType);
                             typeSymbolForDisplayName = exprType;
                             flags.Set(IsLazy, true);
                         }
@@ -269,8 +277,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     {
                         if (GetDelegateReturnType(assignment.Right) is { } exprType)
                         {
-                            // todo: cache types per-compilation
-                            typeSymbol = context.SemanticModel.Compilation.GetTypeByMetadataName("System.Func`1")?.Construct(exprType);
+                            typeSymbol = knownSymbols.SystemFunc1?.Construct(exprType);
                             typeSymbolForDisplayName = exprType;
                             flags.Set(IsTransient, true);
                         }
@@ -365,7 +372,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
                     var right = assignment.Right;
 
-                    bool IsStaticPropertyAccess(string classAttribute, string propertyName)
+                    bool IsStaticPropertyAccess(INamedTypeSymbol? classAttribute, string propertyName)
                         => right is MemberAccess
                            {
                                Expression: { } classIdentifier,
@@ -379,7 +386,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                                Identifier.ValueText: { Length: > 0 } simpleIdentifierText,
                            }
                            && simpleIdentifierText == propertyName
-                           && context.SemanticModel.GetDeclaredSymbol(classDecl, ct) is { } classSymbol
+                           && containingClassSymbol is { } classSymbol
                            && classSymbol.HasAttribute(classAttribute);
 
                     bool IsFindMethodCall(string methodName)
@@ -391,7 +398,8 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                                    Name.Identifier.ValueText: var identifierText,
                                },
                            }
-                           && context.SemanticModel.GetSymbolInfo(findClassIdentifier, ct).Symbol is ITypeSymbol { FQN: MedicineFindClassFQN }
+                           && context.SemanticModel.GetSymbolInfo(findClassIdentifier, ct).Symbol is ITypeSymbol findClassType
+                           && findClassType.Is(knownSymbols.MedicineFind)
                            && identifierText == methodName;
 
                     string? cleanupExpression = null;
@@ -453,11 +461,11 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     }
 
                     bool isSingleton =
-                        IsStaticPropertyAccess(SingletonAttributeFQN, "Instance") ||
+                        IsStaticPropertyAccess(knownSymbols.SingletonAttribute, "Instance") ||
                         IsFindMethodCall("Singleton");
 
                     bool isTracked =
-                        IsStaticPropertyAccess(TrackAttributeFQN, "Instances") ||
+                        IsStaticPropertyAccess(knownSymbols.TrackAttribute, "Instances") ||
                         IsFindMethodCall("Instances");
 
                     flags.Set(IsSingleton, isSingleton);
@@ -481,7 +489,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     {
                         if (right is Identifier { Identifier.ValueText: "Instance" })
                         {
-                            if (context.SemanticModel.GetDeclaredSymbol(classDecl, ct) is ITypeSymbol classSymbol)
+                            if (containingClassSymbol is ITypeSymbol classSymbol)
                                 typeSymbol = classSymbol;
                         }
                         else
@@ -500,7 +508,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         }
                         else if (right is Identifier { Identifier.ValueText: "Instances" })
                         {
-                            if (context.SemanticModel.GetDeclaredSymbol(classDecl, ct) is ITypeSymbol classSymbol)
+                            if (containingClassSymbol is ITypeSymbol classSymbol)
                                 typeSymbol = classSymbol;
                         }
                         else
@@ -537,12 +545,12 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
                     flags.Set(
                         IsUnityObject,
-                        value: typeSymbol.InheritsFrom("global::UnityEngine.Object")
+                        value: typeSymbol.InheritsFrom(knownSymbols.UnityObject)
                     );
 
                     flags.Set(
                         IsUnityComponent,
-                        value: typeSymbol.InheritsFrom("global::UnityEngine.Component")
+                        value: typeSymbol.InheritsFrom(knownSymbols.UnityComponent)
                     );
 
                     flags.Set(
@@ -556,7 +564,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
                     flags.Set(IsValueType, typeSymbol?.IsValueType is true);
                     flags.Set(IsArray, typeSymbol is IArrayTypeSymbol);
-                    flags.Set(IsDisposable, typeSymbol.HasInterface("global::System.IDisposable"));
+                    flags.Set(IsDisposable, typeSymbol.HasInterface(knownSymbols.SystemIDisposable));
 
                     return new()
                     {

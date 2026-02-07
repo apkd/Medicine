@@ -13,6 +13,8 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 {
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
+        var knownSymbolsProvider = context.GetKnownSymbolsProvider();
+
         var medicineSettings = context.CompilationProvider
             .Combine(context.ParseOptionsProvider)
             .Select((x, ct) => new MedicineSettings(x, ct));
@@ -25,7 +27,8 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
                     predicate: static (x, ct) => x is MethodDeclarationSyntax or PropertyDeclarationSyntax,
                     transform: TransformForCache
                 )
-                .SelectEx(Transform)
+                .Combine(knownSymbolsProvider)
+                .SelectEx((x, ct) => Transform(x.Left, x.Right, ct))
                 .Combine(medicineSettings)
                 .Select((x, ct) => x.Left with { Symbols = x.Right.PreprocessorSymbolNames });
 
@@ -85,7 +88,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
         """.Trim()
         .HtmlEncode();
 
-    static GeneratorInput Transform(CacheInput cacheInput, CancellationToken ct)
+    static GeneratorInput Transform(CacheInput cacheInput, in KnownSymbols knownSymbols, CancellationToken ct)
     {
         var context = cacheInput.Context.Value;
         ITypeSymbol wrapperType;
@@ -191,7 +194,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
                 .ToArray();
 
             if (identifiersToPatch.Length > 0)
-                retExprType = ReevaluateWithPatchedIdentifiers(model, retExpr, identifiersToPatch, ct);
+                retExprType = ReevaluateWithPatchedIdentifiers(model, retExpr, identifiersToPatch, knownSymbols, ct);
         }
 
         if (retExprType is null or IErrorTypeSymbol)
@@ -325,6 +328,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
         SemanticModel model,
         ExpressionSyntax retExpr,
         IdentifierNameSyntax[] identifiers,
+        KnownSymbols knownSymbols,
         CancellationToken ct
     )
     {
@@ -337,11 +341,10 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
                 // try to fix "SomeTrackedType.Instances"
                 case "Instances":
                 {
-                    const string trackedStruct = "Medicine.TrackedInstances`1";
                     if (identifier.Parent is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax typeName } memberAccess)
                         if (model.GetSymbolInfo(typeName, ct).Symbol is INamedTypeSymbol typeSymbol)
-                            if (typeSymbol.HasAttribute(TrackAttributeFQN))
-                                if (model.Compilation.GetTypeByMetadataName(trackedStruct)?.Construct(typeSymbol) is { } constructed)
+                            if (typeSymbol.HasAttribute(knownSymbols.TrackAttribute))
+                                if (knownSymbols.TrackedInstances?.Construct(typeSymbol) is { } constructed)
                                     return (constructed, memberAccess);
 
                     break;
@@ -351,7 +354,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
                 {
                     if (identifier.Parent is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax typeName } memberAccess)
                         if (model.GetSymbolInfo(typeName, ct).Symbol is INamedTypeSymbol typeSymbol)
-                            if (typeSymbol.HasAttribute(SingletonAttributeFQN))
+                            if (typeSymbol.HasAttribute(knownSymbols.SingletonAttribute))
                                 return (typeSymbol, memberAccess);
 
                     break;

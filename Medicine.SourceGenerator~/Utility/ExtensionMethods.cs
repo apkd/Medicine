@@ -15,13 +15,61 @@ public static partial class ExtensionMethods
     extension(ITypeSymbol? self)
     {
         public bool InheritsFrom(string baseTypeFullyQualifiedName)
-            => self is not null && self.IsReferenceType && self.GetBaseTypes().Any(x => x.Is(baseTypeFullyQualifiedName));
+        {
+            if (self is null || !self.IsReferenceType)
+                return false;
+
+            for (var x = self.BaseType; x is not null; x = x.BaseType)
+                if (x.Is(baseTypeFullyQualifiedName))
+                    return true;
+
+            return false;
+        }
+
+        public bool InheritsFrom(ITypeSymbol baseType)
+        {
+            if (self is null || !self.IsReferenceType)
+                return false;
+
+            for (var x = self.BaseType; x is not null; x = x.BaseType)
+                if (x.Is(baseType))
+                    return true;
+
+            return false;
+        }
 
         public IEnumerable<ITypeSymbol> GetBaseTypes()
-            => self != null ? self.SelectRecursive(x => x.BaseType) : [];
+        {
+            if (self is not null)
+                for (var x = self.BaseType; x is not null; x = x.BaseType)
+                    yield return x;
+        }
 
         public bool HasInterface(string interfaceFullyQualifiedName, bool checkAllInterfaces = true)
-            => (checkAllInterfaces ? self?.AllInterfaces : self?.Interfaces)?.Any(x => x.Is(interfaceFullyQualifiedName)) is true;
+        {
+            if (self is null)
+                return false;
+
+            var interfaces = checkAllInterfaces ? self.AllInterfaces : self.Interfaces;
+            foreach (var x in interfaces)
+                if (x.Is(interfaceFullyQualifiedName))
+                    return true;
+
+            return false;
+        }
+
+        public bool HasInterface(ISymbol? interfaceType, bool checkAllInterfaces = true)
+        {
+            if (self is null || interfaceType is null)
+                return false;
+
+            var interfaces = checkAllInterfaces ? self.AllInterfaces : self.Interfaces;
+            foreach (var x in interfaces)
+                if (x.Is(interfaceType))
+                    return true;
+
+            return false;
+        }
     }
 
     extension(ISymbol self)
@@ -35,20 +83,79 @@ public static partial class ExtensionMethods
 
     extension(ISymbol? self)
     {
-        public bool Is(ISymbol? other)
+        public bool Is(ISymbol other)
             => SymbolEqualityComparer.Default.Equals(self, other);
 
         public bool Is(string fqn)
             => self?.FQN.Equals(fqn, Ordinal) ?? false;
 
         public bool HasAttribute(string attributeFullyQualifiedName)
-            => self?.GetAttributes().Any(x => x.AttributeClass.Is(attributeFullyQualifiedName)) is true;
+        {
+            if (self is null)
+                return false;
+
+            var attributes = self.GetAttributes();
+            foreach (var x in attributes)
+                if (x.AttributeClass.Is(attributeFullyQualifiedName))
+                    return true;
+
+            return false;
+        }
+
+        public bool HasAttribute(ISymbol? attributeSymbol)
+        {
+            if (self is null || attributeSymbol is null)
+                return false;
+
+            var attributes = self.GetAttributes();
+            foreach (var x in attributes)
+                if (x.AttributeClass.Is(attributeSymbol))
+                    return true;
+
+            return false;
+        }
 
         public bool HasAttribute(Func<string, bool> attributeFullyQualifiedNamePredicate)
-            => self?.GetAttributes().Select(x => x?.AttributeClass?.FQN ?? "").Any(attributeFullyQualifiedNamePredicate) is true;
+        {
+            if (self is null)
+                return false;
+
+            var attributes = self.GetAttributes();
+            foreach (var attribute in attributes)
+            {
+                string fqn = attribute.AttributeClass?.FQN ?? "";
+                if (attributeFullyQualifiedNamePredicate(fqn))
+                    return true;
+            }
+
+            return false;
+        }
 
         public AttributeData? GetAttribute(string attributeFullyQualifiedName)
-            => self?.GetAttributes().FirstOrDefault(x => x.AttributeClass.Is(attributeFullyQualifiedName));
+        {
+            if (self is null)
+                return null;
+
+            var attributes = self.GetAttributes();
+            foreach (var x in attributes)
+                if (x.AttributeClass.Is(attributeFullyQualifiedName))
+                    return x;
+
+            return null;
+        }
+
+        public AttributeData? GetAttribute(ISymbol? attributeSymbol)
+        {
+            if (self is null || attributeSymbol is null)
+                return null;
+
+            var attributes = self.GetAttributes();
+            foreach (var x in attributes)
+                if (x.AttributeClass.Is(attributeSymbol))
+                    return x;
+
+            return null;
+        }
 
         public string? GetSafeSymbolName(SemanticModel model, int position)
         {
@@ -77,19 +184,62 @@ public static partial class ExtensionMethods
     extension(MemberDeclarationSyntax? self)
     {
         public bool HasAttribute(Func<string, bool> predicate)
-            => self?.AttributeLists.SelectMany(x => x.Attributes.Select(x => x.Name.ToString())).Any(predicate) is true;
+        {
+            if (self is null)
+                return false;
+
+            var attributeLists = self.AttributeLists;
+            foreach (var attributeList in attributeLists)
+            {
+                foreach (var attribute in attributeList.Attributes)
+                    if (predicate(attribute.Name.ToString()))
+                        return true;
+            }
+
+            return false;
+        }
 
         public AttributeSyntax? GetAttribute(Func<string, bool> predicate)
-            => self?.AttributeLists.SelectMany(x => x.Attributes).FirstOrDefault(x => predicate(x.Name.ToString()));
+        {
+            if (self is null)
+                return null;
+
+            foreach (var attributeList in self.AttributeLists)
+            foreach (var x in attributeList.Attributes)
+                if (predicate(x.Name.ToString()))
+                    return x;
+
+            return null;
+        }
     }
 
     extension(LocalFunctionStatementSyntax? self)
     {
         public bool HasAttribute(Func<string, bool> predicate)
-            => self?.AttributeLists.SelectMany(x => x.Attributes.Select(x => x.Name.ToString())).Any(predicate) is true;
+        {
+            if (self is null)
+                return false;
+
+            foreach (var attributeList in self.AttributeLists)
+            foreach (var x in attributeList.Attributes)
+                if (predicate(x.Name.ToString()))
+                    return true;
+
+            return false;
+        }
 
         public AttributeSyntax? GetAttribute(Func<string, bool> predicate)
-            => self?.AttributeLists.SelectMany(x => x.Attributes).FirstOrDefault(x => predicate(x.Name.ToString()));
+        {
+            if (self is null)
+                return null;
+
+            foreach (var attributeList in self.AttributeLists)
+            foreach (var x in attributeList.Attributes)
+                if (predicate(x.Name.ToString()))
+                    return x;
+
+            return null;
+        }
     }
 
     extension(SyntaxNode node)

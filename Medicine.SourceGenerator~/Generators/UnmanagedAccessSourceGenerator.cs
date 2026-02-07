@@ -60,6 +60,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
     {
         context.RegisterPostInitializationOutput(x => x.AddSource("UnmanagedAccessExtensions.g.cs", extensionsSrc));
 
+        var knownSymbolsProvider = context.GetKnownSymbolsProvider();
+
         var settingsProvider = context.CompilationProvider
             .Combine(context.ParseOptionsProvider)
             .Select((x, ct) => new MedicineSettings(x, ct));
@@ -69,8 +71,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: UnmanagedAccessAttributeMetadataName,
                 predicate: static (node, _) => node is ClassDeclarationSyntax,
-                transform: TransformSyntaxContext
+                transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
             )
+            .Combine(knownSymbolsProvider)
+            .SelectEx((x, ct) => TransformSyntaxContext(x.Left.Context.Value, x.Right, ct))
             .Combine(settingsProvider)
             .Select((x, ct) => x.Left with { MedicineSettings = x.Right });
 
@@ -80,7 +84,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         );
     }
 
-    static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, CancellationToken ct)
+    static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, KnownSymbols knownSymbols, CancellationToken ct)
     {
         if (context.TargetNode is not TypeDeclarationSyntax typeDecl)
             return default;
@@ -88,7 +92,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         if (context.TargetSymbol is not ITypeSymbol typeSymbol)
             return default;
 
-        var unmanagedAccessAttribute = context.Attributes.First(x => x.AttributeClass.Is(UnmanagedAccessAttributeFQN));
+        var unmanagedAccessAttribute = context.Attributes.First(x => x.AttributeClass.Is(knownSymbols.UnmanagedAccessAttribute));
 
         var settings = unmanagedAccessAttribute
             .GetAttributeConstructorArguments(ct)
@@ -100,14 +104,14 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 )
             );
 
-        var trackAttribute = context.TargetSymbol.GetAttribute(TrackAttributeFQN);
+        var trackAttribute = context.TargetSymbol.GetAttribute(knownSymbols.TrackAttribute);
 
         bool hasCachedEnable = trackAttribute?
             .GetAttributeConstructorArguments(ct)
             .Get("cacheEnabledState", false) ?? false;
 
         bool hasIInstanceIndex
-            = typeSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false);
+            = typeSymbol.HasInterface(knownSymbols.IInstanceIndexInterface, checkAllInterfaces: false);
 
         var output = new GeneratorInput
         {
@@ -121,7 +125,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDecl, context.SemanticModel, ct),
             ClassName = typeSymbol.Name,
             ClassFQN = typeSymbol.FQN,
-            IsUnityObject = typeSymbol.InheritsFrom("global::UnityEngine.Object"),
+            IsUnityObject = typeSymbol.InheritsFrom(knownSymbols.UnityObject),
             IsTracked = trackAttribute is not null,
         };
 

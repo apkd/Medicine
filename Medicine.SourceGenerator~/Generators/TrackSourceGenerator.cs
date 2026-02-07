@@ -58,6 +58,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
+        var knownSymbolsProvider = context.GetKnownSymbolsProvider();
+
         var medicineSettings = context.CompilationProvider
             .Combine(context.ParseOptionsProvider)
             .Select((x, ct) => new MedicineSettings(x, ct));
@@ -71,9 +73,10 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     .ForAttributeWithMetadataNameEx(
                         fullyQualifiedMetadataName: attributeName,
                         predicate: static (node, _) => node is ClassDeclarationSyntax,
-                        transform: (attributeSyntaxContext, ct)
-                            => TransformSyntaxContext(attributeSyntaxContext, ct, attributeName, $"global::{attributeName}")
+                        transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
                     )
+                    .Combine(knownSymbolsProvider)
+                    .SelectEx((x, ct) => TransformSyntaxContext(x.Left.Context.Value, x.Right, ct, attributeName))
                     .Where(x => x.Attribute is { Length: > 0 })
                     .Combine(medicineSettings)
                     .Select((x, ct) => x.Left with
@@ -145,9 +148,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
     static GeneratorInput TransformSyntaxContext(
         GeneratorAttributeSyntaxContext context,
+        KnownSymbols knownSymbols,
         CancellationToken ct,
-        string attributeName,
-        string attributeFQN
+        string attributeName
     )
     {
         if (context.TargetNode is not TypeDeclarationSyntax typeDeclaration)
@@ -159,12 +162,21 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         if (context.Attributes.FirstOrDefault() is not { AttributeConstructor: not null } attributeData)
             return default;
 
+        INamedTypeSymbol? attributeSymbol = attributeName switch
+        {
+            SingletonAttributeMetadataName => knownSymbols.SingletonAttribute,
+            TrackAttributeMetadataName => knownSymbols.TrackAttribute,
+            _ => null,
+        };
+        if (attributeSymbol is null)
+            return default;
+
         var attributeArguments = attributeData
             .GetAttributeConstructorArguments(ct)
             .Select(x => new TrackAttributeSettings(
                     SingletonStrategy: x.Get<SingletonStrategy>("strategy", null),
                     TrackInstanceIDs: x.Get("instanceIdArray", false),
-                    TrackTransforms: x.Get("transformAccessArray", false) && classSymbol.InheritsFrom("global::UnityEngine.MonoBehaviour"),
+                    TrackTransforms: x.Get("transformAccessArray", false) && classSymbol.InheritsFrom(knownSymbols.UnityMonoBehaviour),
                     InitialCapacity: x.Get("transformInitialCapacity", 64),
                     DesiredJobCount: x.Get("transformDesiredJobCount", -1),
                     CacheEnabledState: x.Get("cacheEnabledState", false),
@@ -176,7 +188,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         bool manualInheritanceMismatch = false;
         foreach (var baseType in classSymbol.GetBaseTypes())
         {
-            var baseAttribute = baseType.GetAttribute(attributeFQN);
+            var baseAttribute = baseType.GetAttribute(attributeSymbol);
             if (baseAttribute is null)
                 continue;
 
@@ -196,17 +208,18 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         var sourceLocation = attributeData.ApplicationSyntaxReference.GetLocation()
                              ?? typeDeclaration.Identifier.GetLocation();
 
-        bool hasIIndexInstance = classSymbol.HasInterface(IInstanceIndexInterfaceFQN);
-        bool emitIIndexInstance = hasIIndexInstance && !classSymbol.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false);
+        bool hasIIndexInstance = classSymbol.HasInterface(knownSymbols.IInstanceIndexInterface);
 
-        var allInterfaces = classSymbol.AllInterfaces;
+        bool emitIIndexInstance = hasIIndexInstance &&
+                                  !classSymbol.HasInterface(knownSymbols.IInstanceIndexInterface, checkAllInterfaces: false);
+
         string classTypeFQN = classSymbol.FQN;
 
         var trackingIdRegistrations = new List<TrackingIdRegistration>();
 
         // gather IFindByID interface usages
         {
-            foreach (var interfaceType in allInterfaces)
+            foreach (var interfaceType in classSymbol.AllInterfaces)
             {
                 AddTrackingIdFromSymbol(interfaceType, interfaceType.FQN);
 
@@ -226,9 +239,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     trackingIdRegistrations.Add(new(lookupTypeFQN, idTypeFQN));
             }
 
-            static bool TryGetTrackingIdType(INamedTypeSymbol type, out string idTypeFQN)
+            bool TryGetTrackingIdType(INamedTypeSymbol type, out string idTypeFQN)
             {
-                if (!type.FQN.StartsWith(TrackingIdInterfaceFQN))
+                if (!type.OriginalDefinition.Is(knownSymbols.TrackingIdInterface))
                 {
                     idTypeFQN = "";
                     return false;
@@ -255,7 +268,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             Attribute = attributeName,
             AttributeSettings = attributeArguments,
             UnmanagedDataFQNs = classSymbol.Interfaces
-                .Where(x => x.FQN.StartsWith(UnmanagedDataInterfaceFQN))
+                .Where(x => x.OriginalDefinition.Is(knownSymbols.UnmanagedDataInterface))
                 .Select(x => x.TypeArguments.FirstOrDefault()?.FQN ?? "")
                 .ToArray(),
             TrackingIdRegistrations = trackingIdRegistrations.ToArray(),
@@ -265,7 +278,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             ManualInheritanceMismatch = manualInheritanceMismatch,
             InterfacesWithAttribute
                 = classSymbol.Interfaces
-                    .Where(x => x.HasAttribute(attributeFQN))
+                    .Where(x => x.HasAttribute(attributeSymbol))
                     .Where(x => !classSymbol.GetBaseTypes().Any(y => y.Interfaces.Contains(x))) // skip interfaces already registered via base class
                     .Select(x => x.FQN)
                     .Where(x => x != null)
@@ -277,11 +290,11 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     | (classSymbol.IsSealed ? IsSealed : 0)
                     | (classSymbol.IsAbstract ? IsAbstract : 0)
                     | (classSymbol.IsValueType ? IsValueType : 0)
-                    | (classSymbol.InheritsFrom("global::UnityEngine.Object") ? IsUnityEngineObject : 0)
-                    | (classSymbol.InheritsFrom("global::UnityEngine.Component") ? IsComponent : 0)
-                    | (classSymbol.InheritsFrom("global::UnityEngine.MonoBehaviour") ? IsMonoBehaviour : 0)
-                    | (classSymbol.InheritsFrom("global::UnityEngine.ScriptableObject") ? IsScriptableObject : 0)
-                    | (classSymbol.IsAbstract ? IsAbstract : 0)
+                    | (classSymbol.InheritsFrom(knownSymbols.UnityObject) ? IsUnityEngineObject : 0)
+                    | (classSymbol.InheritsFrom(knownSymbols.UnityComponent) ? IsComponent : 0)
+                    | (classSymbol.InheritsFrom(knownSymbols.UnityMonoBehaviour) ? IsMonoBehaviour : 0)
+                    | (classSymbol.InheritsFrom(knownSymbols.UnityScriptableObject) ? IsScriptableObject : 0)
+                    | (classSymbol.IsAbstract ? IsAbstract : 0),
         };
     }
 
