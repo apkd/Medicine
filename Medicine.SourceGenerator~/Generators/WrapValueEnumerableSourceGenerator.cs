@@ -332,116 +332,206 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
         CancellationToken ct
     )
     {
-        (ITypeSymbol?, MemberAccessExpressionSyntax?) TryInferAssignedType(IdentifierNameSyntax identifier)
+        var unresolvedIdentifiers = identifiers
+            .Where(x => model.GetSymbolInfo(x, ct).Symbol is null)
+            .ToArray();
+
+        if (unresolvedIdentifiers.Length == 0)
+            return null;
+
+        var unresolvedIdentifierNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var identifier in unresolvedIdentifiers)
+            unresolvedIdentifierNames.Add(identifier.Identifier.ValueText);
+
+        var assignmentTypesByIdentifier = BuildInjectAssignmentTypeMap(model, retExpr, unresolvedIdentifierNames, ct);
+
+        Dictionary<(int Start, int Length), TypeSyntax>? memberAccessCastTypes = null;
+        Dictionary<string, TypeSyntax>? identifierCastTypes = null;
+
+        foreach (var identifier in unresolvedIdentifiers)
         {
-            var root = model.SyntaxTree.GetRoot(ct);
+            if (!TryInferIdentifierType(identifier, assignmentTypesByIdentifier, out var inferredType, out var memberAccessExpressionSyntax))
+                continue;
+
+            var castType = SyntaxFactory.ParseTypeName(inferredType.FQN);
+
+            if (memberAccessExpressionSyntax is not null)
+            {
+                memberAccessCastTypes ??= [];
+                var key = (memberAccessExpressionSyntax.SpanStart, memberAccessExpressionSyntax.Span.Length);
+                if (!memberAccessCastTypes.ContainsKey(key))
+                    memberAccessCastTypes[key] = castType;
+            }
+            else
+            {
+                identifierCastTypes ??= new(StringComparer.Ordinal);
+                if (!identifierCastTypes.ContainsKey(identifier.Identifier.ValueText))
+                    identifierCastTypes[identifier.Identifier.ValueText] = castType;
+            }
+        }
+
+        if (memberAccessCastTypes is null && identifierCastTypes is null)
+            return null;
+
+        ExpressionSyntax expr = retExpr;
+
+        // first pass: apply high-confidence member access fixes and rebind once.
+        if (memberAccessCastTypes is not null)
+        {
+            if (new CastMemberAccessRewriter(memberAccessCastTypes).Visit(expr) is not ExpressionSyntax patchedExpression)
+                return null;
+
+            if (!ReferenceEquals(patchedExpression, expr))
+            {
+                expr = patchedExpression;
+
+                var result = model.GetSpeculativeTypeInfo(retExpr.SpanStart, expr, BindAsExpression).ConvertedType;
+                if (result is not (null or IErrorTypeSymbol))
+                    return result;
+            }
+        }
+
+        if (identifierCastTypes is null)
+            return null;
+
+        // second pass: batch all identifier casts and rebind once.
+        if (new CastRewriter(identifierCastTypes).Visit(expr) is not ExpressionSyntax fullyPatchedExpression)
+            return null;
+
+        if (ReferenceEquals(fullyPatchedExpression, expr))
+            return null;
+
+        var finalResult = model.GetSpeculativeTypeInfo(retExpr.SpanStart, fullyPatchedExpression, BindAsExpression).ConvertedType;
+        return finalResult is not (null or IErrorTypeSymbol)
+            ? finalResult
+            : null;
+
+        bool TryInferIdentifierType(
+            IdentifierNameSyntax identifier,
+            IReadOnlyDictionary<string, ITypeSymbol>? cachedAssignmentTypes,
+            [NotNullWhen(true)] out ITypeSymbol? inferredType,
+            out MemberAccessExpressionSyntax? memberAccessExpressionSyntax
+        )
+        {
+            inferredType = null;
+            memberAccessExpressionSyntax = null;
 
             switch (identifier.Identifier.ValueText)
             {
                 // try to fix "SomeTrackedType.Instances"
                 case "Instances":
                 {
-                    if (identifier.Parent is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax typeName } memberAccess)
-                        if (model.GetSymbolInfo(typeName, ct).Symbol is INamedTypeSymbol typeSymbol)
-                            if (typeSymbol.HasAttribute(knownSymbols.TrackAttribute))
-                                if (knownSymbols.TrackedInstances?.Construct(typeSymbol) is { } constructed)
-                                    return (constructed, memberAccess);
+                    if (identifier.Parent is not MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax typeName } memberAccess)
+                        break;
 
-                    break;
+                    if (model.GetSymbolInfo(typeName, ct).Symbol is not INamedTypeSymbol typeSymbol)
+                        break;
+
+                    if (!typeSymbol.HasAttribute(knownSymbols.TrackAttribute))
+                        break;
+
+                    if (knownSymbols.TrackedInstances.Construct(typeSymbol) is not { } constructed)
+                        break;
+
+                    inferredType = constructed;
+                    memberAccessExpressionSyntax = memberAccess;
+                    return true;
                 }
                 // try to fix "SomeSingletonType.Instance"
                 case "Instance":
                 {
-                    if (identifier.Parent is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax typeName } memberAccess)
-                        if (model.GetSymbolInfo(typeName, ct).Symbol is INamedTypeSymbol typeSymbol)
-                            if (typeSymbol.HasAttribute(knownSymbols.SingletonAttribute))
-                                return (typeSymbol, memberAccess);
+                    if (identifier.Parent is not MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax typeName } memberAccess)
+                        break;
 
-                    break;
+                    if (model.GetSymbolInfo(typeName, ct).Symbol is not INamedTypeSymbol typeSymbol)
+                        break;
+
+                    if (!typeSymbol.HasAttribute(knownSymbols.SingletonAttribute))
+                        break;
+
+                    inferredType = typeSymbol;
+                    memberAccessExpressionSyntax = memberAccess;
+                    return true;
                 }
             }
 
-            // try to find an assignment in an [Inject] method
-            var assignment = root
-                .DescendantNodes()
-                .OfType<MethodDeclarationSyntax>()
-                .Where(x => x.HasAttribute(y => y is InjectAttributeNameShort or InjectAttributeName or InjectAttributeMetadataName))
-                .SelectMany(x => x.DescendantNodes())
-                .OfType<AssignmentExpressionSyntax>()
-                .FirstOrDefault(a => a.Left is IdentifierNameSyntax left && left.Identifier.ValueText == identifier.Identifier.ValueText);
-
-            if (assignment?.Right is not null)
-            {
-                var rhsType = model.GetTypeInfo(assignment.Right, ct).Type;
-                if (rhsType is not null and not IErrorTypeSymbol)
-                    return (rhsType, null);
-            }
-
-            return (null, null);
+            return cachedAssignmentTypes?.TryGetValue(identifier.Identifier.ValueText, out inferredType) == true;
         }
+    }
 
-        SyntaxNode expr = retExpr;
+    static Dictionary<string, ITypeSymbol>? BuildInjectAssignmentTypeMap(
+        SemanticModel model,
+        ExpressionSyntax retExpr,
+        HashSet<string> unresolvedIdentifierNames,
+        CancellationToken ct
+    )
+    {
+        if (retExpr.FirstAncestorOrSelf<TypeDeclarationSyntax>() is not { } containingType)
+            return null;
 
-        foreach (var identifier in identifiers)
+        Dictionary<string, ITypeSymbol>? assignmentTypesByIdentifier = null;
+
+        foreach (var method in containingType.Members.OfType<MethodDeclarationSyntax>())
         {
-            var (inferredType, memberAccessExpressionSyntax) = TryInferAssignedType(identifier);
-
-            if (inferredType is null or IErrorTypeSymbol)
+            if (!method.HasAttribute(x => x is InjectAttributeNameShort or InjectAttributeName or InjectAttributeMetadataName))
                 continue;
 
-            expr = memberAccessExpressionSyntax is not null
-                ? new CastMemberAccessRewriter(memberAccessExpressionSyntax, inferredType).Visit(expr)
-                : new CastRewriter(identifier.Identifier.ValueText, inferredType).Visit(expr);
+            foreach (var assignment in method.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+            {
+                if (assignment.Left is not IdentifierNameSyntax leftIdentifier)
+                    continue;
 
-            var result = model.GetSpeculativeTypeInfo(
-                    retExpr.SpanStart,
-                    (ExpressionSyntax)expr,
-                    BindAsExpression
-                )
-                .ConvertedType;
+                var identifierName = leftIdentifier.Identifier.ValueText;
+                if (!unresolvedIdentifierNames.Contains(identifierName))
+                    continue;
 
-            if (result is not (null or IErrorTypeSymbol))
-                return result;
+                if (assignmentTypesByIdentifier?.ContainsKey(identifierName) is true)
+                    continue;
+
+                var rhsType = model.GetTypeInfo(assignment.Right, ct).Type;
+                if (rhsType is null or IErrorTypeSymbol)
+                    continue;
+
+                assignmentTypesByIdentifier ??= new(StringComparer.Ordinal);
+                assignmentTypesByIdentifier[identifierName] = rhsType;
+
+                if (assignmentTypesByIdentifier.Count == unresolvedIdentifierNames.Count)
+                    return assignmentTypesByIdentifier;
+            }
         }
 
-        return null;
+        return assignmentTypesByIdentifier;
     }
 
-    sealed class CastMemberAccessRewriter(MemberAccessExpressionSyntax memberAccessExpression, ITypeSymbol type) : CSharpSyntaxRewriter
+    sealed class CastMemberAccessRewriter(IReadOnlyDictionary<(int Start, int Length), TypeSyntax> castTypesByMemberAccessSpan) : CSharpSyntaxRewriter
     {
-        readonly string typeName = type.FQN;
-
         public override SyntaxNode? VisitMemberAccessExpression(MemberAccessExpressionSyntax node)
         {
-            if (node.Expression.IsEquivalentTo(memberAccessExpression))
-            {
-                // build (TrackedInstances<TrackedObject>)TrackedObject.Instances
-                var castExpr =
-                    SyntaxFactory.ParenthesizedExpression(
-                        SyntaxFactory.CastExpression(
-                            SyntaxFactory.ParseTypeName(typeName),
-                            node.Expression
-                        )
-                    );
+            if (!castTypesByMemberAccessSpan.TryGetValue((node.Expression.SpanStart, node.Expression.Span.Length), out var castType))
+                return base.VisitMemberAccessExpression(node);
 
-                // keep the original .Name (AsValueEnumerable, Select, …)
-                return node.WithExpression(castExpr);
-            }
+            // build (TrackedInstances<TrackedObject>)TrackedObject.Instances
+            var castExpr =
+                SyntaxFactory.ParenthesizedExpression(
+                    SyntaxFactory.CastExpression(
+                        castType,
+                        node.Expression
+                    )
+                );
 
-            return base.VisitMemberAccessExpression(node);
+            // keep the original .Name (AsValueEnumerable, Select, …)
+            return node.WithExpression(castExpr);
         }
     }
 
-    sealed class CastRewriter(string identifier, ITypeSymbol type) : CSharpSyntaxRewriter
+    sealed class CastRewriter(IReadOnlyDictionary<string, TypeSyntax> castTypesByIdentifier) : CSharpSyntaxRewriter
     {
-        readonly string typeName = type.FQN;
-
         public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
-            => node.Identifier.ValueText == identifier
+            => castTypesByIdentifier.TryGetValue(node.Identifier.ValueText, out var castType)
                 ? SyntaxFactory
                     .ParenthesizedExpression(
                         SyntaxFactory.CastExpression(
-                            SyntaxFactory.ParseTypeName(typeName),
+                            castType,
                             node.WithoutTrivia()
                         )
                     )
