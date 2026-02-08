@@ -51,6 +51,12 @@ public static class TestUtility
 #if UNITY_EDITOR
 public static class CI
 {
+    const string TestResultsDirectory = "test-results";
+    const string EditModeResultsFilename = "results-editmode.xml";
+    const string PlayModeResultsFilename = "results-playmode.xml";
+    const string CombinedResultsFilename = "report.txt";
+    const string InitTestSceneSearchPattern = "InitTestScene*.unity";
+
     sealed class TestRunnerLambdaCallbacks : ICallbacks
     {
         public Action<ITestAdaptor> RunStarted { get; init; }
@@ -87,17 +93,20 @@ public static class CI
         {
             static void WriteTestResults(ITestResultAdaptor results, string filename)
             {
+                Directory.CreateDirectory(TestResultsDirectory);
+                var outputPath = Path.Combine(TestResultsDirectory, filename);
+
 #if UNITY_6000_0_OR_NEWER
-                File.Copy(
-                    $"{Application.persistentDataPath}/TestResults.xml",
-                    $"test-results/{filename}"
-                );
+                File.Copy($"{Application.persistentDataPath}/TestResults.xml", outputPath, overwrite: true);
 #else
+                if (File.Exists(outputPath))
+                    File.Delete(outputPath);
+
                 var resultsWriterType = Type.GetType("UnityEditor.TestTools.TestRunner.Api.ResultsWriter,UnityEditor.TestRunner")!;
                 object resultsWriter = Activator.CreateInstance(resultsWriterType, true);
                 resultsWriter.GetType()
                     .GetMethod("WriteResultToFile", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)
-                    ?.Invoke(resultsWriter, new object[] { results, $"test-results/{filename}" });
+                    ?.Invoke(resultsWriter, new object[] { results, outputPath });
 #endif
             }
 
@@ -122,7 +131,12 @@ public static class CI
                         try
                         {
                             failCount += results.FailCount;
-                            WriteTestResults(results, "Edit mode tests.xml");
+                            WriteTestResults(results, EditModeResultsFilename);
+                        }
+                        catch (Exception ex)
+                        {
+                            failCount += 1;
+                            Debug.LogException(ex);
                         }
                         finally
                         {
@@ -160,7 +174,12 @@ public static class CI
                         try
                         {
                             failCount += results.FailCount;
-                            WriteTestResults(results, "Play mode tests.xml");
+                            WriteTestResults(results, PlayModeResultsFilename);
+                        }
+                        catch (Exception ex)
+                        {
+                            failCount += 1;
+                            Debug.LogException(ex);
                         }
                         finally
                         {
@@ -176,14 +195,47 @@ public static class CI
                 while (!runFinished)
                     await Task.Delay(100);
             }
+
+            var editModeReportPath = Path.Combine(TestResultsDirectory, EditModeResultsFilename);
+            var playModeReportPath = Path.Combine(TestResultsDirectory, PlayModeResultsFilename);
+            var combinedReportPath = Path.Combine(TestResultsDirectory, CombinedResultsFilename);
+
+            try
+            {
+                var editModeReport = TestReportParser.ParseTestRunReport(editModeReportPath, "EditMode");
+                var playModeReport = TestReportParser.ParseTestRunReport(playModeReportPath, "PlayMode");
+                string combinedReport = TestReportParser.BuildCombinedReport(editModeReport, playModeReport);
+                await File.WriteAllTextAsync(combinedReportPath, combinedReport);
+                Console.WriteLine(combinedReport);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+
         }
         catch (Exception ex)
         {
+            failCount += 1;
             Debug.LogException(ex);
         }
         finally
         {
+            CleanupInitTestScenes();
             EditorApplication.Exit(failCount);
+        }
+    }
+
+    static void CleanupInitTestScenes()
+    {
+        try
+        {
+            foreach (var scenePath in Directory.EnumerateFiles("Assets", InitTestSceneSearchPattern, SearchOption.TopDirectoryOnly))
+                AssetDatabase.DeleteAsset(scenePath.Replace('\\', '/'));
+        }
+        catch (Exception ex)
+        {
+            Debug.LogException(ex);
         }
     }
 }
