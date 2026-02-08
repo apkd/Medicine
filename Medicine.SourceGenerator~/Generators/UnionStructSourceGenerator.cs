@@ -3,7 +3,6 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static Constants;
-using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 
 [Generator]
 public sealed class UnionStructSourceGenerator : IIncrementalGenerator
@@ -246,8 +245,6 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         };
     }
 
-    static readonly char[] spaceSplitParams = [' '];
-
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
         if (input.DerivedStructs.Length == 0)
@@ -405,7 +402,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                         .Parameters
                         .AsArray()
                         .Zip(member.ParameterRefKinds.AsArray().Cast<RefKind>(), (call, refKind) => (call, refKind))
-                        .Select(x => x.refKind.AsRefString() + x.call.Split(spaceSplitParams)[^1]);
+                        .Select(x => x.refKind.AsRefString() + GetParameterName(x.call));
 
                 string callParameters = !member.IsProperty
                     ? callParametersEnumerable.Join(", ")
@@ -456,7 +453,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                             {
                                 var outParameters = member.Parameters
                                     .AsArray()
-                                    .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call: call.Split(spaceSplitParams)[^1], refKind))
+                                    .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call: GetParameterName(call), refKind))
                                     .Where(x => x.refKind is (byte)RefKind.Out)
                                     .ToArray();
 
@@ -501,7 +498,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
                             var outParameters = member.Parameters
                                 .AsArray()
-                                .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call: call.Split(spaceSplitParams)[^1], refKind))
+                                .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call: GetParameterName(call), refKind))
                                 .Where(x => x.refKind is (byte)RefKind.Out)
                                 .ToArray();
 
@@ -582,5 +579,13 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
             src.Linebreak();
         }
+    }
+
+    static string GetParameterName(string parameterDeclaration)
+    {
+        int lastSpaceIndex = parameterDeclaration.LastIndexOf(' ');
+        return lastSpaceIndex >= 0
+            ? parameterDeclaration[(lastSpaceIndex + 1)..]
+            : parameterDeclaration;
     }
 }
