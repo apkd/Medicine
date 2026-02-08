@@ -257,7 +257,8 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                 {
                     var typeSymbolForDisplayName = typeSymbol;
                     var flags = default(ExpressionFlags);
-                    var expression = assignment.Right.ToString().Replace("\r", "").Replace("\n", "").AsSpan().Trim();
+                    var normalizedExpression = NormalizeExpressionText(assignment.Right.ToString());
+                    var expression = normalizedExpression.AsSpan();
                     var editModeLocalDeclarations = GetEditModeLocalDeclarations(assignment);
 
                     if (assignment.Right is ImplicitObjectCreationExpressionSyntax { ArgumentList.Arguments: [{ Expression: { } expr }, ..] })
@@ -292,20 +293,31 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                             Lambda { Body: Expression body }
                                 => context.SemanticModel.GetTypeInfo(body, ct).Type,
                             Lambda { Body: BlockSyntax body }
-                                => body.DescendantNodes()
-                                    .OfType<ReturnStatementSyntax>()
-                                    .Select(x => x.Expression)
-                                    .Where(x => x is not null)
-                                    .Select(x => context.SemanticModel.GetTypeInfo(x!, ct).Type)
-                                    .FirstOrDefault(x => x is not null),
+                                => GetFirstNonNullReturnType(body),
                             MemberAccess or GenericName or Name
-                                => context.SemanticModel.GetSymbolInfo(delegateExpression, ct)
-                                    .CandidateSymbols
-                                    .OfType<IMethodSymbol>()
-                                    .FirstOrDefault(x => x.Parameters is not { Length: > 0 })
-                                    ?.ReturnType,
+                                => GetMethodGroupReturnType(delegateExpression),
                             _ => null,
                         };
+
+                    ITypeSymbol? GetFirstNonNullReturnType(BlockSyntax body)
+                    {
+                        foreach (var node in body.DescendantNodes())
+                            if (node is ReturnStatementSyntax { Expression: { } returnExpression })
+                                if (context.SemanticModel.GetTypeInfo(returnExpression, ct).Type is { } returnType)
+                                    return returnType;
+
+                        return null;
+                    }
+
+                    ITypeSymbol? GetMethodGroupReturnType(Expression delegateExpression)
+                    {
+                        var symbolInfo = context.SemanticModel.GetSymbolInfo(delegateExpression, ct);
+                        foreach (var symbol in symbolInfo.CandidateSymbols)
+                            if (symbol is IMethodSymbol { Parameters.Length: 0 } method)
+                                return method.ReturnType;
+
+                        return null;
+                    }
 
                     bool MatchOption(ref ReadOnlySpan<char> expression, ExpressionFlags flag, ReadOnlySpan<char> pattern)
                     {
@@ -652,7 +664,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
                     var result = new string[declarations.Count];
                     for (int i = 0; i < declarations.Count; i++)
-                        result[i] = declarations[i].Statement.Replace("\r\n", "").Replace("\r", "").Replace("\n", " ").Trim();
+                        result[i] = NormalizeLocalDeclarationText(declarations[i].Statement);
 
                     return result;
                 }
@@ -662,26 +674,80 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         return output;
     }
 
-    public static ITypeSymbol? ReevaluateWithPatchedIdentifiers(SemanticModel model, Expression expr, Dictionary<string, ITypeSymbol> resolvedTypes, CT ct)
+    static string NormalizeExpressionText(string text)
+        => NormalizeText(text.AsSpan(), replaceStandaloneLfWithSpace: false);
+
+    static string NormalizeLocalDeclarationText(string text)
+        => NormalizeText(text.AsSpan(), replaceStandaloneLfWithSpace: true);
+
+    static string NormalizeText(ReadOnlySpan<char> source, bool replaceStandaloneLfWithSpace)
     {
-        SyntaxNode currentExpr = expr;
+        var buffer = source.Length <= 1024
+            ? stackalloc char[source.Length]
+            : new char[source.Length];
 
-        foreach (var identifier in expr.DescendantNodesAndSelf().OfType<Identifier>().ToArray())
-            if (resolvedTypes.TryGetValue(identifier.Identifier.ValueText, out var type))
-                currentExpr = new CastRewriter(identifier.Identifier.ValueText, type).Visit(currentExpr);
+        int written = 0;
+        for (int i = 0; i < source.Length; i++)
+        {
+            switch (source[i])
+            {
+                case '\r':
+                {
+                    if (i + 1 < source.Length && source[i + 1] == '\n')
+                        i++;
 
-        return currentExpr != expr
-            ? model.GetSpeculativeTypeInfo(expr.SpanStart, (Expression)currentExpr, SpeculativeBindingOption.BindAsExpression).ConvertedType
-            : null;
+                    continue;
+                }
+                case '\n':
+                {
+                    if (replaceStandaloneLfWithSpace)
+                        buffer[written++] = ' ';
+
+                    continue;
+                }
+                default:
+                    buffer[written++] = source[i];
+                    break;
+            }
+        }
+
+        return buffer[..written].Trim().ToString();
     }
 
-    sealed class CastRewriter(string identifier, ITypeSymbol type) : CSharpSyntaxRewriter
+    public static ITypeSymbol? ReevaluateWithPatchedIdentifiers(SemanticModel model, Expression expr, Dictionary<string, ITypeSymbol> resolvedTypes, CT ct)
+    {
+        Dictionary<string, TypeSyntax>? castTypesByIdentifier = null;
+
+        foreach (var identifier in expr.DescendantNodesAndSelf().OfType<Identifier>())
+        {
+            string identifierName = identifier.Identifier.ValueText;
+
+            if (castTypesByIdentifier?.ContainsKey(identifierName) is true)
+                continue;
+
+            if (!resolvedTypes.TryGetValue(identifierName, out var type))
+                continue;
+
+            castTypesByIdentifier ??= new(StringComparer.Ordinal);
+            castTypesByIdentifier[identifierName] = SyntaxFactory.ParseTypeName(type.ToDisplayString(FullyQualifiedFormat));
+        }
+
+        if (castTypesByIdentifier is null)
+            return null;
+
+        if (new CastRewriter(castTypesByIdentifier).Visit(expr) is not Expression patchedExpression || ReferenceEquals(patchedExpression, expr))
+            return null;
+
+        return model.GetSpeculativeTypeInfo(expr.SpanStart, patchedExpression, SpeculativeBindingOption.BindAsExpression).ConvertedType;
+    }
+
+    sealed class CastRewriter(IReadOnlyDictionary<string, TypeSyntax> castTypesByIdentifier) : CSharpSyntaxRewriter
     {
         public override SyntaxNode? VisitIdentifierName(Identifier node)
-            => node.Identifier.ValueText == identifier
+            => castTypesByIdentifier.TryGetValue(node.Identifier.ValueText, out var castType)
                 ? SyntaxFactory.ParenthesizedExpression(
                         SyntaxFactory.CastExpression(
-                            SyntaxFactory.ParseTypeName(type.ToDisplayString(FullyQualifiedFormat)),
+                            castType,
                             node.WithoutTrivia()
                         )
                     )
@@ -955,6 +1021,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                                 {
                                     src.Line.Write($"{Alias.NoInline} {x.TypeFQN} {m}Expr() => {x.InitExpression};");
                                 }
+
                                 src.Line.Write($"#nullable enable");
 
                                 src.Line.Write($"if ({m}Utility.EditMode)");
