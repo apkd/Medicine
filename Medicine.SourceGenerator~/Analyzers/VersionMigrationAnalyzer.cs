@@ -28,49 +28,23 @@ public sealed class VersionMigrationAnalyzer : DiagnosticAnalyzer
         context.RegisterSyntaxNodeAction(AnalyzeProperty, SyntaxKind.PropertyDeclaration);
     }
 
-    static readonly string[] attributeFQNs =
-    [
-        "global::Medicine.Inject",
-        "global::Medicine.InjectAttribute",
-        "global::Medicine.Inject.All",
-        "global::Medicine.Inject.Single",
-        "global::Medicine.Inject.FromChildren",
-        "global::Medicine.Inject.FromParents",
-        "global::Medicine.Inject.Lazy",
-        "global::Medicine.Inject.FromChildren.Lazy",
-        "global::Medicine.Inject.FromParents.Lazy",
-        "global::Medicine.Inject.All.Lazy",
-        "global::Medicine.Inject.Single.Lazy",
-    ];
-
     static void AnalyzeProperty(SyntaxNodeAnalysisContext context)
     {
         var prop = (PropertyDeclarationSyntax)context.Node;
 
-        bool AttributePredicate(string attributeName)
-            => attributeName is
-                "Inject" or
-                "Medicine.Inject" or
-                "Inject.All" or
-                "Medicine.Inject.All" or
-                "Inject.Single" or
-                "Medicine.Inject.Single" or
-                "Inject.FromChildren" or
-                "Inject.FromParents" or
-                "Medicine.Inject.FromChildren" or
-                "Medicine.Inject.FromParents" or
-                "Inject.Lazy" or
-                "Medicine.Inject.Lazy" or
-                "Inject.FromChildren.Lazy" or
-                "Inject.FromParents.Lazy" or
-                "Medicine.Inject.FromChildren.Lazy" or
-                "Medicine.Inject.FromParents.Lazy";
+        bool AttributePredicate(NameSyntax attributeName)
+            => attributeName.MatchesQualifiedNamePattern("Medicine.InjectAttribute", namespaceSegments: 1, skipEnd: "Attribute") ||
+               attributeName.MatchesQualifiedNamePattern("Medicine.Inject.All", namespaceSegments: 1) ||
+               attributeName.MatchesQualifiedNamePattern("Medicine.Inject.Single", namespaceSegments: 1) ||
+               attributeName.MatchesQualifiedNamePattern("Medicine.Inject.FromChildren", namespaceSegments: 1) ||
+               attributeName.MatchesQualifiedNamePattern("Medicine.Inject.FromParents", namespaceSegments: 1) ||
+               attributeName.MatchesQualifiedNamePattern("Medicine.Inject.Lazy", namespaceSegments: 1) ||
+               attributeName.MatchesQualifiedNamePattern("Medicine.Inject.FromChildren.Lazy", namespaceSegments: 1) ||
+               attributeName.MatchesQualifiedNamePattern("Medicine.Inject.FromParents.Lazy", namespaceSegments: 1);
 
         if (prop.HasAttribute(AttributePredicate))
             if (prop.AccessorList?.Accessors.Count is 1 or 2)
                 if (prop.AccessorList.Accessors.Any(x => x.Keyword.IsKind(SyntaxKind.GetKeyword)))
-                    if (context.SemanticModel.GetDeclaredSymbol(prop) is { } symbol)
-                        if (symbol.HasAttribute(attributeFQNs.Contains))
-                            context.ReportDiagnostic(Diagnostic.Create(MED012, prop.GetLocation(), prop.Identifier.Text));
+                    context.ReportDiagnostic(Diagnostic.Create(MED012, prop.GetLocation(), prop.Identifier.Text));
     }
 }

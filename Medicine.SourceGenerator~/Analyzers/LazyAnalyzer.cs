@@ -61,7 +61,7 @@ public sealed class LazyAnalyzer : DiagnosticAnalyzer
             ContainingType:
             {
                 Name: "Lazy",
-                ContainingNamespace.Name: "Medicine",
+                IsInMedicineNamespace: true,
             },
         };
 

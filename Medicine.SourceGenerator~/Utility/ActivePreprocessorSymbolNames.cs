@@ -15,14 +15,17 @@ public static partial class ExtensionMethods
 {
     public static ActivePreprocessorSymbolNames GetActivePreprocessorSymbols(this ParseOptions parseOptions)
     {
-        var names = parseOptions.PreprocessorSymbolNames.ToArray();
         var result = default(ActivePreprocessorSymbolNames);
 
-        if (names.Contains(nameof(DEBUG)))
-            result |= DEBUG;
-
-        if (names.Contains(nameof(UNITY_EDITOR)))
-            result |= UNITY_EDITOR;
+        foreach (var name in parseOptions.PreprocessorSymbolNames)
+        {
+            result |= name switch
+            {
+                nameof(DEBUG) => DEBUG,
+                nameof(UNITY_EDITOR) => UNITY_EDITOR,
+                _ => 0,
+            };
+        }
 
         return result;
     }

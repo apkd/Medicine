@@ -63,7 +63,6 @@ public sealed class OptionalUsageAnalyzer : DiagnosticAnalyzer
 
             var symbolInfo = context.SemanticModel.GetSymbolInfo(invocation, context.CancellationToken);
 
-
             var symbol = symbolInfo.Symbol as IMethodSymbol;
 
             if (symbol is null)
@@ -81,11 +80,7 @@ public sealed class OptionalUsageAnalyzer : DiagnosticAnalyzer
             return symbol is
             {
                 Name: "Optional",
-                ContainingType:
-                {
-                    Name: "MedicineExtensions",
-                    ContainingNamespace: { Name: "Medicine", ContainingNamespace.IsGlobalNamespace: true },
-                }
+                ContainingType: { Name: "MedicineExtensions", IsInMedicineNamespace: true }
             };
         }
 
@@ -95,24 +90,17 @@ public sealed class OptionalUsageAnalyzer : DiagnosticAnalyzer
             {
                 switch (ancestor)
                 {
-                    case MethodDeclarationSyntax method when HasInjectAttribute(method, model, ct):
-                    case LocalFunctionStatementSyntax localFunction when HasInjectAttribute(localFunction, model, ct):
+                    case MethodDeclarationSyntax method when method.HasAttribute(MatchInjectAttribute):
+                    case LocalFunctionStatementSyntax localFunction when localFunction.HasAttribute(MatchInjectAttribute):
                         return true;
                 }
             }
+
+            static bool MatchInjectAttribute(NameSyntax name)
+                => name.MatchesQualifiedNamePattern("Medicine.InjectAttribute", namespaceSegments: 1, skipEnd: "Attribute");
 
             return false;
         }
     }
 
-    static bool HasInjectAttribute(MethodDeclarationSyntax method, SemanticModel model, CancellationToken ct)
-        => method.HasAttribute(IsInjectAttributeName) ||
-           model.GetDeclaredSymbol(method, ct) is { } symbol && symbol.HasAttribute(Constants.InjectAttributeFQN);
-
-    static bool HasInjectAttribute(LocalFunctionStatementSyntax localFunction, SemanticModel model, CancellationToken ct)
-        => localFunction.HasAttribute(IsInjectAttributeName) ||
-           model.GetDeclaredSymbol(localFunction, ct) is IMethodSymbol symbol && symbol.HasAttribute(Constants.InjectAttributeFQN);
-
-    static bool IsInjectAttributeName(string name)
-        => name is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute";
 }

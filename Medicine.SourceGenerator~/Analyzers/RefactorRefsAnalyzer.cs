@@ -59,6 +59,22 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
     static void AnalyzeInvocation(SyntaxNodeAnalysisContext context)
     {
         var invocationExpr = (InvocationExpressionSyntax)context.Node;
+        var containingMethod = invocationExpr.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
+        var containingLocalFunction = invocationExpr.Ancestors().OfType<LocalFunctionStatementSyntax>().FirstOrDefault();
+
+        if (containingMethod is null && containingLocalFunction is null)
+            return;
+
+        // ignore static methods
+        if (containingMethod?.Modifiers.Any(SyntaxKind.StaticKeyword) is true)
+            return;
+
+        // syntax-only guard to avoid expensive symbol resolution in [Inject] scopes
+        if (containingMethod.HasAttribute(IsInjectAttributeName))
+            return;
+
+        if (containingLocalFunction.HasAttribute(IsInjectAttributeName))
+            return;
 
         // ignore expressions that refer to local variables or parameters - can't easily refactor those
         foreach (var identifierName in invocationExpr.DescendantNodes().OfType<IdentifierNameSyntax>().Where(x => x.Parent is not NameColonSyntax))
@@ -80,28 +96,6 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
                 return;
         }
 
-        // check if the containing method is already marked with [Inject]
-        {
-            var containingMethod = invocationExpr.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
-            var containingLocalFunction = invocationExpr.Ancestors().OfType<LocalFunctionStatementSyntax>().FirstOrDefault();
-
-            if (containingMethod is null)
-                if (containingLocalFunction is null)
-                    return;
-
-            // ignore static methods
-            if (containingMethod?.Modifiers.Any(SyntaxKind.StaticKeyword) is true)
-                return;
-
-            // fast attribute name test
-            if (containingMethod.HasAttribute(x => x is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute"))
-                return;
-
-            // fast attribute name test
-            if (containingLocalFunction.HasAttribute(x => x is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute"))
-                return;
-        }
-
         // ignore situations when the call already assigns to a field/property
         if (invocationExpr.Parent is AssignmentExpressionSyntax aes && aes.Right == invocationExpr)
             if (context.SemanticModel.GetSymbolInfo(aes.Left, context.CancellationToken).Symbol is IFieldSymbol or IPropertySymbol)
@@ -113,7 +107,7 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
         var injectionMethod
             = classDecl.Members
                   .OfType<MethodDeclarationSyntax>()
-                  .FirstOrDefault(m => m.HasAttribute(x => x is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute")) ??
+                  .FirstOrDefault(m => m.HasAttribute(IsInjectAttributeName)) ??
               classDecl.Members
                   .OfType<MethodDeclarationSyntax>()
                   .FirstOrDefault(m => m.Identifier.Text == "Awake" && !m.ParameterList.Parameters.Any());
@@ -121,7 +115,7 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
         var injectionLocalFunction = classDecl
             .DescendantNodes()
             .OfType<LocalFunctionStatementSyntax>()
-            .FirstOrDefault(m => m.HasAttribute(x => x is "Inject" or "InjectAttribute" or "Medicine.Inject" or "Medicine.InjectAttribute"));
+            .FirstOrDefault(m => m.HasAttribute(IsInjectAttributeName));
 
         if (injectionMethod is null && injectionLocalFunction is null)
         {
@@ -150,4 +144,7 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(MED007, invocationExpr.GetLocation(), invocationExpr.ToString()));
         }
     }
+
+    static bool IsInjectAttributeName(NameSyntax name)
+        => name.MatchesQualifiedNamePattern("Medicine.InjectAttribute", namespaceSegments: 1, skipEnd: "Attribute");
 }

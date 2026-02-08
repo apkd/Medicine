@@ -66,6 +66,7 @@ public readonly struct AttributeConstructorArgumentsDict
             int paramCount = parameterSymbols.Length;
             bool lastIsParams = paramCount > 0 && parameterSymbols[paramCount - 1].IsParams;
             int lastOrdinal = paramCount - 1;
+            Dictionary<string, int>? parameterOrdinalsByName = null;
 
             if (attributeData.ApplicationSyntaxReference?.GetSyntax(ct) is not AttributeSyntax { ArgumentList: { } argumentList })
                 return ordinals;
@@ -76,9 +77,9 @@ public readonly struct AttributeConstructorArgumentsDict
                 if (arg.NameColon is not null)
                 {
                     var name = arg.NameColon.Name.Identifier.ValueText;
-                    var p = parameterSymbols.FirstOrDefault(p => p.Name == name);
-                    if (p is not null)
-                        ordinals.Add(p.Ordinal);
+                    parameterOrdinalsByName ??= BuildParameterOrdinals();
+                    if (parameterOrdinalsByName.TryGetValue(name, out int namedOrdinal))
+                        ordinals.Add(namedOrdinal);
 
                     continue;
                 }
@@ -95,6 +96,16 @@ public readonly struct AttributeConstructorArgumentsDict
                 ordinals.Add(mappedOrdinal);
                 positionalIndex++;
             }
+
+            Dictionary<string, int> BuildParameterOrdinals()
+            {
+                var map = new Dictionary<string, int>(parameterSymbols.Length, StringComparer.Ordinal);
+
+                foreach (var parameter in parameterSymbols)
+                    map[parameter.Name] = parameter.Ordinal;
+
+                return map;
+            }
         }
         catch (Exception)
         {
@@ -106,25 +117,55 @@ public readonly struct AttributeConstructorArgumentsDict
 
     static object MaterializeArray(TypedConstant arrayConstant, ITypeSymbol parameterType)
     {
+        var values = arrayConstant.Values;
+        int length = values.Length;
+
         if (parameterType is IArrayTypeSymbol arrayType)
         {
-            if (arrayType.ElementType.SpecialType == SpecialType.System_String)
-                return arrayConstant.Values.Select(v => (string?)v.Value).ToArray();
-
-            if (arrayType.ElementType.SpecialType == SpecialType.System_Boolean)
-                return arrayConstant.Values.Select(v => v.Value is bool b && b).ToArray();
-
-            if (arrayType.ElementType.SpecialType == SpecialType.System_Int32)
-                return arrayConstant.Values.Select(v => v.Value is int i ? i : default).ToArray();
-
-            if (arrayType.ElementType.SpecialType == SpecialType.System_Int64)
-                return arrayConstant.Values.Select(v => v.Value is long l ? l : default).ToArray();
-
-            if (arrayType.ElementType.SpecialType == SpecialType.System_Double)
-                return arrayConstant.Values.Select(v => v.Value is double d ? d : default).ToArray();
+            switch (arrayType.ElementType.SpecialType)
+            {
+                case SpecialType.System_String:
+                {
+                    var result = new string?[length];
+                    for (int i = 0; i < result.Length; i++)
+                        result[i] = (string?)values[i].Value;
+                    return result;
+                }
+                case SpecialType.System_Boolean:
+                {
+                    var result = new bool[length];
+                    for (int i = 0; i < result.Length; i++)
+                        result[i] = values[i].Value is true;
+                    return result;
+                }
+                case SpecialType.System_Int32:
+                {
+                    var result = new int[length];
+                    for (int i = 0; i < result.Length; i++)
+                        result[i] = values[i].Value is int x ? x : 0;
+                    return result;
+                }
+                case SpecialType.System_Int64:
+                {
+                    var result = new long[length];
+                    for (int i = 0; i < result.Length; i++)
+                        result[i] = values[i].Value is long x ? x : 0;
+                    return result;
+                }
+                case SpecialType.System_Double:
+                {
+                    var result = new double[length];
+                    for (int i = 0; i < result.Length; i++)
+                        result[i] = values[i].Value is double x ? x : 0;
+                    return result;
+                }
+            }
         }
 
-        return arrayConstant.Values.Select(v => v.Value).ToArray();
+        var fallback = new object?[length];
+        for (int i = 0; i < fallback.Length; i++)
+            fallback[i] = values[i].Value;
+        return fallback;
     }
 
     public T? Get<T>(string name, T? defaultValue)

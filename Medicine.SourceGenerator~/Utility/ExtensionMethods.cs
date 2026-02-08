@@ -45,14 +45,14 @@ public static partial class ExtensionMethods
                     yield return x;
         }
 
-        public bool HasInterface(string interfaceFullyQualifiedName, bool checkAllInterfaces = true)
+        public bool HasInterface(Func<INamedTypeSymbol, bool> interfacePredicate, bool checkAllInterfaces = true)
         {
             if (self is null)
                 return false;
 
             var interfaces = checkAllInterfaces ? self.AllInterfaces : self.Interfaces;
             foreach (var x in interfaces)
-                if (x.Is(interfaceFullyQualifiedName))
+                if (interfacePredicate(x))
                     return true;
 
             return false;
@@ -79,6 +79,9 @@ public static partial class ExtensionMethods
 
         public int Hash
             => SymbolEqualityComparer.Default.GetHashCode(self);
+
+        public bool IsInMedicineNamespace
+            => self.ContainingNamespace is { Name: Constants.Namespace, ContainingNamespace.IsGlobalNamespace: true };
     }
 
     extension(ISymbol? self)
@@ -115,18 +118,16 @@ public static partial class ExtensionMethods
             return false;
         }
 
-        public bool HasAttribute(Func<string, bool> attributeFullyQualifiedNamePredicate)
+        public bool HasAttribute(Func<INamedTypeSymbol, bool> attributePredicate)
         {
             if (self is null)
                 return false;
 
             var attributes = self.GetAttributes();
             foreach (var attribute in attributes)
-            {
-                string fqn = attribute.AttributeClass?.FQN ?? "";
-                if (attributeFullyQualifiedNamePredicate(fqn))
-                    return true;
-            }
+                if (attribute.AttributeClass is { } attributeClass)
+                    if (attributePredicate(attributeClass))
+                        return true;
 
             return false;
         }
@@ -183,21 +184,22 @@ public static partial class ExtensionMethods
 
     extension(MemberDeclarationSyntax? self)
     {
-        public bool HasAttribute(Func<string, bool> predicate)
+        public bool HasAttribute(Func<NameSyntax, bool> predicate)
         {
             if (self is null)
                 return false;
 
             var attributeLists = self.AttributeLists;
             foreach (var attributeList in attributeLists)
-            {
-                foreach (var attribute in attributeList.Attributes)
-                    if (predicate(attribute.Name.ToString()))
-                        return true;
-            }
+            foreach (var attribute in attributeList.Attributes)
+                if (predicate(attribute.Name))
+                    return true;
 
             return false;
         }
+
+        public bool HasAttribute(Func<string, bool> predicate)
+            => self.HasAttribute((Func<NameSyntax, bool>)(x => predicate(x.ToString())));
 
         public AttributeSyntax? GetAttribute(Func<string, bool> predicate)
         {
@@ -215,18 +217,21 @@ public static partial class ExtensionMethods
 
     extension(LocalFunctionStatementSyntax? self)
     {
-        public bool HasAttribute(Func<string, bool> predicate)
+        public bool HasAttribute(Func<NameSyntax, bool> predicate)
         {
             if (self is null)
                 return false;
 
             foreach (var attributeList in self.AttributeLists)
             foreach (var x in attributeList.Attributes)
-                if (predicate(x.Name.ToString()))
+                if (predicate(x.Name))
                     return true;
 
             return false;
         }
+
+        public bool HasAttribute(Func<string, bool> predicate)
+            => self.HasAttribute((Func<NameSyntax, bool>)(x => predicate(x.ToString())));
 
         public AttributeSyntax? GetAttribute(Func<string, bool> predicate)
         {
@@ -302,28 +307,163 @@ public static partial class ExtensionMethods
             );
     }
 
+    extension(NameSyntax? nameSyntax)
+    {
+        public bool MatchesQualifiedNamePattern(string fullNamePattern, int namespaceSegments = 0, string skipEnd = "")
+        {
+            if (nameSyntax is null)
+                return false;
+
+            if (string.IsNullOrEmpty(fullNamePattern))
+                return false;
+
+            bool hasSkipEnd = !string.IsNullOrEmpty(skipEnd);
+            int skipEndLength = skipEnd.Length;
+
+            int patternSegments = 1;
+            foreach (char c in fullNamePattern)
+                if (c is '.')
+                    patternSegments++;
+
+            int nameSegments = CountSegments(nameSyntax);
+            if (nameSegments <= 0)
+                return false;
+
+            int requiredSegments = patternSegments - namespaceSegments;
+            if (nameSegments < requiredSegments || nameSegments > patternSegments)
+                return false;
+
+            int patternCursor = fullNamePattern.Length;
+            NameSyntax? cursor = nameSyntax;
+
+            for (int i = 0; i < nameSegments; i++)
+            {
+                if (!TryGetNextSegment(fullNamePattern, ref patternCursor, out int segmentStart, out int segmentLength))
+                    return false;
+
+                if (!TryPopRightmostIdentifier(ref cursor, out var identifier))
+                    return false;
+
+                if (!SegmentMatches(
+                        identifier.ValueText.AsSpan(),
+                        fullNamePattern.AsSpan(segmentStart, segmentLength),
+                        isRightmostSegment: i == 0,
+                        hasSkipEnd: hasSkipEnd,
+                        skipEnd: skipEnd,
+                        skipEndLength: skipEndLength
+                    ))
+                    return false;
+            }
+
+            return true;
+
+            static int CountSegments(NameSyntax current)
+                => current switch
+                {
+                    QualifiedNameSyntax x      => CountSegments(x.Left) + 1,
+                    AliasQualifiedNameSyntax _ => 1,
+                    SimpleNameSyntax _         => 1,
+                    _                          => 0,
+                };
+
+            static bool TryPopRightmostIdentifier(ref NameSyntax? current, out SyntaxToken identifier)
+            {
+                switch (current)
+                {
+                    case QualifiedNameSyntax qualified:
+                        identifier = qualified.Right.Identifier;
+                        current = qualified.Left;
+                        return true;
+
+                    case AliasQualifiedNameSyntax aliasQualified:
+                        identifier = aliasQualified.Name.Identifier;
+                        current = null;
+                        return true;
+
+                    case SimpleNameSyntax simple:
+                        identifier = simple.Identifier;
+                        current = null;
+                        return true;
+
+                    default:
+                        identifier = default;
+                        current = null;
+                        return false;
+                }
+            }
+
+            static bool TryGetNextSegment(string pattern, ref int cursor, out int segmentStart, out int segmentLength)
+            {
+                if (cursor <= 0)
+                {
+                    segmentStart = 0;
+                    segmentLength = 0;
+                    return false;
+                }
+
+                int start = cursor - 1;
+                while (start >= 0 && pattern[start] != '.')
+                    start--;
+
+                segmentStart = start + 1;
+                segmentLength = cursor - segmentStart;
+                cursor = start;
+                return true;
+            }
+
+            static bool SegmentMatches(
+                ReadOnlySpan<char> identifier,
+                ReadOnlySpan<char> segment,
+                bool isRightmostSegment,
+                bool hasSkipEnd,
+                string skipEnd,
+                int skipEndLength
+            )
+            {
+                if (identifier.SequenceEqual(segment))
+                    return true;
+
+                if (!isRightmostSegment || !hasSkipEnd)
+                    return false;
+
+                if (segment.Length <= skipEndLength)
+                    return false;
+
+                var segmentTail = segment[(segment.Length - skipEndLength)..];
+                if (!segmentTail.SequenceEqual(skipEnd.AsSpan()))
+                    return false;
+
+                var segmentWithoutTail = segment[..(segment.Length - skipEndLength)];
+                return identifier.SequenceEqual(segmentWithoutTail);
+            }
+        }
+    }
+
+    extension(SyntaxReference? self)
+    {
+        public Location? GetLocation()
+            => self is { SyntaxTree: { } tree, Span: { IsEmpty: false } span }
+                ? Location.Create(tree, span)
+                : null;
+    }
+
     extension(string self)
     {
         public string HtmlEncode()
             => System.Web.HttpUtility.HtmlEncode(self);
     }
 
-    public static string Join(this IEnumerable<string> self, string separator)
-        => string.Join(separator, self);
-
-    public static IEnumerable<T> SelectRecursive<T>(this T node, Func<T, T?> selector)
+    extension(IEnumerable<string> self)
     {
-        while (selector(node) is { } newNode)
-            yield return node = newNode;
+        public string Join(string separator)
+            => string.Join(separator, self);
     }
 
-    public static T[] AsArray<T>(this ImmutableArray<T> array)
-        => Unsafe.As<ImmutableArray<T>, ValueTuple<T[]>>(ref array).Item1 ?? [];
-
-    public static Location? GetLocation(this SyntaxReference? syntaxReference)
-        => syntaxReference is { SyntaxTree: { } tree, Span: { IsEmpty: false } span }
-            ? Location.Create(tree, span)
-            : null;
+    extension<T>(ImmutableArray<T> self)
+    {
+        public T[] AsArray()
+            => Unsafe.As<ImmutableArray<T>, ValueTuple<T[]>>(ref self).Item1 ?? [];
+    }
 
     public static void Deconstruct<TKey, TValue>(this KeyValuePair<TKey, TValue> pair, out TKey key, out TValue value)
         => (key, value) = (pair.Key, pair.Value);

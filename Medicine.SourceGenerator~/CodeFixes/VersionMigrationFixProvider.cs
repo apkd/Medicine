@@ -59,11 +59,11 @@ public sealed class VersionMigrationFixProvider : CodeFixProvider
         var typeSymbol = propSymbol.Type;
         var isArray = typeSymbol is IArrayTypeSymbol;
 
-        bool injectFromChildren = propSymbol.HasAttribute(a => a.Contains("FromChildren"));
-        bool injectFromParents = propSymbol.HasAttribute(a => a.Contains("FromParents"));
-        bool injectAll = propSymbol.HasAttribute(a => a.Contains("All"));
-        bool injectSingle = propSymbol.HasAttribute(a => a.Contains("Single"));
-        bool injectLazy = propSymbol.HasAttribute(a => a.Contains("Lazy"));
+        bool injectFromChildren = HasInjectModifier("FromChildren");
+        bool injectFromParents = HasInjectModifier("FromParents");
+        bool injectAll = HasInjectModifier("All");
+        bool injectSingle = HasInjectModifier("Single");
+        bool injectLazy = HasInjectModifier("Lazy");
 
         bool optional = propSymbol.GetAttributes().SelectMany(a => a.NamedArguments).Any(kvp => kvp is { Key: "Optional", Value.Value: true });
         bool includeInactive = propSymbol.GetAttributes().SelectMany(a => a.NamedArguments).Any(kvp => kvp is { Key: "IncludeInactive", Value.Value: true });
@@ -74,6 +74,28 @@ public sealed class VersionMigrationFixProvider : CodeFixProvider
         string componentTypeName = isArray
             ? ((IArrayTypeSymbol)typeSymbol).ElementType.ToMinimalDisplayString(semanticModel, NullableFlowState.None, property.GetLocation().SourceSpan.Start)
             : typeSymbol.ToMinimalDisplayString(semanticModel, NullableFlowState.None, property.GetLocation().SourceSpan.Start);
+
+        bool HasInjectModifier(string name)
+            => propSymbol.HasAttribute(attributeType => ContainsModifier(attributeType, name));
+
+        static bool ContainsModifier(INamedTypeSymbol attributeType, string name)
+        {
+            if (!attributeType.IsInMedicineNamespace)
+                return false;
+
+            bool hasInjectAncestor = false;
+            bool hasModifier = false;
+            for (INamedTypeSymbol? current = attributeType; current is not null; current = current.ContainingType)
+            {
+                if (current.Name.Contains(name, StringComparison.Ordinal))
+                    hasModifier = true;
+
+                if (current.Name is "Inject" or "InjectAttribute")
+                    hasInjectAncestor = true;
+            }
+
+            return hasInjectAncestor && hasModifier;
+        }
 
         string retrievalExpString = (injectFromChildren, injectFromParents, injectAll, injectSingle, injectLazy, isArray) switch
         {

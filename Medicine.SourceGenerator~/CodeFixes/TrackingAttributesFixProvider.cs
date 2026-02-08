@@ -5,6 +5,8 @@ using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Formatting;
+using Microsoft.CodeAnalysis.Simplification;
 using static Constants;
 
 [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(TrackingAttributesFixProvider)), Shared]
@@ -49,26 +51,52 @@ public sealed class TrackingAttributesFixProvider : CodeFixProvider
         if (attributeName is null)
             return;
 
-        context.RegisterCodeFix(
-            CodeAction.Create(
-                title: $"Add the [{attributeName}] attribute",
-                createChangedSolution: ct => AddAttributeAsync(context.Document.Project.Solution, typeSymbol, attributeName, ct),
-                equivalenceKey: $"Add{attributeName}"
-            ),
-            diagnostic
-        );
+        if (diagnostic.Id == "MED017")
+        {
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    title: $"Add the [{attributeName}] attribute",
+                    createChangedDocument: ct => AddAttributeToCurrentDocumentAsync(context.Document, typeSymbol, attributeName, ct),
+                    equivalenceKey: $"Add{attributeName}"
+                ),
+                diagnostic
+            );
+        }
+        else
+        {
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    title: $"Add the [{attributeName}] attribute",
+                    createChangedSolution: ct => AddAttributeAsync(context.Document.Project.Solution, typeSymbol, attributeName, ct),
+                    equivalenceKey: $"Add{attributeName}"
+                ),
+                diagnostic
+            );
+        }
 
         if (diagnostic.Id == "MED017")
         {
             context.RegisterCodeFix(
                 CodeAction.Create(
                     $"Remove the {IInstanceIndexInterfaceName} interface",
-                    createChangedSolution: ct => RemoveInterfaceAsync(context.Document.Project.Solution, typeSymbol, IInstanceIndexInterfaceName, ct),
+                    createChangedDocument: ct => RemoveInterfaceFromCurrentDocumentAsync(context.Document, typeSymbol, IInstanceIndexInterfaceName, ct),
                     equivalenceKey: $"Remove{IInstanceIndexInterfaceName}"
                 ),
                 diagnostic
             );
         }
+    }
+
+    static async Task<Document> RemoveInterfaceFromCurrentDocumentAsync(Document document, INamedTypeSymbol typeSymbol, string interfaceName, CancellationToken ct)
+    {
+        var solution = await RemoveInterfaceAsync(document.Project.Solution, typeSymbol, interfaceName, ct).ConfigureAwait(false);
+        return solution.GetDocument(document.Id) ?? document;
+    }
+
+    static async Task<Document> AddAttributeToCurrentDocumentAsync(Document document, INamedTypeSymbol typeSymbol, string attributeName, CancellationToken ct)
+    {
+        var solution = await AddAttributeAsync(document.Project.Solution, typeSymbol, attributeName, ct).ConfigureAwait(false);
+        return solution.GetDocument(document.Id) ?? document;
     }
 
     static async Task<Solution> RemoveInterfaceAsync(Solution solution, INamedTypeSymbol typeSymbol, string interfaceName, CancellationToken ct)
@@ -96,9 +124,10 @@ public sealed class TrackingAttributesFixProvider : CodeFixProvider
 
         var newTypeDeclaration = typeDeclaration.WithBaseList(
             newBaseList.Types.Count > 0 ? newBaseList.WithTriviaFrom(baseList) : null
-        );
+        ).WithAdditionalAnnotations(Formatter.Annotation, Simplifier.Annotation);
 
-        var newRoot = root.ReplaceNode(typeDeclaration, newTypeDeclaration);
+        var newRoot = root.ReplaceNode(typeDeclaration, newTypeDeclaration)
+            .WithAdditionalAnnotations(Formatter.Annotation, Simplifier.Annotation);
         return solution.WithDocumentSyntaxRoot(targetDocument.Id, newRoot);
     }
 
@@ -130,7 +159,9 @@ public sealed class TrackingAttributesFixProvider : CodeFixProvider
             if (!typeDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword))
                 newTypeDeclaration = newTypeDeclaration.AddModifiers(SyntaxFactory.Token(SyntaxKind.PartialKeyword));
 
-        var newRoot = root.ReplaceNode(typeDeclaration, newTypeDeclaration);
+        newTypeDeclaration = newTypeDeclaration.WithAdditionalAnnotations(Formatter.Annotation, Simplifier.Annotation);
+        var newRoot = root.ReplaceNode(typeDeclaration, newTypeDeclaration)
+            .WithAdditionalAnnotations(Formatter.Annotation, Simplifier.Annotation);
 
         if (newRoot is CompilationUnitSyntax compilationUnit)
         {

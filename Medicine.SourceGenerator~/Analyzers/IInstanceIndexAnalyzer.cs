@@ -14,7 +14,7 @@ public sealed class InstanceIndexAnalyzer : DiagnosticAnalyzer
         title: "IInstanceIndex requires [Track]",
         messageFormat: "Class '{0}' implements the IInstanceIndex interface but is missing [Track].",
         category: "Medicine",
-        defaultSeverity: DiagnosticSeverity.Warning,
+        defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "The IInstanceIndex interface does not do anything unless the class is also decorated with [Track]."
     );
@@ -31,20 +31,21 @@ public sealed class InstanceIndexAnalyzer : DiagnosticAnalyzer
 
     static void AnalyzeNamedType(SymbolAnalysisContext context)
     {
-        var type = (INamedTypeSymbol)context.Symbol;
-
-        if (type.TypeKind != TypeKind.Class)
+        if (context.Symbol is not INamedTypeSymbol { TypeKind: TypeKind.Class } type)
             return;
 
-        if (type.HasInterface(IInstanceIndexInterfaceFQN, checkAllInterfaces: false) && !type.HasAttribute(TrackAttributeFQN))
-        {
-            context.ReportDiagnostic(
-                Diagnostic.Create(
-                    MED017,
-                    type.Locations.First(),
-                    type.ToDisplayString(MinimallyQualifiedFormat)
-                )
-            );
-        }
+        if (!type.HasInterface(x => x is { Name: IInstanceIndexInterfaceName, IsInMedicineNamespace: true }))
+            return;
+
+        if (type.HasAttribute(x => x is { Name: TrackAttributeName, IsInMedicineNamespace: true }))
+            return;
+
+        context.ReportDiagnostic(
+            Diagnostic.Create(
+                descriptor: MED017,
+                location: type.Locations.First(),
+                messageArgs: type.ToDisplayString(MinimallyQualifiedFormat)
+            )
+        );
     }
 }

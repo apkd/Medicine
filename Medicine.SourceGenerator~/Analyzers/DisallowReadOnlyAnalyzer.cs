@@ -40,13 +40,16 @@ public sealed class DisallowReadonlyFieldAnalyzer : DiagnosticAnalyzer
         if (!fieldDeclaration.Modifiers.Any(SyntaxKind.ReadOnlyKeyword))
             return;
 
+        if (!fieldDeclaration.HasAttribute(x => x.MatchesQualifiedNamePattern("Medicine.DisallowReadonlyAttribute", namespaceSegments: 1)))
+            return;
+
         var typeInfo = context.SemanticModel.GetTypeInfo(fieldDeclaration.Declaration.Type);
 
         if (typeInfo is not { Type: INamedTypeSymbol { TypeKind: TypeKind.Struct } type })
             return;
 
         var hasAttribute = type.GetAttributes() is { Length: > 0 } attributes &&
-                    attributes.Any(x => x is { AttributeClass: { ContainingNamespace.Name: "Medicine", Name: "DisallowReadonlyAttribute" } });
+                    attributes.Any(x => x is { AttributeClass: { Name: "DisallowReadonlyAttribute", IsInMedicineNamespace: true } });
 
         if (hasAttribute)
             context.ReportDiagnostic(Diagnostic.Create(MED015, fieldDeclaration.GetLocation()));
