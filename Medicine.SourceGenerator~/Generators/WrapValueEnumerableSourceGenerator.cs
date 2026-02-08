@@ -6,7 +6,6 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static ActivePreprocessorSymbolNames;
 using static Constants;
 using static Microsoft.CodeAnalysis.SpeculativeBindingOption;
-using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 
 [Generator]
 sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
@@ -73,6 +72,8 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
         public string? GetEnumeratorNamespace;
         public bool IsPublic;
         public ActivePreprocessorSymbolNames Symbols;
+
+        // ReSharper disable once NotAccessedField.Local
         public ImmutableArray<byte> MethodTextChecksumForCache;
     }
 

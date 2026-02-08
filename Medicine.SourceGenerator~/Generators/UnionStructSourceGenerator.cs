@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using static System.StringComparison;
 using static Constants;
 
 [Generator]
@@ -42,8 +43,17 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public string TypeIDFieldName;
         public bool IsPublic;
 
-        public EquatableArray<InterfaceMemberInput> InterfaceMembers;
-        public EquatableArray<DerivedInput> DerivedStructs;
+        public EquatableIgnore<Func<InterfaceMemberInput[]>> InterfaceMembersBuilderFunc;
+        public EquatableIgnore<Func<DerivedInput[]>> DerivedStructsBuilderFunc;
+
+        // ReSharper disable once NotAccessedField.Local
+        public EquatableArray<byte> BaseTextCheckSumForCache;
+    }
+
+    record struct DerivedDeferredInput
+    {
+        public EquatableArray<string> PublicMembers;
+        public bool HasParameterlessConstructor;
     }
 
     record struct Derived : IGeneratorTransformOutput
@@ -55,10 +65,13 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public string DerivedFQN { get; init; }
         public string DerivedName { get; init; }
         public EquatableArray<string> Declaration { get; init; }
-        public ImmutableArray<INamedTypeSymbol> Interfaces { get; init; }
         public byte? ForcedId { get; init; }
-        public EquatableArray<string> PublicMembers { get; init; }
-        public bool HasParameterlessConstructor { get; init; }
+
+        public EquatableIgnore<Func<string, string, bool>> ImplementsUnionInterfaceFunc;
+        public EquatableIgnore<Func<DerivedDeferredInput>> DeferredInputBuilderFunc;
+
+        // ReSharper disable once NotAccessedField.Local
+        public EquatableArray<byte> DerivedTextCheckSumForCache;
     }
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -111,19 +124,48 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         var typeIDEnumSymbol = symbolTypeMembers.FirstOrDefault(x => x.Name is "TypeIDs");
         var typeIDField = symbolMembers.FirstOrDefault(x => x is IFieldSymbol { Type.Name: "TypeIDs" });
 
+        return new()
+        {
+            SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "Union"),
+            BaseDeclaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
+            BaseTypeName = symbol.Name,
+            BaseTypeFQN = symbol.FQN,
+            InterfaceName = interfaceSymbol.Name,
+            InterfaceFQN = interfaceSymbol.FQN,
+            TypeIDEnumFQN = typeIDEnumSymbol?.FQN ?? $"{symbol.FQN}.TypeIDs",
+            TypeIDFieldName = typeIDField?.Name ?? "TypeID",
+            IsPublic = structDecl.Modifiers.Any(SyntaxKind.PublicKeyword),
+            InterfaceMembersBuilderFunc = new(() => BuildInterfaceMembers(interfaceSymbol)),
+            BaseTextCheckSumForCache = structDecl.GetText().GetChecksum().AsArray(),
+        };
+    }
+
+    static InterfaceMemberInput[] BuildInterfaceMembers(INamedTypeSymbol interfaceSymbol)
+    {
         var members = new List<InterfaceMemberInput>();
 
         foreach (var member in interfaceSymbol.GetMembers())
         {
             if (member is IMethodSymbol { MethodKind: MethodKind.Ordinary } method)
             {
+                int parameterCount = method.Parameters.Length;
+                string[] parameters = new string[parameterCount];
+                byte[] parameterRefKinds = new byte[parameterCount];
+
+                for (int i = 0; i < parameterCount; i++)
+                {
+                    var parameter = method.Parameters[i];
+                    parameters[i] = $"{parameter.Type.FQN} {parameter.Name}";
+                    parameterRefKinds[i] = (byte)parameter.RefKind;
+                }
+
                 members.Add(
                     new()
                     {
                         Name = method.Name,
                         ReturnTypeFQN = method.ReturnType.FQN,
-                        Parameters = method.Parameters.Select(x => $"{x.Type.FQN} {x.Name}").ToArray(),
-                        ParameterRefKinds = method.Parameters.Select(x => (byte)x.RefKind).ToArray(),
+                        Parameters = parameters,
+                        ParameterRefKinds = parameterRefKinds,
                         IsProperty = false,
                     }
                 );
@@ -141,19 +183,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             }
         }
 
-        return new()
-        {
-            SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "Union"),
-            BaseDeclaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
-            BaseTypeName = symbol.Name,
-            BaseTypeFQN = symbol.FQN,
-            InterfaceName = interfaceSymbol.Name,
-            InterfaceFQN = interfaceSymbol.FQN,
-            TypeIDEnumFQN = typeIDEnumSymbol?.FQN ?? $"{symbol.FQN}.TypeIDs",
-            TypeIDFieldName = typeIDField?.Name ?? "TypeID",
-            IsPublic = structDecl.Modifiers.Any(SyntaxKind.PublicKeyword),
-            InterfaceMembers = members.ToArray(),
-        };
+        return members.ToArray();
     }
 
     static Derived TransformDerivedCandidate(GeneratorAttributeSyntaxContext context, CancellationToken ct)
@@ -177,13 +207,33 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             DerivedFQN = symbol.FQN,
             DerivedName = symbol.Name,
             Declaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
-            Interfaces = symbol.AllInterfaces,
             ForcedId = forcedId,
-            PublicMembers = symbol.GetMembers()
-                .Where(x => x is { DeclaredAccessibility: Accessibility.Public } and not IMethodSymbol { MethodKind: not MethodKind.Ordinary })
-                .Select(x => x.Name)
-                .Distinct()
-                .ToArray(),
+            ImplementsUnionInterfaceFunc = new((interfaceName, interfaceFQN) => ImplementsUnionInterface(symbol, interfaceName, interfaceFQN)),
+            DeferredInputBuilderFunc = new(() => BuildDerivedDeferredInput(symbol)),
+            DerivedTextCheckSumForCache = structDecl.GetText().GetChecksum().AsArray(),
+        };
+    }
+
+    static bool ImplementsUnionInterface(INamedTypeSymbol symbol, string interfaceName, string interfaceFQN)
+    {
+        foreach (var type in symbol.AllInterfaces)
+            if (type.Name.Contains(interfaceName, Ordinal) && type.FQN == interfaceFQN)
+                return true;
+
+        return false;
+    }
+
+    static DerivedDeferredInput BuildDerivedDeferredInput(INamedTypeSymbol symbol)
+    {
+        var publicMembers = symbol.GetMembers()
+            .Where(x => x is { DeclaredAccessibility: Accessibility.Public } and not IMethodSymbol { MethodKind: not MethodKind.Ordinary })
+            .Select(x => x.Name)
+            .Distinct()
+            .ToArray();
+
+        return new()
+        {
+            PublicMembers = publicMembers,
             HasParameterlessConstructor = symbol.InstanceConstructors.Any(x => x is { Parameters.Length: 0, IsImplicitlyDeclared: false }),
         };
     }
@@ -191,64 +241,112 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     static GeneratorInput CombineBaseAndDerived((GeneratorInput Base, ImmutableArray<Derived> Candidates) input, CancellationToken ct)
     {
         var result = input.Base;
+        var candidates = input.Candidates.AsArray();
 
-        var candidates = input.Candidates
-            .AsArray()
-            .Where(candidate => candidate.Interfaces.Any(x => x.Name.Contains(result.InterfaceName) && x.FQN == result.InterfaceFQN))
-            .ToArray();
+        var derivedStructsBuilderFunc = new EquatableIgnore<Func<DerivedInput[]>>(
+            () => BuildDerivedStructs(candidates, result.InterfaceName, result.InterfaceFQN)
+        );
 
-        var usedIds = new HashSet<byte>();
-        foreach (var c in candidates)
-            if (c.ForcedId.HasValue)
-                usedIds.Add(c.ForcedId.Value);
-
-        var nextId = (byte)1;
-
-        byte GetNextId()
+        var firstError = result.GetError();
+        if (firstError is null)
         {
-            while (usedIds.Contains(nextId))
-                nextId++;
-
-            return nextId++;
+            foreach (var candidate in candidates)
+            {
+                firstError = candidate.GetError();
+                if (firstError is not null)
+                    break;
+            }
         }
-
-        var derivedStructs = candidates
-            .Select(x => (candidate: x, isForced: x.ForcedId.HasValue))
-            .OrderBy(x => !x.isForced)
-            .ThenBy(x => x.candidate.DerivedName)
-            .ToArray()
-            .Select(x => new DerivedInput
-                {
-                    Name = x.candidate.DerivedName,
-                    FQN = x.candidate.DerivedFQN,
-                    Declaration = x.candidate.Declaration,
-                    AssignedId = x.candidate.ForcedId ?? GetNextId(),
-                    PubliclyImplementedMembers = x.candidate.PublicMembers,
-                    HasParameterlessConstructor = x.candidate.HasParameterlessConstructor,
-                }
-            )
-            .OrderBy(x => x.AssignedId)
-            .ToArray();
-
-        var firstError
-            = result.GetError()
-              ?? input.Candidates
-                  .AsArray()
-                  .Select(x => x.GetError())
-                  .FirstOrDefault(x => x is not null);
 
         return result with
         {
-            DerivedStructs = derivedStructs,
+            DerivedStructsBuilderFunc = derivedStructsBuilderFunc,
             SourceGeneratorError = firstError?.error,
             SourceGeneratorErrorLocation = firstError?.location,
         };
     }
 
+    readonly record struct CandidateSortItem(int CandidateIndex, string CandidateName, bool HasForcedId);
+
+    static DerivedInput[] BuildDerivedStructs(Derived[] candidates, string interfaceName, string interfaceFQN)
+    {
+        var matched = new List<CandidateSortItem>(candidates.Length);
+        var usedIds = new HashSet<byte>();
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            var candidate = candidates[i];
+            var implementsUnionInterfaceFunc = candidate.ImplementsUnionInterfaceFunc.Value;
+            if (implementsUnionInterfaceFunc is null || !implementsUnionInterfaceFunc(interfaceName, interfaceFQN))
+                continue;
+
+            if (candidate.ForcedId is { } forcedId)
+            {
+                matched.Add(new(i, candidate.DerivedName, true));
+                usedIds.Add(forcedId);
+            }
+            else
+            {
+                matched.Add(new(i, candidate.DerivedName, false));
+            }
+        }
+
+        if (matched.Count == 0)
+            return [];
+
+        matched.Sort(static (left, right) =>
+        {
+            if (left.HasForcedId != right.HasForcedId)
+                return left.HasForcedId ? -1 : 1;
+
+            if (left.CandidateName.CompareTo(right.CandidateName, Ordinal) is var nameCompare and not 0)
+                return nameCompare;
+
+            return left.CandidateIndex.CompareTo(right.CandidateIndex);
+        });
+
+        var derivedStructs = new DerivedInput[matched.Count];
+        byte nextId = 1;
+
+        for (int i = 0; i < matched.Count; i++)
+        {
+            var candidate = candidates[matched[i].CandidateIndex];
+            var deferredInput = candidate.DeferredInputBuilderFunc.Value?.Invoke() ?? default;
+
+            derivedStructs[i] = new()
+            {
+                Name = candidate.DerivedName,
+                FQN = candidate.DerivedFQN,
+                Declaration = candidate.Declaration,
+                AssignedId = candidate.ForcedId ?? GetNextAvailableId(usedIds, ref nextId),
+                PubliclyImplementedMembers = deferredInput.PublicMembers,
+                HasParameterlessConstructor = deferredInput.HasParameterlessConstructor,
+            };
+        }
+
+        Array.Sort(
+            derivedStructs,
+            static (left, right) => left.AssignedId.CompareTo(right.AssignedId)
+        );
+
+        return derivedStructs;
+    }
+
+    static byte GetNextAvailableId(HashSet<byte> usedIds, ref byte nextId)
+    {
+        while (usedIds.Contains(nextId))
+            nextId++;
+
+        return nextId++;
+    }
+
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
-        if (input.DerivedStructs.Length == 0)
+        var derivedStructs = input.DerivedStructsBuilderFunc.Value?.Invoke() ?? [];
+        if (derivedStructs.Length == 0)
             return;
+
+        var interfaceMembers = input.InterfaceMembersBuilderFunc.Value?.Invoke() ?? [];
 
         src.Line.Write(Alias.UsingInline);
         src.Line.Write($"using {m}UnsafeUtility = global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility;");
@@ -256,7 +354,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         src.Linebreak();
 
         // 1. derived structs generated members
-        foreach (var derived in input.DerivedStructs)
+        foreach (var derived in derivedStructs)
         {
             foreach (var x in derived.Declaration.AsSpan())
             {
@@ -302,7 +400,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             using (src.Braces)
             {
                 src.Line.Write("Unset = 0,");
-                foreach (var derived in input.DerivedStructs)
+                foreach (var derived in derivedStructs)
                     src.Line.Write($"{derived.Name} = {derived.AssignedId},");
             }
 
@@ -311,12 +409,12 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             src.Line.Write("static readonly int[] derivedStructSizes =");
             using (src.Braces)
             {
-                var maxId = input.DerivedStructs.Length > 0 ? input.DerivedStructs.AsArray().Max(x => x.AssignedId) : 0;
+                var maxId = derivedStructs[^1].AssignedId;
                 var sizes = new string[maxId + 1];
                 for (int i = 0; i < sizes.Length; i++)
                     sizes[i] = "-1";
 
-                foreach (var derived in input.DerivedStructs)
+                foreach (var derived in derivedStructs)
                     sizes[derived.AssignedId] = $"{m}UnsafeUtility.SizeOf<{derived.FQN}>()";
 
                 for (int i = 0; i < sizes.Length; i++)
@@ -328,12 +426,12 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             src.Line.Write("static readonly string[] derivedStructNames =");
             using (src.Braces)
             {
-                var maxId = input.DerivedStructs.Length > 0 ? input.DerivedStructs.AsArray().Max(x => x.AssignedId) : 0;
+                var maxId = derivedStructs[^1].AssignedId;
                 var names = new string[maxId + 1];
                 for (int i = 0; i < names.Length; i++)
                     names[i] = $"\"Undefined (TypeID={i})\"";
 
-                foreach (var derived in input.DerivedStructs)
+                foreach (var derived in derivedStructs)
                     names[derived.AssignedId] = $"\"{derived.Name}\"";
 
                 for (int i = 0; i < names.Length; i++)
@@ -348,7 +446,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Line.Write("=> TypeID switch");
                 using (src.Braces)
                 {
-                    src.Line.Write($"<= TypeIDs.{input.DerivedStructs.AsArray()[^1].Name} => derivedStructSizes[(int)TypeID],");
+                    src.Line.Write($"<= TypeIDs.{derivedStructs[^1].Name} => derivedStructSizes[(int)TypeID],");
                     src.Line.Write("_ => -1,");
                 }
             }
@@ -361,7 +459,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Line.Write("=> TypeID switch");
                 using (src.Braces)
                 {
-                    src.Line.Write($"<= TypeIDs.{input.DerivedStructs.AsArray()[^1].Name} => derivedStructNames[(int)TypeID],");
+                    src.Line.Write($"<= TypeIDs.{derivedStructs[^1].Name} => derivedStructNames[(int)TypeID],");
                     src.Line.Write("var unknown => $\"Unknown (TypeID={(byte)unknown})\",");
                 }
             }
@@ -384,7 +482,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         using (src.Braces)
         {
             // polymorphic methods/properties
-            foreach (var member in input.InterfaceMembers)
+            foreach (var member in interfaceMembers)
             {
                 var parametersEnumerable
                     = member
@@ -427,7 +525,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                         src.Line.Write($"switch (self.{input.TypeIDFieldName})");
                         using (src.Braces)
                         {
-                            foreach (var derived in input.DerivedStructs)
+                            foreach (var derived in derivedStructs)
                             {
                                 src.Line.Write($"case {input.TypeIDEnumFQN}.{derived.Name}:");
                                 using (src.Indent)
@@ -475,7 +573,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                         src.Line.Write($"=> self.{input.TypeIDFieldName} switch");
                         using (src.Braces)
                         {
-                            foreach (var derived in input.DerivedStructs)
+                            foreach (var derived in derivedStructs)
                             {
                                 src.Line.Write($"{input.TypeIDEnumFQN}.{derived.Name}");
                                 using (src.Indent)
@@ -529,7 +627,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             }
 
             // AsDerivedStruct methods
-            foreach (var derived in input.DerivedStructs)
+            foreach (var derived in derivedStructs)
             {
                 src.Line.Write($"public static unsafe ref {derived.FQN} As{derived.Name}(this ref {input.BaseTypeFQN} self)");
                 using (src.Braces)
