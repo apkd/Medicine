@@ -184,7 +184,8 @@ public partial class TrackAttributePlayModeTests
             => default;
     }
 
-    sealed class MBTrackStressTestDerived : MBTrackStressTestGeneric<int, float>, IFindByID<int>
+    [Track]
+    sealed partial class MBTrackStressTestDerived : MBTrackStressTestGeneric<int, float>, IFindByID<int>
     {
         int IFindByID<int>.ID
             => GetHashCode();

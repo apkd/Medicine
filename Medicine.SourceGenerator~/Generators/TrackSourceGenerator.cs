@@ -221,34 +221,46 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         {
             foreach (var interfaceType in classSymbol.AllInterfaces)
             {
-                AddTrackingIdFromSymbol(interfaceType, interfaceType.FQN);
+                AddTrackingIdFromSymbol(interfaceType, interfaceType, interfaceType.FQN);
 
                 foreach (var inheritedInterface in interfaceType.AllInterfaces)
-                    AddTrackingIdFromSymbol(inheritedInterface, interfaceType.FQN);
+                    AddTrackingIdFromSymbol(inheritedInterface, interfaceType, interfaceType.FQN);
             }
 
-            void AddTrackingIdFromSymbol(INamedTypeSymbol type, string lookupTypeFQN)
+            void AddTrackingIdFromSymbol(INamedTypeSymbol type, INamedTypeSymbol lookupType, string lookupTypeFQN)
             {
-                if (!TryGetTrackingIdType(type, out var idTypeFQN))
+                if (!TryGetTrackingIdType(type, lookupType, out var idTypeFQN, out bool registerLookupType))
                     return;
 
                 if (!trackingIdRegistrations.Contains(new(classTypeFQN, idTypeFQN)))
                     trackingIdRegistrations.Add(new(classTypeFQN, idTypeFQN));
 
+                // omit direct IFindByID<T> implementations
+                if (!registerLookupType)
+                    return;
+
                 if (!trackingIdRegistrations.Contains(new(lookupTypeFQN, idTypeFQN)))
                     trackingIdRegistrations.Add(new(lookupTypeFQN, idTypeFQN));
             }
 
-            bool TryGetTrackingIdType(INamedTypeSymbol type, out string idTypeFQN)
+            bool TryGetTrackingIdType(INamedTypeSymbol type, INamedTypeSymbol lookupType, out string idTypeFQN, out bool registerLookupType)
             {
                 if (!type.OriginalDefinition.Is(knownSymbols.TrackingIdInterface))
                 {
                     idTypeFQN = "";
+                    registerLookupType = false;
                     return false;
                 }
 
                 idTypeFQN = type.TypeArguments.FirstOrDefault()?.FQN ?? "";
-                return idTypeFQN.Length > 0;
+                if (idTypeFQN.Length is 0)
+                {
+                    registerLookupType = false;
+                    return false;
+                }
+
+                registerLookupType = !type.Is(lookupType);
+                return true;
             }
         }
 
