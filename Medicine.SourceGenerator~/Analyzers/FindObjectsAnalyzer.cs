@@ -36,87 +36,75 @@ sealed class FindObjectsAnalyzer : DiagnosticAnalyzer
     {
         context.EnableConcurrentExecution();
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
-        context.RegisterSyntaxNodeAction(
-            action: AnalyzeInvocation,
-            syntaxKinds: SyntaxKind.InvocationExpression
-        );
-
-        return;
-
-        static void AnalyzeInvocation(SyntaxNodeAnalysisContext context)
+        context.RegisterCompilationStartAction(startContext =>
         {
-            if (context.Node is not InvocationExpressionSyntax invocation)
+            var knownSymbols = new KnownSymbols(startContext.Compilation);
+            startContext.RegisterSyntaxNodeAction(
+                action: syntaxContext => AnalyzeInvocation(syntaxContext, knownSymbols),
+                syntaxKinds: SyntaxKind.InvocationExpression
+            );
+        });
+    }
+
+    static void AnalyzeInvocation(SyntaxNodeAnalysisContext context, KnownSymbols knownSymbols)
+    {
+        if (context.Node is not InvocationExpressionSyntax invocation)
+            return;
+
+        var nameSyntax = invocation.Expression switch
+        {
+            GenericNameSyntax x                                        => x,
+            MemberAccessExpressionSyntax { Name: GenericNameSyntax x } => x,
+            _                                                          => null,
+        };
+
+        if (nameSyntax is null)
+            return;
+
+        if (context.SemanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol methodSymbol)
+            return;
+
+        var methodName = nameSyntax.Identifier.ValueText;
+
+        if (methodName is "FindObjectOfType" or "FindFirstObjectByType" or "FindAnyObjectByType")
+        {
+            if (!methodSymbol.ContainingType.Is(knownSymbols.UnityObject))
                 return;
 
-            var nameSyntax = invocation.Expression switch
-            {
-                GenericNameSyntax x                                        => x,
-                MemberAccessExpressionSyntax { Name: GenericNameSyntax x } => x,
-                _                                                          => null,
-            };
+            if (methodSymbol.TypeArguments.FirstOrDefault()?.HasAttribute(knownSymbols.SingletonAttribute) == true)
+                context.ReportDiagnostic(Diagnostic.Create(MED013, invocation.GetLocation(), invocation.ToString()));
 
-            if (nameSyntax is null)
-                return;
-
-            if (context.SemanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol methodSymbol)
-                return;
-
-            var methodName = nameSyntax.Identifier.ValueText;
-
-            if (methodName is "FindObjectOfType" or "FindFirstObjectByType" or "FindAnyObjectByType")
-            {
-                if (methodSymbol.ContainingType is not { } containingType)
-                    return;
-
-                if (containingType.ContainingNamespace.ToDisplayString() != "UnityEngine")
-                    return;
-
-                if (containingType.Name != "Object")
-                    return;
-
-                if (methodSymbol.TypeArguments.FirstOrDefault()?.HasAttribute("global::Medicine.SingletonAttribute") == true)
-                    context.ReportDiagnostic(Diagnostic.Create(MED013, invocation.GetLocation(), invocation.ToString()));
-
-                return;
-            }
-
-            if (methodName is "FindObjectsOfType" or "FindObjectsByType" or "ObjectsByType")
-                if (IsTarget(methodSymbol, invocation, context.SemanticModel))
-                    context.ReportDiagnostic(Diagnostic.Create(MED011, invocation.GetLocation()));
+            return;
         }
 
-        static bool IsTarget(IMethodSymbol methodSymbol, InvocationExpressionSyntax invocation, SemanticModel semanticModel)
-        {
-            if (!methodSymbol.IsGenericMethod)
-                return false;
+        if (methodName is "FindObjectsOfType" or "FindObjectsByType" or "ObjectsByType")
+            if (IsTarget(methodSymbol, invocation, knownSymbols))
+                context.ReportDiagnostic(Diagnostic.Create(MED011, invocation.GetLocation()));
+    }
 
-            var containingType = methodSymbol.ContainingType;
-            if (containingType is null)
-                return false;
+    static bool IsTarget(IMethodSymbol methodSymbol, InvocationExpressionSyntax invocation, KnownSymbols knownSymbols)
+    {
+        if (!methodSymbol.IsGenericMethod)
+            return false;
 
-            var nameSpace = containingType.ContainingNamespace.ToDisplayString();
+        bool IsTracked()
+            => methodSymbol.TypeArguments.FirstOrDefault()?.HasAttribute(knownSymbols.TrackAttribute) is true;
 
-            bool IsTracked()
-                => methodSymbol.TypeArguments.FirstOrDefault()?.HasAttribute("global::Medicine.TrackAttribute") is true;
+        if (methodSymbol.ContainingType.Is(knownSymbols.UnityObject))
+            if (methodSymbol.Name is "FindObjectsOfType" or "FindObjectsByType")
+                return true;
 
-            if (nameSpace is "UnityEngine")
-                if (containingType.Name is "Object")
-                    if (methodSymbol.Name is "FindObjectsOfType" or "FindObjectsByType")
+        bool IsIncludeInactive()
+            => invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression
+                is LiteralExpressionSyntax { Token.ValueText: "true" }
+                or MemberAccessExpressionSyntax { Name.Identifier.Text: "Include" };
+
+        if (methodSymbol.ContainingType.Is(knownSymbols.MedicineFind))
+            if (methodSymbol.Name is "ObjectsByType")
+                if (IsTracked())
+                    if (!IsIncludeInactive())
                         return true;
 
-            bool IsIncludeInactive()
-                => invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression
-                    is LiteralExpressionSyntax { Token.ValueText: "true" }
-                    or MemberAccessExpressionSyntax { Name.Identifier.Text: "Include" };
-
-            if (nameSpace is "Medicine")
-                if (containingType.Name is "Find")
-                    if (methodSymbol.Name is "ObjectsByType")
-                        if (IsTracked())
-                            if (!IsIncludeInactive())
-                                return true;
-
-            return false;
-        }
+        return false;
     }
 }

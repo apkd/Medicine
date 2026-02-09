@@ -82,13 +82,29 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
 
     static void OnCompilationStart(CompilationStartAnalysisContext context)
     {
+        var knownSymbols = new KnownSymbols(context.Compilation);
+
         context.RegisterSyntaxNodeAction(
-            syntaxContext => AnalyzeInvocation(syntaxContext, MED001, "Singleton", Constants.SingletonAttributeFQN, "global::Medicine.Find"),
+            syntaxContext => AnalyzeInvocation(
+                syntaxContext,
+                knownSymbols,
+                MED001,
+                "Singleton",
+                knownSymbols.SingletonAttribute,
+                Constants.SingletonAttributeShort
+            ),
             SyntaxKind.InvocationExpression
         );
 
         context.RegisterSyntaxNodeAction(
-            syntaxContext => AnalyzeInvocation(syntaxContext, MED002, "Instances", Constants.TrackAttributeFQN, "global::Medicine.Find"),
+            syntaxContext => AnalyzeInvocation(
+                syntaxContext,
+                knownSymbols,
+                MED002,
+                "Instances",
+                knownSymbols.TrackAttribute,
+                Constants.TrackAttributeName.Replace(nameof(Attribute), "")
+            ),
             SyntaxKind.InvocationExpression
         );
 
@@ -98,8 +114,8 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
                 var namedTypeSymbol = (INamedTypeSymbol)symbolContext.Symbol;
 
                 // Incompatible attributes check
-                var hasSingleton = namedTypeSymbol.HasAttribute(Constants.SingletonAttributeFQN);
-                var hasTrack = namedTypeSymbol.HasAttribute(Constants.TrackAttributeFQN);
+                var hasSingleton = namedTypeSymbol.HasAttribute(knownSymbols.SingletonAttribute);
+                var hasTrack = namedTypeSymbol.HasAttribute(knownSymbols.TrackAttribute);
 
                 if (hasSingleton && hasTrack)
                 {
@@ -115,11 +131,11 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
                 if (namedTypeSymbol.TypeKind != TypeKind.Class)
                     return;
 
-                if (!hasTrack && !namedTypeSymbol.GetBaseTypes().Any(x => x.HasAttribute(Constants.TrackAttributeFQN)))
+                if (!hasTrack && !namedTypeSymbol.GetBaseTypes().Any(x => x.HasAttribute(knownSymbols.TrackAttribute)))
                 {
                     foreach (var @interface in namedTypeSymbol.Interfaces)
                     {
-                        if (!@interface.HasAttribute(Constants.TrackAttributeFQN))
+                        if (!@interface.HasAttribute(knownSymbols.TrackAttribute))
                             continue;
 
                         symbolContext.ReportDiagnostic(
@@ -140,7 +156,7 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
                 {
                     foreach (var @interface in namedTypeSymbol.Interfaces)
                     {
-                        if (!@interface.HasAttribute(Constants.SingletonAttributeFQN))
+                        if (!@interface.HasAttribute(knownSymbols.SingletonAttribute))
                             continue;
 
                         symbolContext.ReportDiagnostic(
@@ -163,10 +179,11 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
 
     static void AnalyzeInvocation(
         SyntaxNodeAnalysisContext context,
+        KnownSymbols knownSymbols,
         DiagnosticDescriptor diagnosticDescriptor,
         string methodName,
-        string attributeFQN,
-        string medicineFindFQN
+        INamedTypeSymbol attributeSymbol,
+        string attributeDisplayName
     )
     {
         var invocation = (InvocationExpressionSyntax)context.Node;
@@ -196,7 +213,7 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
             })
             return;
 
-        if (!containingType.Is(medicineFindFQN))
+        if (!containingType.Is(knownSymbols.MedicineFind))
             return;
 
         if (context.SemanticModel.GetTypeInfo(typeArgumentSyntax).Type is not INamedTypeSymbol typeArgument)
@@ -205,7 +222,7 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
         if (typeArgument.IsUnboundGenericType)
             return;
 
-        if (!typeArgument.HasAttribute(attributeFQN))
+        if (!typeArgument.HasAttribute(attributeSymbol))
         {
             if (typeArgument.ContainingNamespace?.ToDisplayString().StartsWith("UnityEngine", StringComparison.Ordinal) ?? false)
             {
@@ -215,7 +232,7 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
                         typeArgumentSyntax.GetLocation(),
                         typeArgument.ToDisplayString(MinimallyQualifiedFormat),
                         methodSymbol.ToDisplayString(CSharpShortErrorMessageFormat),
-                        attributeFQN.Replace(nameof(Attribute), "")
+                        attributeDisplayName
                     )
                 );
             }

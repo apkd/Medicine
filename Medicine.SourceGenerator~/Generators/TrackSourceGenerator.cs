@@ -159,6 +159,10 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         if (context.TargetSymbol is not INamedTypeSymbol { TypeKind: TypeKind.Class } classSymbol)
             return default;
 
+        if (classSymbol.HasAttribute(knownSymbols.SingletonAttribute))
+            if (classSymbol.HasAttribute(knownSymbols.TrackAttribute))
+                return default; // disallow both attributes
+
         if (context.Attributes.FirstOrDefault() is not { AttributeConstructor: not null } attributeData)
             return default;
 

@@ -9,9 +9,6 @@ using Microsoft.CodeAnalysis.Diagnostics;
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class NullComparisonAnalyzer : DiagnosticAnalyzer
 {
-    const string ExtensionsDefine = "MEDICINE_EXTENSIONS_LIB";
-    const string UnityObjectFqn = "global::UnityEngine.Object";
-
     public static readonly DiagnosticDescriptor MED026 = new(
         id: nameof(MED026),
         title: "Use faster IsNull extension method",
@@ -39,43 +36,49 @@ public sealed class NullComparisonAnalyzer : DiagnosticAnalyzer
         context.EnableConcurrentExecution();
 
         context.RegisterCompilationStartAction(startContext =>
-        {
-            if (!HasExtensionsSymbol(startContext.Compilation))
-                return;
+            {
+                if (!HasExtensionsSymbol(startContext.Compilation))
+                    return;
 
-            startContext.RegisterSyntaxNodeAction(AnalyzeBinary, SyntaxKind.EqualsExpression, SyntaxKind.NotEqualsExpression);
-            startContext.RegisterSyntaxNodeAction(AnalyzeIsPattern, SyntaxKind.IsPatternExpression);
-        });
+                var knownSymbols = new KnownSymbols(startContext.Compilation);
+                startContext.RegisterSyntaxNodeAction(
+                    syntaxContext => AnalyzeBinary(syntaxContext, knownSymbols.UnityObject),
+                    SyntaxKind.EqualsExpression,
+                    SyntaxKind.NotEqualsExpression
+                );
+
+                startContext.RegisterSyntaxNodeAction(
+                    syntaxContext => AnalyzeIsPattern(syntaxContext, knownSymbols.UnityObject),
+                    SyntaxKind.IsPatternExpression
+                );
+            }
+        );
     }
 
     static bool HasExtensionsSymbol(Compilation compilation)
     {
         foreach (var tree in compilation.SyntaxTrees)
-        {
-            if (tree.Options is not CSharpParseOptions options)
-                continue;
-
-            foreach (var name in options.PreprocessorSymbolNames)
-                if (name == ExtensionsDefine)
-                    return true;
-        }
+            if (tree.Options is CSharpParseOptions options)
+                foreach (var name in options.PreprocessorSymbolNames)
+                    if (name is Constants.MedicineExtensionsDefine)
+                        return true;
 
         return false;
     }
 
-    static void AnalyzeBinary(SyntaxNodeAnalysisContext context)
+    static void AnalyzeBinary(SyntaxNodeAnalysisContext context, INamedTypeSymbol unityObjectSymbol)
     {
         if (context.Node is not BinaryExpressionSyntax binary)
             return;
 
-        if (!TryGetUnityOperand(binary.Left, binary.Right, context.SemanticModel, context.CancellationToken, out _))
+        if (!TryGetUnityOperand(binary.Left, binary.Right, context.SemanticModel, context.CancellationToken, unityObjectSymbol, out _))
             return;
 
         var descriptor = binary.IsKind(SyntaxKind.EqualsExpression) ? MED026 : MED027;
         context.ReportDiagnostic(Diagnostic.Create(descriptor, binary.GetLocation()));
     }
 
-    static void AnalyzeIsPattern(SyntaxNodeAnalysisContext context)
+    static void AnalyzeIsPattern(SyntaxNodeAnalysisContext context, INamedTypeSymbol unityObjectSymbol)
     {
         if (context.Node is not IsPatternExpressionSyntax isPattern)
             return;
@@ -84,15 +87,12 @@ public sealed class NullComparisonAnalyzer : DiagnosticAnalyzer
 
         if (IsNullPattern(pattern))
         {
-            if (IsUnityObjectExpression(isPattern.Expression, context.SemanticModel, context.CancellationToken))
+            if (IsUnityObjectExpression(isPattern.Expression, context.SemanticModel, context.CancellationToken, unityObjectSymbol))
                 context.ReportDiagnostic(Diagnostic.Create(MED026, isPattern.GetLocation()));
-
-            return;
         }
-
-        if (IsNotNullPattern(pattern))
+        else if (IsNotNullPattern(pattern))
         {
-            if (IsUnityObjectExpression(isPattern.Expression, context.SemanticModel, context.CancellationToken))
+            if (IsUnityObjectExpression(isPattern.Expression, context.SemanticModel, context.CancellationToken, unityObjectSymbol))
                 context.ReportDiagnostic(Diagnostic.Create(MED027, isPattern.GetLocation()));
         }
     }
@@ -102,6 +102,7 @@ public sealed class NullComparisonAnalyzer : DiagnosticAnalyzer
         ExpressionSyntax right,
         SemanticModel model,
         CancellationToken ct,
+        INamedTypeSymbol unityObjectSymbol,
         out ExpressionSyntax unityOperand
     )
     {
@@ -109,7 +110,7 @@ public sealed class NullComparisonAnalyzer : DiagnosticAnalyzer
 
         if (IsNullLiteral(left))
         {
-            if (IsUnityObjectExpression(right, model, ct))
+            if (IsUnityObjectExpression(right, model, ct, unityObjectSymbol))
             {
                 unityOperand = right;
                 return true;
@@ -120,7 +121,7 @@ public sealed class NullComparisonAnalyzer : DiagnosticAnalyzer
 
         if (IsNullLiteral(right))
         {
-            if (!IsUnityObjectExpression(left, model, ct))
+            if (!IsUnityObjectExpression(left, model, ct, unityObjectSymbol))
                 return false;
 
             unityOperand = left;
@@ -159,27 +160,38 @@ public sealed class NullComparisonAnalyzer : DiagnosticAnalyzer
         return pattern;
     }
 
-    static bool IsUnityObjectExpression(ExpressionSyntax expression, SemanticModel model, CancellationToken ct)
+    static bool IsUnityObjectExpression(
+        ExpressionSyntax expression,
+        SemanticModel model,
+        CancellationToken ct,
+        INamedTypeSymbol unityObjectSymbol
+    )
     {
         var typeInfo = model.GetTypeInfo(expression, ct);
         var type = typeInfo.Type ?? typeInfo.ConvertedType;
-        return IsUnityObjectType(type);
+        return IsUnityObjectType(type, unityObjectSymbol);
     }
 
-    static bool IsUnityObjectType(ITypeSymbol? type)
+    static bool IsUnityObjectType(ITypeSymbol? type, INamedTypeSymbol unityObjectSymbol)
     {
-        if (type is null or IErrorTypeSymbol)
-            return false;
-
-        if (type is ITypeParameterSymbol typeParameter)
+        switch (type)
         {
-            foreach (var constraint in typeParameter.ConstraintTypes)
-                if (IsUnityObjectType(constraint))
-                    return true;
+            case null or IErrorTypeSymbol:
+            {
+                return false;
+            }
+            case ITypeParameterSymbol typeParameter:
+            {
+                foreach (var constraint in typeParameter.ConstraintTypes)
+                    if (IsUnityObjectType(constraint, unityObjectSymbol))
+                        return true;
 
-            return false;
+                return false;
+            }
+            default:
+            {
+                return type.Is(unityObjectSymbol) || type.InheritsFrom(unityObjectSymbol);
+            }
         }
-
-        return type.Is(UnityObjectFqn) || type.InheritsFrom(UnityObjectFqn);
     }
 }

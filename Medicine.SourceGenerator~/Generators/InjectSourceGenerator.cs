@@ -771,6 +771,11 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             );
         }
 
+        expressions = expressions
+            .GroupBy(x => x.PropertyName, StringComparer.Ordinal)
+            .Select(x => x.First())
+            .ToArray();
+
         string storageSuffix = input.InjectMethodOrLocalFunctionName is "Awake" ? "" : $"For{input.InjectMethodOrLocalFunctionName}";
         string storagePropName = $"{m}MedicineInternal{storageSuffix}";
         string storageStructName = $"{m}MedicineInternalBackingStorage{storageSuffix}";

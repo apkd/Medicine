@@ -3,6 +3,7 @@ static class Constants
     public const string m = "ᵐ";
     public const string Namespace = "Medicine";
     public const string NamespaceWithGlobal = $"global::{Namespace}";
+    public const string MedicineExtensionsDefine = "MEDICINE_EXTENSIONS_LIB";
 
     public const string MedicineSettingsAttributeShort = "MedicineSettings";
     public const string MedicineSettingsAttribute = $"{MedicineSettingsAttributeShort}Attribute";

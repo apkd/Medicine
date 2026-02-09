@@ -110,7 +110,11 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     static GeneratorInput TransformBase(GeneratorAttributeSyntaxContext context, CancellationToken ct)
     {
         if (context is not { TargetSymbol: ITypeSymbol symbol, TargetNode: StructDeclarationSyntax structDecl })
-            return default;
+            return new()
+            {
+                SourceGeneratorError = "Unexpected target shape for [UnionHeader].",
+                SourceGeneratorErrorLocation = new LocationInfo(context.TargetNode.GetLocation()),
+            };
 
         var symbolMembers = symbol.GetMembers().AsArray();
         var symbolTypeMembers = symbol.GetTypeMembers().AsArray();
@@ -119,7 +123,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                               ?? symbolTypeMembers.FirstOrDefault(x => x.TypeKind is TypeKind.Interface);
 
         if (interfaceSymbol is null)
-            return default;
+            return new()
+            {
+                SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "Union"),
+            };
 
         var typeIDEnumSymbol = symbolTypeMembers.FirstOrDefault(x => x.Name is "TypeIDs");
         var typeIDField = symbolMembers.FirstOrDefault(x => x is IFieldSymbol { Type.Name: "TypeIDs" });

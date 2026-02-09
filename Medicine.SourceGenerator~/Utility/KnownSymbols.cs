@@ -42,9 +42,14 @@ readonly record struct KnownSymbols
 
     public KnownSymbols(Compilation compilation)
     {
+
         EquatableIgnore<INamedTypeSymbol> Get(string metadataName)
-            => new(compilation.GetTypeByMetadataName(metadataName)
-                   ?? throw new($"Common type not found: '{metadataName}'"));
+        {
+            // missing common symbols should be rare enough; in case we can't resolve these,
+            // we fall back to System.Void which won't match any equality/inheritance checks
+            var missingSymbolFallback = compilation.GetSpecialType(SpecialType.System_Void);
+            return new(compilation.GetTypeByMetadataName(metadataName) ?? missingSymbolFallback);
+        }
 
         unityObject = Get("UnityEngine.Object");
         unityComponent = Get("UnityEngine.Component");
