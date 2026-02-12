@@ -13,6 +13,22 @@ public partial class UnionNestedTests
         }
 
         public TypeIDs TypeID;
+        public int RootCounter;
+        public int RootGetOnly => 101;
+        public int RootPublicGetPrivateSet { get; private set; }
+        public int RootPrivateGetPublicSet { private get; set; }
+
+        int rootSetOnlyValue;
+        public int RootSetOnly { set => rootSetOnlyValue = value; }
+
+        public readonly int ReadRootSetOnly()
+            => rootSetOnlyValue;
+
+        public readonly int ReadRootPrivateGetPublicSet()
+            => RootPrivateGetPublicSet;
+
+        public void SetRootPublicGetPrivateSet(int value)
+            => RootPublicGetPrivateSet = value;
     }
 
     [UnionHeader]
@@ -27,6 +43,21 @@ public partial class UnionNestedTests
 
         public RootState Header;
         public int Counter;
+        public int ChildGetOnly => 201;
+        public int ChildPublicGetPrivateSet { get; private set; }
+        public int ChildPrivateGetPublicSet { private get; set; }
+
+        int childSetOnlyValue;
+        public int ChildSetOnly { set => childSetOnlyValue = value; }
+
+        public readonly int ReadChildSetOnly()
+            => childSetOnlyValue;
+
+        public readonly int ReadChildPrivateGetPublicSet()
+            => ChildPrivateGetPublicSet;
+
+        public void SetChildPublicGetPrivateSet(int value)
+            => ChildPublicGetPrivateSet = value;
     }
 
     [Union]
@@ -208,6 +239,101 @@ public partial class UnionNestedTests
 
         childA.Header.Counter = 13;
         Assert.That(childA.Counter, Is.EqualTo(13));
+    }
+
+    [Test]
+    public void RootHeaderPropertyForwarding_Works_ForNestedUnionVariants()
+    {
+        var plain = CreatePlainState();
+        var childA = CreateChildAState();
+
+        plain.RootCounter = 8;
+        Assert.That(plain.Header.RootCounter, Is.EqualTo(8));
+
+        childA.RootCounter = 15;
+        Assert.That(childA.Header.Header.RootCounter, Is.EqualTo(15));
+
+        childA.Header.Header.RootCounter = 19;
+        Assert.That(childA.RootCounter, Is.EqualTo(19));
+    }
+
+    [Test]
+    public void RootHeaderPropertyForwarding_HandlesAccessorVariants_ForNestedUnionVariants()
+    {
+        var childA = CreateChildAState();
+
+        Assert.That(childA.RootGetOnly, Is.EqualTo(101));
+
+        childA.RootSetOnly = 21;
+        Assert.That(childA.Header.Header.ReadRootSetOnly(), Is.EqualTo(21));
+
+        childA.RootPrivateGetPublicSet = 31;
+        Assert.That(childA.Header.Header.ReadRootPrivateGetPublicSet(), Is.EqualTo(31));
+
+        childA.Header.Header.SetRootPublicGetPrivateSet(41);
+        Assert.That(childA.RootPublicGetPrivateSet, Is.EqualTo(41));
+    }
+
+    [Test]
+    public void ChildHeaderPropertyForwarding_HandlesAccessorVariants_ForNestedUnionVariants()
+    {
+        var childA = CreateChildAState();
+
+        Assert.That(childA.ChildGetOnly, Is.EqualTo(201));
+
+        childA.ChildSetOnly = 27;
+        Assert.That(childA.Header.ReadChildSetOnly(), Is.EqualTo(27));
+
+        childA.ChildPrivateGetPublicSet = 37;
+        Assert.That(childA.Header.ReadChildPrivateGetPublicSet(), Is.EqualTo(37));
+
+        childA.Header.SetChildPublicGetPrivateSet(47);
+        Assert.That(childA.ChildPublicGetPrivateSet, Is.EqualTo(47));
+    }
+
+    [Test]
+    public void NestedForwardedProperties_ExposeExpectedAccessorShapes()
+    {
+        var rootGetOnly = typeof(ChildAState).GetProperty(nameof(RootState.RootGetOnly));
+        var rootGetPrivateSet = typeof(ChildAState).GetProperty(nameof(RootState.RootPublicGetPrivateSet));
+        var rootPrivateGetSet = typeof(ChildAState).GetProperty(nameof(RootState.RootPrivateGetPublicSet));
+        var rootSetOnly = typeof(ChildAState).GetProperty(nameof(RootState.RootSetOnly));
+        var childGetOnly = typeof(ChildAState).GetProperty(nameof(ChildState.ChildGetOnly));
+        var childGetPrivateSet = typeof(ChildAState).GetProperty(nameof(ChildState.ChildPublicGetPrivateSet));
+        var childPrivateGetSet = typeof(ChildAState).GetProperty(nameof(ChildState.ChildPrivateGetPublicSet));
+        var childSetOnly = typeof(ChildAState).GetProperty(nameof(ChildState.ChildSetOnly));
+
+        Assert.That(rootGetOnly, Is.Not.Null);
+        Assert.That(rootGetOnly!.CanRead, Is.True);
+        Assert.That(rootGetOnly.CanWrite, Is.False);
+
+        Assert.That(rootGetPrivateSet, Is.Not.Null);
+        Assert.That(rootGetPrivateSet!.CanRead, Is.True);
+        Assert.That(rootGetPrivateSet.CanWrite, Is.False);
+
+        Assert.That(rootPrivateGetSet, Is.Not.Null);
+        Assert.That(rootPrivateGetSet!.CanRead, Is.False);
+        Assert.That(rootPrivateGetSet.CanWrite, Is.True);
+
+        Assert.That(rootSetOnly, Is.Not.Null);
+        Assert.That(rootSetOnly!.CanRead, Is.False);
+        Assert.That(rootSetOnly.CanWrite, Is.True);
+
+        Assert.That(childGetOnly, Is.Not.Null);
+        Assert.That(childGetOnly!.CanRead, Is.True);
+        Assert.That(childGetOnly.CanWrite, Is.False);
+
+        Assert.That(childGetPrivateSet, Is.Not.Null);
+        Assert.That(childGetPrivateSet!.CanRead, Is.True);
+        Assert.That(childGetPrivateSet.CanWrite, Is.False);
+
+        Assert.That(childPrivateGetSet, Is.Not.Null);
+        Assert.That(childPrivateGetSet!.CanRead, Is.False);
+        Assert.That(childPrivateGetSet.CanWrite, Is.True);
+
+        Assert.That(childSetOnly, Is.Not.Null);
+        Assert.That(childSetOnly!.CanRead, Is.False);
+        Assert.That(childSetOnly.CanWrite, Is.True);
     }
 
     [Test]

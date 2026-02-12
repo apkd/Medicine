@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static System.StringComparison;
 using static Constants;
+using static Microsoft.CodeAnalysis.Accessibility;
 
 [Generator]
 public sealed class UnionStructSourceGenerator : IIncrementalGenerator
@@ -30,7 +31,6 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public string Name { get; init; }
         public string FQN { get; init; }
         public EquatableArray<string> Declaration { get; init; }
-        public string HeaderFieldName { get; init; }
         public byte AssignedId { get; init; }
         public EquatableArray<string> PubliclyImplementedMembers { get; init; }
         public EquatableArray<string> MemberNames { get; init; }
@@ -53,14 +53,13 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public string DerivedFQN { get; init; }
         public string DerivedName { get; init; }
         public EquatableArray<string> Declaration { get; init; }
-        public string HeaderFieldName { get; init; }
-        public EquatableArray<string> HeaderChainFQNs { get; init; }
         public byte? ForcedId { get; init; }
 
+        public EquatableIgnore<Func<string, bool>?> HasHeaderInChainFunc { get; init; }
         public EquatableIgnore<Func<string, bool>?> ImplementsUnionInterfaceFunc { get; init; }
         public EquatableIgnore<Func<DerivedDeferredInput>?> DeferredInputBuilderFunc { get; init; }
 
-        // ReSharper disable once NotAccessedField.Local
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public EquatableArray<byte> DerivedTextCheckSumForCache { get; init; }
     }
 
@@ -74,11 +73,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public EquatableArray<string> BaseDeclaration { get; init; }
         public string BaseTypeName { get; init; }
         public string BaseTypeFQN { get; init; }
-        public string InterfaceName { get; init; }
         public string InterfaceFQN { get; init; }
         public string TypeIDEnumFQN { get; init; }
         public string TypeIDFieldName { get; init; }
-        public string RootTypeName { get; init; }
         public string RootTypeFQN { get; init; }
         public string RootInterfaceFQN { get; init; }
         public string RootTypeIDEnumFQN { get; init; }
@@ -92,7 +89,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public EquatableIgnore<Func<HeaderFieldInput[]>?> HeaderFieldsBuilderFunc { get; init; }
         public EquatableIgnore<Func<DerivedInput[]>?> DerivedStructsBuilderFunc { get; init; }
 
-        // ReSharper disable once NotAccessedField.Local
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public EquatableArray<byte> BaseTextCheckSumForCache { get; init; }
     }
 
@@ -132,18 +129,22 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     static GeneratorInput TransformBase(GeneratorAttributeSyntaxContext context, CancellationToken ct)
     {
         if (context is not { TargetSymbol: ITypeSymbol symbol, TargetNode: StructDeclarationSyntax structDecl })
+        {
             return new()
             {
                 SourceGeneratorError = "Unexpected target shape for [UnionHeader].",
                 SourceGeneratorErrorLocation = new LocationInfo(context.TargetNode.GetLocation()),
             };
+        }
 
         if (symbol is not INamedTypeSymbol baseSymbol)
+        {
             return new()
             {
                 SourceGeneratorError = "Unexpected target symbol for [UnionHeader].",
                 SourceGeneratorErrorLocation = new LocationInfo(context.TargetNode.GetLocation()),
             };
+        }
 
         var symbolMembers = symbol.GetMembers().AsArray();
         var symbolTypeMembers = symbol.GetTypeMembers().AsArray();
@@ -152,10 +153,12 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                               ?? symbolTypeMembers.FirstOrDefault(x => x.TypeKind is TypeKind.Interface);
 
         if (interfaceSymbol is null)
+        {
             return new()
             {
                 SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "Union"),
             };
+        }
 
         var typeIDEnumSymbol = symbolTypeMembers.FirstOrDefault(x => x.Name is "TypeIDs");
         var typeIDField = symbolMembers.FirstOrDefault(x => x is IFieldSymbol { Name: "TypeID", Type.Name: "TypeIDs" });
@@ -188,13 +191,11 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             BaseDeclaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
             BaseTypeName = symbol.Name,
             BaseTypeFQN = symbol.FQN,
-            InterfaceName = interfaceSymbol.Name,
             InterfaceFQN = interfaceSymbol.FQN,
             TypeIDEnumFQN = isRootTypeIdOwner
                 ? typeIDEnumSymbol?.FQN ?? $"{symbol.FQN}.TypeIDs"
                 : rootTypeIDEnumSymbol?.FQN ?? $"{rootHeader.FQN}.TypeIDs",
             TypeIDFieldName = typeIDField?.Name ?? "TypeID",
-            RootTypeName = rootHeader.Name,
             RootTypeFQN = rootHeader.FQN,
             RootInterfaceFQN = rootInterface.FQN,
             RootTypeIDEnumFQN = rootTypeIDEnumSymbol?.FQN ?? $"{rootHeader.FQN}.TypeIDs",
@@ -257,24 +258,18 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
     static HeaderFieldInput[] BuildHeaderFields(INamedTypeSymbol headerSymbol)
     {
-        static bool IsAccessible(Accessibility accessibility)
-            => accessibility is
-                Accessibility.Public
-                or Accessibility.Internal
-                or Accessibility.ProtectedOrInternal;
-
         var fieldsAndProperties = headerSymbol.GetMembers()
             .Where(x => x is IFieldSymbol or IPropertySymbol)
             .OrderBy(x => x.Locations.FirstOrDefault()?.SourceSpan.Start ?? int.MaxValue);
 
-        var result = new List<HeaderFieldInput>();
+        var result = new List<HeaderFieldInput>(capacity: 8);
         foreach (var member in fieldsAndProperties)
         {
             switch (member)
             {
                 case IFieldSymbol { IsStatic: false, IsImplicitlyDeclared: false } field:
                 {
-                    if (!IsAccessible(field.DeclaredAccessibility))
+                    if (!field.IsAccessible)
                         break;
 
                     result.Add(
@@ -290,8 +285,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 }
                 case IPropertySymbol { IsStatic: false, IsIndexer: false } property:
                 {
-                    bool canGet = property.GetMethod is { } getter && IsAccessible(getter.DeclaredAccessibility);
-                    bool canSet = property.SetMethod is { } setter && IsAccessible(setter.DeclaredAccessibility);
+                    bool canGet = property.GetMethod is { IsAccessible: true };
+                    bool canSet = property.SetMethod is { IsAccessible: true };
+
                     if (!canGet && !canSet)
                         break;
 
@@ -317,7 +313,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         if (context.TargetNode is not StructDeclarationSyntax structDecl)
             return default;
 
-        if (context.SemanticModel.GetDeclaredSymbol(structDecl, ct) is not INamedTypeSymbol symbol)
+        if (context.SemanticModel.GetDeclaredSymbol(structDecl, ct) is not { } symbol)
             return default;
 
         byte? forcedId = context.Attributes
@@ -333,9 +329,8 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             DerivedFQN = symbol.FQN,
             DerivedName = symbol.Name,
             Declaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
-            HeaderFieldName = GetFirstHeaderField(symbol)?.Name ?? "Header",
-            HeaderChainFQNs = BuildHeaderChainFQNs(symbol),
             ForcedId = forcedId,
+            HasHeaderInChainFunc = new(headerFQN => HasHeaderInChain(symbol, headerFQN)),
             ImplementsUnionInterfaceFunc = new(interfaceFQN => symbol.AllInterfaces.Any(x => x.FQN == interfaceFQN)),
             DeferredInputBuilderFunc = new(() => BuildDerivedDeferredInput(symbol)),
             DerivedTextCheckSumForCache = structDecl.GetText().GetChecksum().AsArray(),
@@ -345,7 +340,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     static DerivedDeferredInput BuildDerivedDeferredInput(INamedTypeSymbol symbol)
     {
         var publicMembers = symbol.GetMembers()
-            .Where(x => x is { DeclaredAccessibility: Accessibility.Public } and not IMethodSymbol { MethodKind: not MethodKind.Ordinary })
+            .Where(x => x is { DeclaredAccessibility: Public } and not IMethodSymbol { MethodKind: not MethodKind.Ordinary })
             .Select(x => x.Name)
             .Distinct()
             .ToArray();
@@ -404,7 +399,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             if (candidate.ImplementsUnionInterfaceFunc.Value?.Invoke(rootInterfaceFQN) is not true)
                 continue;
 
-            if (!HasHeaderInChain(candidate, rootHeaderFQN))
+            if (candidate.HasHeaderInChainFunc.Value?.Invoke(rootHeaderFQN) is not true)
                 continue;
 
             if (candidate.ForcedId is { } forcedId)
@@ -453,7 +448,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             if (candidate.ImplementsUnionInterfaceFunc.Value?.Invoke(interfaceFQN) is not true)
                 continue;
 
-            if (!HasHeaderInChain(candidate, headerFQN))
+            if (candidate.HasHeaderInChainFunc.Value?.Invoke(headerFQN) is not true)
                 continue;
 
             var deferredInput = candidate.DeferredInputBuilderFunc.Value?.Invoke() ?? default;
@@ -464,7 +459,6 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     Name = candidate.DerivedName,
                     FQN = candidate.DerivedFQN,
                     Declaration = candidate.Declaration,
-                    HeaderFieldName = candidate.HeaderFieldName,
                     AssignedId = assigned.AssignedId,
                     PubliclyImplementedMembers = deferredInput.PublicMembers,
                     MemberNames = deferredInput.MemberNames,
@@ -489,24 +483,12 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         return result;
     }
 
-    static bool HasHeaderInChain(Derived candidate, string headerFQN)
-        => candidate.HeaderChainFQNs.AsArray().Any(x => x.Equals(headerFQN, Ordinal));
-
-    static byte GetNextAvailableId(HashSet<byte> usedIds, ref byte nextId)
-    {
-        while (usedIds.Contains(nextId))
-            nextId++;
-
-        return nextId++;
-    }
-
-    static EquatableArray<string> BuildHeaderChainFQNs(INamedTypeSymbol symbol)
+    static bool HasHeaderInChain(INamedTypeSymbol symbol, string headerFQN)
     {
         var firstHeaderFieldType = GetFirstHeaderFieldType(symbol);
         if (firstHeaderFieldType is null)
-            return [];
+            return false;
 
-        var chain = new List<string>();
         var visited = new HashSet<string>(StringComparer.Ordinal);
         var current = firstHeaderFieldType;
         while (current is not null && current.HasAttribute(UnionHeaderStructAttributeFQN))
@@ -514,11 +496,21 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             if (!visited.Add(current.FQN))
                 break;
 
-            chain.Add(current.FQN);
+            if (current.FQN.Equals(headerFQN, Ordinal))
+                return true;
+
             current = GetFirstHeaderFieldType(current);
         }
 
-        return chain.ToArray();
+        return false;
+    }
+
+    static byte GetNextAvailableId(HashSet<byte> usedIds, ref byte nextId)
+    {
+        while (usedIds.Contains(nextId))
+            nextId++;
+
+        return nextId++;
     }
 
     static IFieldSymbol? GetFirstHeaderField(INamedTypeSymbol symbol)
@@ -545,10 +537,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                    {
                        Name: "Interface",
                        TypeKind: TypeKind.Interface,
-                       DeclaredAccessibility: Accessibility.Public,
+                       DeclaredAccessibility: Public,
                    }
                ) ??
-               typeMembers.FirstOrDefault(x => x is { TypeKind: TypeKind.Interface, DeclaredAccessibility: Accessibility.Public });
+               typeMembers.FirstOrDefault(x => x is { TypeKind: TypeKind.Interface, DeclaredAccessibility: Public });
     }
 
     static INamedTypeSymbol GetRootHeader(INamedTypeSymbol headerSymbol, INamedTypeSymbol headerInterface)
@@ -611,10 +603,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 using (src.Braces)
                 {
                     if (headerField.CanGet)
-                        src.Line.Write($"get => {derived.HeaderFieldName}.{headerField.Name};");
+                        src.Line.Write($"get => {m}UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}>(ref this).{headerField.Name};");
 
                     if (headerField.CanSet)
-                        src.Line.Write($"set => {derived.HeaderFieldName}.{headerField.Name} = value;");
+                        src.Line.Write($"set => {m}UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}>(ref this).{headerField.Name} = value;");
                 }
 
                 src.Linebreak();

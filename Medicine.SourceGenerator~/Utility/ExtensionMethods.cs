@@ -82,6 +82,9 @@ public static partial class ExtensionMethods
 
         public bool IsInMedicineNamespace
             => self.ContainingNamespace is { Name: Constants.Namespace, ContainingNamespace.IsGlobalNamespace: true };
+
+        public bool IsAccessible
+            => self.DeclaredAccessibility is Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal;
     }
 
     extension(ISymbol? self)
