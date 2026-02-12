@@ -52,8 +52,8 @@ public static class TestUtility
 public static class CI
 {
     const string TestResultsDirectory = "test-results";
-    const string EditModeResultsFilename = "results-editmode.xml";
-    const string PlayModeResultsFilename = "results-playmode.xml";
+    const string EditModeResultsFilename = "Edit mode tests.xml";
+    const string PlayModeResultsFilename = "Play mode tests.xml";
     const string CombinedResultsFilename = "report.txt";
     const string InitTestSceneSearchPattern = "InitTestScene*.unity";
 
