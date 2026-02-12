@@ -1,5 +1,10 @@
 using Microsoft.CodeAnalysis;
 
+readonly record struct GeneratorEnvironment(
+    KnownSymbols KnownSymbols,
+    MedicineSettings MedicineSettings
+);
+
 readonly record struct KnownSymbols
 {
     readonly EquatableIgnore<INamedTypeSymbol> unityObject;

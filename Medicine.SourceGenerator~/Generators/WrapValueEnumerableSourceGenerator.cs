@@ -12,11 +12,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 {
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var knownSymbolsProvider = context.GetKnownSymbolsProvider();
-
-        var medicineSettings = context.CompilationProvider
-            .Combine(context.ParseOptionsProvider)
-            .Select((x, ct) => new MedicineSettings(x, ct));
+        var generatorEnvironment = context.GetGeneratorEnvironment();
 
         var wrapRequests =
             context
@@ -26,10 +22,12 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
                     predicate: static (x, ct) => x is MethodDeclarationSyntax or PropertyDeclarationSyntax,
                     transform: TransformForCache
                 )
-                .Combine(knownSymbolsProvider)
-                .SelectEx((x, ct) => Transform(x.Left, x.Right, ct))
-                .Combine(medicineSettings)
-                .Select((x, ct) => x.Left with { Symbols = x.Right.PreprocessorSymbolNames });
+                .Combine(generatorEnvironment)
+                .SelectEx((x, ct) => Transform(x.Left, x.Right.KnownSymbols, ct) with
+                    {
+                        Symbols = x.Right.MedicineSettings.PreprocessorSymbolNames,
+                    }
+                );
 
         context.RegisterSourceOutputEx(wrapRequests, GenerateSource);
     }
@@ -346,66 +344,39 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 
         var assignmentTypesByIdentifier = BuildInjectAssignmentTypeMap(model, retExpr, unresolvedIdentifierNames, ct);
 
-        Dictionary<(int Start, int Length), TypeSyntax>? memberAccessCastTypes = null;
-        Dictionary<string, TypeSyntax>? identifierCastTypes = null;
+        Dictionary<(int Start, int Length), ITypeSymbol>? memberAccessCastTypes = null;
+        Dictionary<string, ITypeSymbol>? identifierCastTypes = null;
 
         foreach (var identifier in unresolvedIdentifiers)
         {
             if (!TryInferIdentifierType(identifier, assignmentTypesByIdentifier, out var inferredType, out var memberAccessExpressionSyntax))
                 continue;
 
-            var castType = SyntaxFactory.ParseTypeName(inferredType.FQN);
-
             if (memberAccessExpressionSyntax is not null)
             {
                 memberAccessCastTypes ??= [];
                 var key = (memberAccessExpressionSyntax.SpanStart, memberAccessExpressionSyntax.Span.Length);
                 if (!memberAccessCastTypes.ContainsKey(key))
-                    memberAccessCastTypes[key] = castType;
+                    memberAccessCastTypes[key] = inferredType;
             }
             else
             {
                 identifierCastTypes ??= new(StringComparer.Ordinal);
                 if (!identifierCastTypes.ContainsKey(identifier.Identifier.ValueText))
-                    identifierCastTypes[identifier.Identifier.ValueText] = castType;
+                    identifierCastTypes[identifier.Identifier.ValueText] = inferredType;
             }
         }
 
         if (memberAccessCastTypes is null && identifierCastTypes is null)
             return null;
 
-        ExpressionSyntax expr = retExpr;
-
-        // first pass: apply high-confidence member access fixes and rebind once.
-        if (memberAccessCastTypes is not null)
-        {
-            if (new CastMemberAccessRewriter(memberAccessCastTypes).Visit(expr) is not ExpressionSyntax patchedExpression)
-                return null;
-
-            if (!ReferenceEquals(patchedExpression, expr))
-            {
-                expr = patchedExpression;
-
-                var result = model.GetSpeculativeTypeInfo(retExpr.SpanStart, expr, BindAsExpression).ConvertedType;
-                if (result is not (null or IErrorTypeSymbol))
-                    return result;
-            }
-        }
-
-        if (identifierCastTypes is null)
-            return null;
-
-        // second pass: batch all identifier casts and rebind once.
-        if (new CastRewriter(identifierCastTypes).Visit(expr) is not ExpressionSyntax fullyPatchedExpression)
-            return null;
-
-        if (ReferenceEquals(fullyPatchedExpression, expr))
-            return null;
-
-        var finalResult = model.GetSpeculativeTypeInfo(retExpr.SpanStart, fullyPatchedExpression, BindAsExpression).ConvertedType;
-        return finalResult is not (null or IErrorTypeSymbol)
-            ? finalResult
-            : null;
+        return SpeculativeTypePatching.Reevaluate(
+            model,
+            expression: retExpr,
+            options: new(BindPosition: retExpr.SpanStart, ReturnOnFirstSuccessfulPass: true),
+            identifierTypesByName: identifierCastTypes,
+            memberAccessTypesByExpressionSpan: memberAccessCastTypes
+        );
 
         bool TryInferIdentifierType(
             IdentifierNameSyntax identifier,
@@ -504,39 +475,4 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
         return assignmentTypesByIdentifier;
     }
 
-    sealed class CastMemberAccessRewriter(IReadOnlyDictionary<(int Start, int Length), TypeSyntax> castTypesByMemberAccessSpan) : CSharpSyntaxRewriter
-    {
-        public override SyntaxNode? VisitMemberAccessExpression(MemberAccessExpressionSyntax node)
-        {
-            if (!castTypesByMemberAccessSpan.TryGetValue((node.Expression.SpanStart, node.Expression.Span.Length), out var castType))
-                return base.VisitMemberAccessExpression(node);
-
-            // build (TrackedInstances<TrackedObject>)TrackedObject.Instances
-            var castExpr =
-                SyntaxFactory.ParenthesizedExpression(
-                    SyntaxFactory.CastExpression(
-                        castType,
-                        node.Expression
-                    )
-                );
-
-            // keep the original .Name (AsValueEnumerable, Select, …)
-            return node.WithExpression(castExpr);
-        }
-    }
-
-    sealed class CastRewriter(IReadOnlyDictionary<string, TypeSyntax> castTypesByIdentifier) : CSharpSyntaxRewriter
-    {
-        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
-            => castTypesByIdentifier.TryGetValue(node.Identifier.ValueText, out var castType)
-                ? SyntaxFactory
-                    .ParenthesizedExpression(
-                        SyntaxFactory.CastExpression(
-                            castType,
-                            node.WithoutTrivia()
-                        )
-                    )
-                    .WithTriviaFrom(node)
-                : base.VisitIdentifierName(node);
-    }
 }

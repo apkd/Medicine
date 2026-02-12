@@ -29,11 +29,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public string Name;
         public string MetadataName;
         public string TypeFQN;
-        public string Visibility;
+        public bool IsPublic;
         public bool IsReadOnly;
         public bool IsUnmanagedType;
         public bool IsReferenceType;
-        public bool IsPropertyBackingField;
         public bool IsPrivateInBaseType;
     }
 
@@ -60,11 +59,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
     {
         context.RegisterPostInitializationOutput(x => x.AddSource("UnmanagedAccessExtensions.g.cs", extensionsSrc));
 
-        var knownSymbolsProvider = context.GetKnownSymbolsProvider();
-
-        var settingsProvider = context.CompilationProvider
-            .Combine(context.ParseOptionsProvider)
-            .Select((x, ct) => new MedicineSettings(x, ct));
+        var generatorEnvironment = context.GetGeneratorEnvironment();
 
         var inputProvider = context
             .SyntaxProvider
@@ -73,10 +68,12 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 predicate: static (node, _) => node is ClassDeclarationSyntax,
                 transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
             )
-            .Combine(knownSymbolsProvider)
-            .SelectEx((x, ct) => TransformSyntaxContext(x.Left.Context.Value, x.Right, ct))
-            .Combine(settingsProvider)
-            .Select((x, ct) => x.Left with { MedicineSettings = x.Right });
+            .Combine(generatorEnvironment)
+            .SelectEx((x, ct) => TransformSyntaxContext(x.Left.Context.Value, x.Right.KnownSymbols, ct) with
+                {
+                    MedicineSettings = x.Right.MedicineSettings,
+                }
+            );
 
         context.RegisterSourceOutputEx(
             source: inputProvider,
@@ -139,7 +136,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     Name = "enabled",
                     MetadataName = $"{m}MedicineInternalCachedEnabledState",
                     TypeFQN = "global::System.Boolean",
-                    Visibility = "NonPublic",
+                    IsPublic = false,
                     IsReadOnly = true,
                     IsReferenceType = false,
                     IsUnmanagedType = true,
@@ -155,7 +152,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     Name = "InstanceIndex",
                     MetadataName = $"{m}MedicineInternalInstanceIndex",
                     TypeFQN = "global::System.Int32",
-                    Visibility = "NonPublic",
+                    IsPublic = false,
                     IsReadOnly = true,
                     IsReferenceType = false,
                     IsUnmanagedType = true,
@@ -194,9 +191,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     Name = field.IsImplicitlyDeclared
                         ? field.Name[1..^16]
                         : field.Name,
-                    IsPropertyBackingField = field.IsImplicitlyDeclared,
                     TypeFQN = field.Type.FQN,
-                    Visibility = field.DeclaredAccessibility is Accessibility.Public ? "Public" : "NonPublic",
+                    IsPublic = field.DeclaredAccessibility is Accessibility.Public,
                     IsReadOnly = field.IsReadOnly,
                     IsUnmanagedType = field.Type.IsUnmanagedType,
                     IsReferenceType = field.Type.IsReferenceType,
@@ -205,6 +201,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             );
         }
     }
+
+    static string ToBindingFlagsVisibility(bool isPublic)
+        => isPublic ? "Public" : "NonPublic";
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
@@ -220,10 +219,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             throw new InvalidOperationException("Must include at least one visibility modifier.");
 
         if (!input.AttributeSettings.IncludePublic)
-            input.Fields = input.Fields.AsArray().Where(x => x.Visibility != "Public").ToArray();
+            input.Fields = input.Fields.AsArray().Where(x => !x.IsPublic).ToArray();
 
         if (!input.AttributeSettings.IncludePrivate)
-            input.Fields = input.Fields.AsArray().Where(x => x.Visibility != "NonPublic").ToArray();
+            input.Fields = input.Fields.AsArray().Where(x => x.IsPublic).ToArray();
 
         src.Line.Write($"#pragma warning disable CS0108");
         src.Line.Write(Alias.UsingStorage);
@@ -307,7 +306,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 using (src.Indent)
                 using (src.Braces)
                     foreach (var x in input.Fields.AsArray())
-                        src.Line.Write($"{x.Name} = ᵐUtility.GetFieldOffset(typeof({m}Self), \"{x.MetadataName}\", ᵐBF.{x.Visibility} | ᵐBF.Instance),");
+                        src.Line.Write($"{x.Name} = ᵐUtility.GetFieldOffset(typeof({m}Self), \"{x.MetadataName}\", ᵐBF.{ToBindingFlagsVisibility(x.IsPublic)} | ᵐBF.Instance),");
 
                 src.Write(';');
             }

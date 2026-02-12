@@ -58,35 +58,37 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var knownSymbolsProvider = context.GetKnownSymbolsProvider();
-
-        var medicineSettings = context.CompilationProvider
-            .Combine(context.ParseOptionsProvider)
-            .Select((x, ct) => new MedicineSettings(x, ct));
+        var generatorEnvironment = context.GetGeneratorEnvironment();
 
         context.RegisterPostInitializationOutput((x => x.AddSource("Medicine.Internal.StaticInit.g.cs", staticInitClass)));
 
         foreach (var attributeName in new[] { SingletonAttributeMetadataName, TrackAttributeMetadataName })
         {
-            context.RegisterImplementationSourceOutputEx(
+            context.RegisterSourceOutputEx(
                 context.SyntaxProvider
                     .ForAttributeWithMetadataNameEx(
                         fullyQualifiedMetadataName: attributeName,
                         predicate: static (node, _) => node is ClassDeclarationSyntax,
                         transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
                     )
-                    .Combine(knownSymbolsProvider)
-                    .SelectEx((x, ct) => TransformSyntaxContext(x.Left.Context.Value, x.Right, ct, attributeName))
-                    .Where(x => x.Attribute is { Length: > 0 })
-                    .Combine(medicineSettings)
-                    .Select((x, ct) => x.Left with
+                    .Combine(generatorEnvironment)
+                    .SelectEx((x, ct) =>
                         {
-                            EffectiveSingletonStrategy = x.Left.AttributeSettings.SingletonStrategy ?? x.Right.SingletonStrategy,
-                            HasIInstanceIndex = x.Left.HasIInstanceIndex || x.Right.AlwaysTrackInstanceIndices,
-                            EmitIInstanceIndex = x.Left.EmitIInstanceIndex || x.Right.AlwaysTrackInstanceIndices,
-                            Symbols = x.Right.PreprocessorSymbolNames,
+                            var input = TransformSyntaxContext(x.Left.Context.Value, x.Right.KnownSymbols, ct, attributeName);
+                            if (input.Attribute is not { Length: > 0 })
+                                return input;
+
+                            var settings = x.Right.MedicineSettings;
+                            return input with
+                                {
+                                    EffectiveSingletonStrategy = input.AttributeSettings.SingletonStrategy ?? settings.SingletonStrategy,
+                                    HasIInstanceIndex = input.HasIInstanceIndex || settings.AlwaysTrackInstanceIndices,
+                                    EmitIInstanceIndex = input.EmitIInstanceIndex || settings.AlwaysTrackInstanceIndices,
+                                    Symbols = settings.PreprocessorSymbolNames,
+                                };
                         }
-                    ),
+                    )
+                    .Where(x => x.Attribute is { Length: > 0 }),
                 GenerateSource
             );
         }
@@ -309,8 +311,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     | (classSymbol.InheritsFrom(knownSymbols.UnityObject) ? IsUnityEngineObject : 0)
                     | (classSymbol.InheritsFrom(knownSymbols.UnityComponent) ? IsComponent : 0)
                     | (classSymbol.InheritsFrom(knownSymbols.UnityMonoBehaviour) ? IsMonoBehaviour : 0)
-                    | (classSymbol.InheritsFrom(knownSymbols.UnityScriptableObject) ? IsScriptableObject : 0)
-                    | (classSymbol.IsAbstract ? IsAbstract : 0),
+                    | (classSymbol.InheritsFrom(knownSymbols.UnityScriptableObject) ? IsScriptableObject : 0),
         };
     }
 

@@ -107,11 +107,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var knownSymbolsProvider = context.GetKnownSymbolsProvider();
-
-        var medicineSettings = context.CompilationProvider
-            .Combine(context.ParseOptionsProvider)
-            .Select((x, ct) => new MedicineSettings(x, ct));
+        var generatorEnvironment = context.GetGeneratorEnvironment();
 
         var syntaxProvider = context.SyntaxProvider
             .ForAttributeWithMetadataNameEx(
@@ -125,19 +121,18 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     },
                 transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
             )
-            .Combine(knownSymbolsProvider)
-            .SelectEx((x, ct) => TransformSyntaxContext(x.Left.Context.Value, x.Right, ct));
+            .Combine(generatorEnvironment)
+            .SelectEx((x, ct) =>
+                {
+                    var input = TransformSyntaxContext(x.Left.Context.Value, x.Right.KnownSymbols, ct);
+                    input.MakePublic ??= x.Right.MedicineSettings.MakePublic;
+                    input.Symbols = x.Right.MedicineSettings.PreprocessorSymbolNames;
+                    return input;
+                }
+            );
 
         context.RegisterSourceOutputEx(
-            source: syntaxProvider.Combine(medicineSettings)
-                .Select((x, ct) =>
-                    {
-                        var (input, settings) = x;
-                        input.MakePublic ??= settings.MakePublic;
-                        input.Symbols = settings.PreprocessorSymbolNames;
-                        return input;
-                    }
-                ),
+            source: syntaxProvider,
             action: GenerateSource
         );
     }
@@ -231,7 +226,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         var typeSymbol = context.SemanticModel.GetTypeInfo(assignment.Right, ct).Type;
 
                         if (typeSymbol is null or IErrorTypeSymbol)
-                            typeSymbol = ReevaluateWithPatchedIdentifiers(context.SemanticModel, assignment.Right, resolvedTypes, ct);
+                            typeSymbol = SpeculativeTypePatching.ReevaluateWithResolvedIdentifiers(context.SemanticModel, assignment.Right, resolvedTypes);
 
                         if (typeSymbol is null or IErrorTypeSymbol)
                             continue;
@@ -712,47 +707,6 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         }
 
         return buffer[..written].Trim().ToString();
-    }
-
-    public static ITypeSymbol? ReevaluateWithPatchedIdentifiers(SemanticModel model, Expression expr, Dictionary<string, ITypeSymbol> resolvedTypes, CT ct)
-    {
-        Dictionary<string, TypeSyntax>? castTypesByIdentifier = null;
-
-        foreach (var identifier in expr.DescendantNodesAndSelf().OfType<Identifier>())
-        {
-            string identifierName = identifier.Identifier.ValueText;
-
-            if (castTypesByIdentifier?.ContainsKey(identifierName) is true)
-                continue;
-
-            if (!resolvedTypes.TryGetValue(identifierName, out var type))
-                continue;
-
-            castTypesByIdentifier ??= new(StringComparer.Ordinal);
-            castTypesByIdentifier[identifierName] = SyntaxFactory.ParseTypeName(type.ToDisplayString(FullyQualifiedFormat));
-        }
-
-        if (castTypesByIdentifier is null)
-            return null;
-
-        if (new CastRewriter(castTypesByIdentifier).Visit(expr) is not Expression patchedExpression || ReferenceEquals(patchedExpression, expr))
-            return null;
-
-        return model.GetSpeculativeTypeInfo(expr.SpanStart, patchedExpression, SpeculativeBindingOption.BindAsExpression).ConvertedType;
-    }
-
-    sealed class CastRewriter(IReadOnlyDictionary<string, TypeSyntax> castTypesByIdentifier) : CSharpSyntaxRewriter
-    {
-        public override SyntaxNode? VisitIdentifierName(Identifier node)
-            => castTypesByIdentifier.TryGetValue(node.Identifier.ValueText, out var castType)
-                ? SyntaxFactory.ParenthesizedExpression(
-                        SyntaxFactory.CastExpression(
-                            castType,
-                            node.WithoutTrivia()
-                        )
-                    )
-                    .WithTriviaFrom(node)
-                : base.VisitIdentifierName(node);
     }
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
