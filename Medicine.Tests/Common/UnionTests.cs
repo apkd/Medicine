@@ -22,7 +22,22 @@ public partial class UnionTests
         }
 
         public TypeIDs TypeID;
-        public int Generation;
+        public int Generation { get; set; }
+        public int GetOnly => 101;
+        public int PublicGetPrivateSet { get; private set; }
+        public int PrivateGetPublicSet { private get; set; }
+
+        int setOnlyValue;
+        public int SetOnly { set => setOnlyValue = value; }
+
+        public readonly int ReadSetOnly()
+            => setOnlyValue;
+
+        public readonly int ReadPrivateGetPublicSet()
+            => PrivateGetPublicSet;
+
+        public void SetPublicGetPrivateSet(int value)
+            => PublicGetPrivateSet = value;
     }
 
     [Union(1)]
@@ -214,5 +229,22 @@ public partial class UnionTests
 
         triangle.Header.Generation = 8;
         Assert.That(triangle.Generation, Is.EqualTo(8));
+    }
+
+    [Test]
+    public void HeaderPropertyForwarding_HandlesAccessorVariants()
+    {
+        var triangle = new Triangle { Header = { TypeID = Shape.TypeIDs.Triangle } };
+
+        Assert.That(triangle.GetOnly, Is.EqualTo(101));
+
+        triangle.SetOnly = 21;
+        Assert.That(triangle.Header.ReadSetOnly(), Is.EqualTo(21));
+
+        triangle.PrivateGetPublicSet = 31;
+        Assert.That(triangle.Header.ReadPrivateGetPublicSet(), Is.EqualTo(31));
+
+        triangle.Header.SetPublicGetPrivateSet(41);
+        Assert.That(triangle.PublicGetPrivateSet, Is.EqualTo(41));
     }
 }

@@ -21,6 +21,8 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     {
         public string Name { get; init; }
         public string TypeFQN { get; init; }
+        public bool CanGet { get; init; }
+        public bool CanSet { get; init; }
     }
 
     record struct DerivedInput
@@ -254,17 +256,61 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     }
 
     static HeaderFieldInput[] BuildHeaderFields(INamedTypeSymbol headerSymbol)
-        => headerSymbol.GetMembers()
-            .OfType<IFieldSymbol>()
-            .Where(x => !x.IsStatic)
-            .OrderBy(x => x.Locations.FirstOrDefault()?.SourceSpan.Start ?? int.MaxValue)
-            .Select(x => new HeaderFieldInput
+    {
+        static bool IsAccessible(Accessibility accessibility)
+            => accessibility is
+                Accessibility.Public
+                or Accessibility.Internal
+                or Accessibility.ProtectedOrInternal;
+
+        var fieldsAndProperties = headerSymbol.GetMembers()
+            .Where(x => x is IFieldSymbol or IPropertySymbol)
+            .OrderBy(x => x.Locations.FirstOrDefault()?.SourceSpan.Start ?? int.MaxValue);
+
+        var result = new List<HeaderFieldInput>();
+        foreach (var member in fieldsAndProperties)
+        {
+            switch (member)
+            {
+                case IFieldSymbol { IsStatic: false, IsImplicitlyDeclared: false } field:
                 {
-                    Name = x.Name,
-                    TypeFQN = x.Type.FQN,
+                    if (!IsAccessible(field.DeclaredAccessibility))
+                        break;
+
+                    result.Add(
+                        new()
+                        {
+                            Name = field.Name,
+                            TypeFQN = field.Type.FQN,
+                            CanGet = true,
+                            CanSet = !field.IsReadOnly && !field.IsConst,
+                        }
+                    );
+                    break;
                 }
-            )
-            .ToArray();
+                case IPropertySymbol { IsStatic: false, IsIndexer: false } property:
+                {
+                    bool canGet = property.GetMethod is { } getter && IsAccessible(getter.DeclaredAccessibility);
+                    bool canSet = property.SetMethod is { } setter && IsAccessible(setter.DeclaredAccessibility);
+                    if (!canGet && !canSet)
+                        break;
+
+                    result.Add(
+                        new()
+                        {
+                            Name = property.Name,
+                            TypeFQN = property.Type.FQN,
+                            CanGet = canGet,
+                            CanSet = canSet,
+                        }
+                    );
+                    break;
+                }
+            }
+        }
+
+        return result.ToArray();
+    }
 
     static Derived TransformDerivedCandidate(GeneratorAttributeSyntaxContext context, CancellationToken ct)
     {
@@ -564,8 +610,11 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"public {headerField.TypeFQN} {headerField.Name}");
                 using (src.Braces)
                 {
-                    src.Line.Write($"get => {derived.HeaderFieldName}.{headerField.Name};");
-                    src.Line.Write($"set => {derived.HeaderFieldName}.{headerField.Name} = value;");
+                    if (headerField.CanGet)
+                        src.Line.Write($"get => {derived.HeaderFieldName}.{headerField.Name};");
+
+                    if (headerField.CanSet)
+                        src.Line.Write($"set => {derived.HeaderFieldName}.{headerField.Name} = value;");
                 }
 
                 src.Linebreak();
