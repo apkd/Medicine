@@ -2,6 +2,8 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Medicine.SourceGenerator", "Medicine.SourceGenerator.csproj", "{D3582ADC-4AB6-4FF6-929D-77ADC992884F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Medicine.SourceGenerator.Tests", "..\Medicine.SourceGenerator.Tests~\Medicine.SourceGenerator.Tests.csproj", "{9D64FC44-0DAA-4E4B-9045-4D44F66F7F26}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assembly-CSharp", "..\..\..\Assembly-CSharp.csproj", "{269FB9BF-CC12-DDC3-E6FB-CAF385FDCC11}"
 	ProjectSection(ProjectDependencies) = postProject
 		{D3582ADC-4AB6-4FF6-929D-77ADC992884F} = {D3582ADC-4AB6-4FF6-929D-77ADC992884F}
@@ -25,6 +27,10 @@ Global
 		{D3582ADC-4AB6-4FF6-929D-77ADC992884F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D3582ADC-4AB6-4FF6-929D-77ADC992884F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D3582ADC-4AB6-4FF6-929D-77ADC992884F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9D64FC44-0DAA-4E4B-9045-4D44F66F7F26}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9D64FC44-0DAA-4E4B-9045-4D44F66F7F26}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9D64FC44-0DAA-4E4B-9045-4D44F66F7F26}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9D64FC44-0DAA-4E4B-9045-4D44F66F7F26}.Release|Any CPU.Build.0 = Release|Any CPU
 		{269FB9BF-CC12-DDC3-E6FB-CAF385FDCC11}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{269FB9BF-CC12-DDC3-E6FB-CAF385FDCC11}.Release|Any CPU.ActiveCfg = Debug|Any CPU
 		{58BD426E-C052-BD32-2AAC-95B2F250077E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU

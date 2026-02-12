@@ -16,6 +16,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  roslyn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: dotnet run
+        run: |
+          mkdir -p "$RUNNER_TEMP/test-results"
+          dotnet run --project Medicine.SourceGenerator.Tests~/Medicine.SourceGenerator.Tests.csproj -c Release -- --markdown-report "$RUNNER_TEMP/test-results/roslyn.md"
+
+      - name: Publish test report
+        if: ${{ !cancelled() }}
+        run: |
+          report="$RUNNER_TEMP/test-results/roslyn.md"
+          if [ -f "$report" ]; then
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Analyzer tests" >> "$GITHUB_STEP_SUMMARY"
+            echo "No report found at `$report`." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   unity:
     runs-on: ubuntu-latest
     timeout-minutes: 30
