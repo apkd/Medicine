@@ -1,7 +1,7 @@
 {
   "name": "pl.apkd.medicine",
   "displayName": "Medicine",
-  "version": "3.0.67",
+  "version": "3.0.68",
   "description": "Medicine is a high-performance Unity tooling package built on Roslyn source generators.\n\nIt removes common MonoBehaviour and ScriptableObject boilerplate by emitting optimized code at compile time, with zero runtime overhead for unused features.\n\nCore features:\n- [Inject]: cached component references with debug-only validation and helpful diagnostics\n- [Singleton]: single active instance access for MonoBehaviours and ScriptableObjects\n- [Track]: fast registries of active instances with optional snapshots\n- Per-instance data aligned with tracked objects for Burst and the Job System access\n- Allocation-free component enumeration\n- Unity tag/layer constants generation\n- Analyzers and quick fixes for your IDE\n\n...and many more tiny and big features - see the <a href=\"https://github.com/apkd/Medicine/blob/master/README.md\">README</a>.",
   "unity": "2022.3",
   "unityRelease": "12f1",
