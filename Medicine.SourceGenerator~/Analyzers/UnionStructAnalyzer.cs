@@ -22,12 +22,12 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
 
     static readonly DiagnosticDescriptor MED020 = new(
         id: nameof(MED020),
-        title: "UnionHeader struct must contain a TypeID field",
-        messageFormat: "Struct '{0}' tagged with [UnionHeader] must contain a field: 'public TypeIDs TypeID;'",
+        title: "UnionHeader struct must define TypeID source",
+        messageFormat: "Struct '{0}' tagged with [UnionHeader] must either contain 'public TypeIDs TypeID;' or use another [UnionHeader] as its first field",
         category: "Medicine",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "UnionHeader struct must contain a TypeID field of type TypeIDs to support polymorphism."
+        description: "UnionHeader struct must define TypeID either directly or through a nested [UnionHeader] parent."
     );
 
     static readonly DiagnosticDescriptor MED021 = new(
@@ -80,8 +80,18 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
         description: "Multiple structs associated with the same UnionHeader cannot share the same ID."
     );
 
+    static readonly DiagnosticDescriptor MED031 = new(
+        id: nameof(MED031),
+        title: "Union struct layout is incompatible with implemented nested union interface",
+        messageFormat: "Struct '{0}' implements nested union interface '{1}' but its first [UnionHeader] field is not compatible with header '{2}'",
+        category: "Medicine",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Structs implementing nested UnionHeader interfaces must use a first-field header chain compatible with those interfaces."
+    );
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; }
-        = ImmutableArray.Create(MED019, MED020, MED021, MED022, MED023, MED024, MED025);
+        = ImmutableArray.Create(MED019, MED020, MED021, MED022, MED023, MED024, MED025, MED031);
 
     readonly record struct UnionEntry(INamedTypeSymbol Symbol, INamedTypeSymbol HeaderInterface, byte Id, Location Location);
 
@@ -210,24 +220,30 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
             if (id == 0)
                 return;
 
+            var firstHeaderType = GetFirstHeaderFieldType(unionType);
+            if (firstHeaderType is null)
+                return;
+
+            var headerChain = GetHeaderChain(firstHeaderType);
             var loc = GetBestLocation(unionType, unionAttr, context.CancellationToken);
+            var visitedFamilyInterfaces = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
 
             foreach (var candidateInterface in unionType.AllInterfaces)
             {
+                if (!IsUnionInterface(candidateInterface))
+                    continue;
+
                 if (candidateInterface.ContainingType is not { TypeKind: TypeKind.Struct } containingType)
                     continue;
 
-                if (!containingType.HasAttribute(UnionHeaderStructAttributeFQN))
+                if (!ContainsHeader(headerChain, containingType))
                     continue;
 
-                var isUnionInterface = containingType
-                    .GetTypeMembers()
-                    .Any(x => x is { TypeKind: TypeKind.Interface, DeclaredAccessibility: Accessibility.Public } && x.Is(candidateInterface));
-
-                if (!isUnionInterface)
+                var familyInterface = GetRootUnionInterface(candidateInterface) ?? candidateInterface;
+                if (!visitedFamilyInterfaces.Add(familyInterface))
                     continue;
 
-                tracker.Observe(context, new(unionType, candidateInterface, id, loc));
+                tracker.Observe(context, new(unionType, familyInterface, id, loc));
             }
         }
 
@@ -235,19 +251,7 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
         {
             foreach (var candidateInterface in unionType.AllInterfaces)
             {
-                var containingType = candidateInterface.ContainingType;
-
-                if (containingType is not { TypeKind: TypeKind.Struct })
-                    continue;
-
-                if (!containingType.HasAttribute(UnionHeaderStructAttributeFQN))
-                    continue;
-
-                var isUnionInterface = containingType
-                    .GetTypeMembers()
-                    .Any(x => x is { TypeKind: TypeKind.Interface, DeclaredAccessibility: Accessibility.Public } && x.Is(candidateInterface));
-
-                if (!isUnionInterface)
+                if (!IsUnionInterface(candidateInterface))
                     continue;
 
                 return Diagnostic.Create(MED024, unionType.Locations[0], unionType.Name, candidateInterface.Name);
@@ -258,29 +262,11 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
 
         Diagnostic? AnalyzeHeader()
         {
-            var hasPublicInterface = unionType
-                .GetTypeMembers()
-                .Any(x => x is
-                    {
-                        TypeKind: TypeKind.Interface,
-                        DeclaredAccessibility: Accessibility.Public,
-                    }
-                );
-
-            if (!hasPublicInterface)
+            var headerInterface = GetUnionInterface(unionType);
+            if (headerInterface is null)
                 return Diagnostic.Create(MED019, unionType.Locations[0], unionType.Name);
 
-            var typeIdField = unionType
-                .GetMembers()
-                .FirstOrDefault(x => x is IFieldSymbol
-                    {
-                        Name: "TypeID",
-                        Type.Name: "TypeIDs",
-                        DeclaredAccessibility: Accessibility.Public,
-                    }
-                );
-
-            if (typeIdField is null)
+            if (!HasTypeIdField(unionType) && !HasNestedTypeIdSource(unionType, headerInterface))
                 return Diagnostic.Create(MED020, unionType.Locations[0], unionType.Name);
 
             return null;
@@ -288,11 +274,7 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
 
         Diagnostic? AnalyzeUnion()
         {
-            var fields = unionType.GetMembers()
-                .OfType<IFieldSymbol>()
-                .Where(x => !x.IsStatic)
-                .OrderBy(x => x.Locations.FirstOrDefault()?.SourceSpan.Start ?? int.MaxValue)
-                .ToArray();
+            var fields = GetInstanceFields(unionType);
 
             if (fields.Length == 0)
                 return Diagnostic.Create(MED022, unionType.Locations[0], unionType.Name);
@@ -305,19 +287,174 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
             if (headerFieldIndex is not 0)
                 return Diagnostic.Create(MED023, fields[headerFieldIndex].Locations[0], unionType.Name);
 
-            var firstFieldType = fields[0].Type;
-            var fieldMembers = firstFieldType.GetTypeMembers();
-
-            var targetInterface
-                = fieldMembers.FirstOrDefault(x => x.Name is "Interface") ??
-                  fieldMembers.FirstOrDefault(x => x.TypeKind is TypeKind.Interface);
+            var firstFieldType = fields[0].Type as INamedTypeSymbol;
+            var targetInterface = firstFieldType is not null
+                ? GetUnionInterface(firstFieldType)
+                : null;
 
             if (targetInterface is not null)
                 if (!unionType.AllInterfaces.Any(i => i.Is(targetInterface)))
                     return Diagnostic.Create(MED021, unionType.Locations[0], unionType.Name);
 
+            if (firstFieldType is null)
+                return null;
+
+            var headerChain = GetHeaderChain(firstFieldType);
+            foreach (var candidateInterface in unionType.AllInterfaces)
+            {
+                if (!IsUnionInterface(candidateInterface))
+                    continue;
+
+                if (candidateInterface.ContainingType is not { TypeKind: TypeKind.Struct } interfaceHeader)
+                    continue;
+
+                if (ContainsHeader(headerChain, interfaceHeader))
+                    continue;
+
+                return Diagnostic.Create(
+                    MED031,
+                    unionType.Locations[0],
+                    unionType.Name,
+                    candidateInterface.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+                    interfaceHeader.Name
+                );
+            }
+
             return null;
         }
+    }
+
+    static bool IsUnionInterface(INamedTypeSymbol candidateInterface)
+    {
+        if (candidateInterface is not { TypeKind: TypeKind.Interface, DeclaredAccessibility: Accessibility.Public })
+            return false;
+
+        if (candidateInterface.ContainingType is not { TypeKind: TypeKind.Struct } containingType)
+            return false;
+
+        if (!containingType.HasAttribute(UnionHeaderStructAttributeFQN))
+            return false;
+
+        return GetUnionInterface(containingType) is { } target && target.Is(candidateInterface);
+    }
+
+    static INamedTypeSymbol? GetUnionInterface(INamedTypeSymbol headerType)
+    {
+        var typeMembers = headerType.GetTypeMembers().AsArray();
+        return typeMembers.FirstOrDefault(x =>
+                   x is
+                   {
+                       Name: "Interface",
+                       TypeKind: TypeKind.Interface,
+                       DeclaredAccessibility: Accessibility.Public,
+                   }
+               ) ??
+               typeMembers.FirstOrDefault(x => x is { TypeKind: TypeKind.Interface, DeclaredAccessibility: Accessibility.Public });
+    }
+
+    static IFieldSymbol[] GetInstanceFields(INamedTypeSymbol type)
+        => type.GetMembers()
+            .OfType<IFieldSymbol>()
+            .Where(x => !x.IsStatic)
+            .OrderBy(x => x.Locations.FirstOrDefault()?.SourceSpan.Start ?? int.MaxValue)
+            .ToArray();
+
+    static INamedTypeSymbol? GetFirstHeaderFieldType(INamedTypeSymbol type)
+    {
+        var fields = GetInstanceFields(type);
+        if (fields.Length == 0)
+            return null;
+
+        return fields[0].Type is INamedTypeSymbol firstFieldType && firstFieldType.HasAttribute(UnionHeaderStructAttributeFQN)
+            ? firstFieldType
+            : null;
+    }
+
+    static INamedTypeSymbol[] GetHeaderChain(INamedTypeSymbol firstHeaderType)
+    {
+        var result = new List<INamedTypeSymbol>();
+        var visited = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+        var current = firstHeaderType;
+
+        while (current.HasAttribute(UnionHeaderStructAttributeFQN))
+        {
+            if (!visited.Add(current))
+                break;
+
+            result.Add(current);
+
+            var parent = GetFirstHeaderFieldType(current);
+            if (parent is null)
+                break;
+
+            current = parent;
+        }
+
+        return [.. result];
+    }
+
+    static bool ContainsHeader(INamedTypeSymbol[] chain, INamedTypeSymbol header)
+    {
+        foreach (var candidate in chain)
+            if (candidate.Is(header))
+                return true;
+
+        return false;
+    }
+
+    static bool HasTypeIdField(INamedTypeSymbol headerType)
+        => headerType.GetMembers()
+            .Any(x => x is IFieldSymbol
+                {
+                    Name: "TypeID",
+                    Type.Name: "TypeIDs",
+                    DeclaredAccessibility: Accessibility.Public,
+                }
+            );
+
+    static bool HasNestedTypeIdSource(INamedTypeSymbol headerType, INamedTypeSymbol headerInterface)
+    {
+        var parentHeader = GetFirstHeaderFieldType(headerType);
+        if (parentHeader is null)
+            return false;
+
+        var parentInterface = GetUnionInterface(parentHeader);
+        if (parentInterface is null)
+            return false;
+
+        return headerInterface.AllInterfaces.Any(x => x.Is(parentInterface));
+    }
+
+    static INamedTypeSymbol? GetRootUnionInterface(INamedTypeSymbol unionInterface)
+    {
+        if (!IsUnionInterface(unionInterface))
+            return null;
+
+        var currentHeader = unionInterface.ContainingType;
+        var currentInterface = unionInterface;
+        var visited = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+
+        while (currentHeader is not null)
+        {
+            if (!visited.Add(currentHeader))
+                break;
+
+            var parentHeader = GetFirstHeaderFieldType(currentHeader);
+            if (parentHeader is null)
+                break;
+
+            var parentInterface = GetUnionInterface(parentHeader);
+            if (parentInterface is null)
+                break;
+
+            if (!currentInterface.AllInterfaces.Any(x => x.Is(parentInterface)))
+                break;
+
+            currentHeader = parentHeader;
+            currentInterface = parentInterface;
+        }
+
+        return currentInterface;
     }
 
     static int CompareEntries(in UnionEntry a, in UnionEntry b)

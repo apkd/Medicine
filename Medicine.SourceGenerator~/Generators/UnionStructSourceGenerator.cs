@@ -41,6 +41,14 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public string InterfaceFQN;
         public string TypeIDEnumFQN;
         public string TypeIDFieldName;
+        public string RootTypeName;
+        public string RootTypeFQN;
+        public string RootInterfaceFQN;
+        public string RootTypeIDEnumFQN;
+        public bool IsRootTypeIDOwner;
+        public bool HasParentHeader;
+        public string ParentTypeName;
+        public string ParentTypeFQN;
         public bool IsPublic;
 
         public EquatableIgnore<Func<InterfaceMemberInput[]>> InterfaceMembersBuilderFunc;
@@ -65,9 +73,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public string DerivedFQN { get; init; }
         public string DerivedName { get; init; }
         public EquatableArray<string> Declaration { get; init; }
+        public EquatableArray<string> HeaderChainFQNs { get; init; }
         public byte? ForcedId { get; init; }
 
-        public EquatableIgnore<Func<string, string, bool>> ImplementsUnionInterfaceFunc;
+        public EquatableIgnore<Func<string, bool>> ImplementsUnionInterfaceFunc;
         public EquatableIgnore<Func<DerivedDeferredInput>> DeferredInputBuilderFunc;
 
         // ReSharper disable once NotAccessedField.Local
@@ -116,6 +125,13 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 SourceGeneratorErrorLocation = new LocationInfo(context.TargetNode.GetLocation()),
             };
 
+        if (symbol is not INamedTypeSymbol baseSymbol)
+            return new()
+            {
+                SourceGeneratorError = "Unexpected target symbol for [UnionHeader].",
+                SourceGeneratorErrorLocation = new LocationInfo(context.TargetNode.GetLocation()),
+            };
+
         var symbolMembers = symbol.GetMembers().AsArray();
         var symbolTypeMembers = symbol.GetTypeMembers().AsArray();
 
@@ -129,7 +145,29 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             };
 
         var typeIDEnumSymbol = symbolTypeMembers.FirstOrDefault(x => x.Name is "TypeIDs");
-        var typeIDField = symbolMembers.FirstOrDefault(x => x is IFieldSymbol { Type.Name: "TypeIDs" });
+        var typeIDField = symbolMembers.FirstOrDefault(x => x is IFieldSymbol { Name: "TypeID", Type.Name: "TypeIDs" });
+        var parentHeader = GetFirstHeaderFieldType(baseSymbol);
+
+        var parentInterface = parentHeader is not null
+            ? GetUnionInterface(parentHeader)
+            : null;
+
+        bool hasNestedParent
+            = parentHeader is not null &&
+              parentInterface is not null &&
+              interfaceSymbol.AllInterfaces.Any(x => x.Is(parentInterface));
+
+        bool isRootTypeIdOwner = !hasNestedParent || typeIDField is not null;
+
+        var rootHeader = isRootTypeIdOwner
+            ? baseSymbol
+            : GetRootHeader(baseSymbol, interfaceSymbol);
+
+        var rootInterface = isRootTypeIdOwner
+            ? interfaceSymbol
+            : GetUnionInterface(rootHeader) ?? interfaceSymbol;
+
+        var rootTypeIDEnumSymbol = rootHeader.GetTypeMembers().FirstOrDefault(x => x.Name is "TypeIDs");
 
         return new()
         {
@@ -139,8 +177,18 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             BaseTypeFQN = symbol.FQN,
             InterfaceName = interfaceSymbol.Name,
             InterfaceFQN = interfaceSymbol.FQN,
-            TypeIDEnumFQN = typeIDEnumSymbol?.FQN ?? $"{symbol.FQN}.TypeIDs",
+            TypeIDEnumFQN = isRootTypeIdOwner
+                ? typeIDEnumSymbol?.FQN ?? $"{symbol.FQN}.TypeIDs"
+                : rootTypeIDEnumSymbol?.FQN ?? $"{rootHeader.FQN}.TypeIDs",
             TypeIDFieldName = typeIDField?.Name ?? "TypeID",
+            RootTypeName = rootHeader.Name,
+            RootTypeFQN = rootHeader.FQN,
+            RootInterfaceFQN = rootInterface.FQN,
+            RootTypeIDEnumFQN = rootTypeIDEnumSymbol?.FQN ?? $"{rootHeader.FQN}.TypeIDs",
+            IsRootTypeIDOwner = isRootTypeIdOwner,
+            HasParentHeader = hasNestedParent,
+            ParentTypeName = hasNestedParent ? parentHeader!.Name : "",
+            ParentTypeFQN = hasNestedParent ? parentHeader!.FQN : "",
             IsPublic = structDecl.Modifiers.Any(SyntaxKind.PublicKeyword),
             InterfaceMembersBuilderFunc = new(() => BuildInterfaceMembers(interfaceSymbol)),
             BaseTextCheckSumForCache = structDecl.GetText().GetChecksum().AsArray(),
@@ -198,7 +246,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         if (context.TargetNode is not StructDeclarationSyntax structDecl)
             return default;
 
-        if (context.SemanticModel.GetDeclaredSymbol(structDecl, ct) is not { } symbol)
+        if (context.SemanticModel.GetDeclaredSymbol(structDecl, ct) is not INamedTypeSymbol symbol)
             return default;
 
         byte? forcedId = context.Attributes
@@ -214,17 +262,18 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             DerivedFQN = symbol.FQN,
             DerivedName = symbol.Name,
             Declaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
+            HeaderChainFQNs = BuildHeaderChainFQNs(symbol),
             ForcedId = forcedId,
-            ImplementsUnionInterfaceFunc = new((interfaceName, interfaceFQN) => ImplementsUnionInterface(symbol, interfaceName, interfaceFQN)),
+            ImplementsUnionInterfaceFunc = new(interfaceFQN => ImplementsUnionInterface(symbol, interfaceFQN)),
             DeferredInputBuilderFunc = new(() => BuildDerivedDeferredInput(symbol)),
             DerivedTextCheckSumForCache = structDecl.GetText().GetChecksum().AsArray(),
         };
     }
 
-    static bool ImplementsUnionInterface(INamedTypeSymbol symbol, string interfaceName, string interfaceFQN)
+    static bool ImplementsUnionInterface(INamedTypeSymbol symbol, string interfaceFQN)
     {
         foreach (var type in symbol.AllInterfaces)
-            if (type.Name.Contains(interfaceName, Ordinal) && type.FQN == interfaceFQN)
+            if (type.FQN == interfaceFQN)
                 return true;
 
         return false;
@@ -250,10 +299,6 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         var result = input.Base;
         var candidates = input.Candidates.AsArray();
 
-        var derivedStructsBuilderFunc = new EquatableIgnore<Func<DerivedInput[]>>(
-            () => BuildDerivedStructs(candidates, result.InterfaceName, result.InterfaceFQN)
-        );
-
         var firstError = result.GetError();
         if (firstError is null)
         {
@@ -267,7 +312,8 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
         return result with
         {
-            DerivedStructsBuilderFunc = derivedStructsBuilderFunc,
+            DerivedStructsBuilderFunc
+            = new(() => BuildDerivedStructs(candidates, result.InterfaceFQN, result.RootInterfaceFQN, result.BaseTypeFQN, result.RootTypeFQN)),
             SourceGeneratorError = firstError?.error,
             SourceGeneratorErrorLocation = firstError?.location,
         };
@@ -275,69 +321,104 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
     readonly record struct CandidateSortItem(int CandidateIndex, string CandidateName, bool HasForcedId);
 
-    static DerivedInput[] BuildDerivedStructs(Derived[] candidates, string interfaceName, string interfaceFQN)
+    readonly record struct AssignedCandidate(int CandidateIndex, byte AssignedId);
+
+    static DerivedInput[] BuildDerivedStructs(Derived[] candidates, string interfaceFQN, string rootInterfaceFQN, string headerFQN, string rootHeaderFQN)
     {
-        var matched = new List<CandidateSortItem>(candidates.Length);
+        var rootCandidates = new List<CandidateSortItem>(candidates.Length);
         var usedIds = new HashSet<byte>();
 
         for (int i = 0; i < candidates.Length; i++)
         {
             var candidate = candidates[i];
-            var implementsUnionInterfaceFunc = candidate.ImplementsUnionInterfaceFunc.Value;
-            if (implementsUnionInterfaceFunc is null || !implementsUnionInterfaceFunc(interfaceName, interfaceFQN))
+            if (!candidate.ImplementsUnionInterfaceFunc.Value.Invoke(rootInterfaceFQN))
+                continue;
+
+            if (!HasHeaderInChain(candidate, rootHeaderFQN))
                 continue;
 
             if (candidate.ForcedId is { } forcedId)
             {
-                matched.Add(new(i, candidate.DerivedName, true));
+                rootCandidates.Add(new(i, candidate.DerivedName, true));
                 usedIds.Add(forcedId);
             }
             else
             {
-                matched.Add(new(i, candidate.DerivedName, false));
+                rootCandidates.Add(new(i, candidate.DerivedName, false));
             }
         }
 
-        if (matched.Count == 0)
+        if (rootCandidates.Count == 0)
             return [];
 
-        matched.Sort(static (left, right) =>
-        {
-            if (left.HasForcedId != right.HasForcedId)
-                return left.HasForcedId ? -1 : 1;
-
-            if (left.CandidateName.CompareTo(right.CandidateName, Ordinal) is var nameCompare and not 0)
-                return nameCompare;
-
-            return left.CandidateIndex.CompareTo(right.CandidateIndex);
-        });
-
-        var derivedStructs = new DerivedInput[matched.Count];
-        byte nextId = 1;
-
-        for (int i = 0; i < matched.Count; i++)
-        {
-            var candidate = candidates[matched[i].CandidateIndex];
-            var deferredInput = candidate.DeferredInputBuilderFunc.Value?.Invoke() ?? default;
-
-            derivedStructs[i] = new()
+        rootCandidates.Sort(static (left, right) =>
             {
-                Name = candidate.DerivedName,
-                FQN = candidate.DerivedFQN,
-                Declaration = candidate.Declaration,
-                AssignedId = candidate.ForcedId ?? GetNextAvailableId(usedIds, ref nextId),
-                PubliclyImplementedMembers = deferredInput.PublicMembers,
-                HasParameterlessConstructor = deferredInput.HasParameterlessConstructor,
-            };
-        }
+                if (left.HasForcedId != right.HasForcedId)
+                    return left.HasForcedId ? -1 : 1;
 
-        Array.Sort(
-            derivedStructs,
-            static (left, right) => left.AssignedId.CompareTo(right.AssignedId)
+                if (left.CandidateName.CompareTo(right.CandidateName, Ordinal) is var nameCompare and not 0)
+                    return nameCompare;
+
+                return left.CandidateIndex.CompareTo(right.CandidateIndex);
+            }
         );
 
-        return derivedStructs;
+        var assignedRootCandidates = new List<AssignedCandidate>(rootCandidates.Count);
+        byte nextId = 1;
+        foreach (var rootCandidate in rootCandidates)
+        {
+            var candidate = candidates[rootCandidate.CandidateIndex];
+            assignedRootCandidates.Add(
+                new(
+                    rootCandidate.CandidateIndex,
+                    candidate.ForcedId ?? GetNextAvailableId(usedIds, ref nextId)
+                )
+            );
+        }
+
+        var derivedStructs = new List<DerivedInput>(assignedRootCandidates.Count);
+        foreach (var assigned in assignedRootCandidates)
+        {
+            var candidate = candidates[assigned.CandidateIndex];
+            if (!candidate.ImplementsUnionInterfaceFunc.Value(interfaceFQN))
+                continue;
+
+            if (!HasHeaderInChain(candidate, headerFQN))
+                continue;
+
+            var deferredInput = candidate.DeferredInputBuilderFunc.Value?.Invoke() ?? default;
+
+            derivedStructs.Add(
+                new()
+                {
+                    Name = candidate.DerivedName,
+                    FQN = candidate.DerivedFQN,
+                    Declaration = candidate.Declaration,
+                    AssignedId = assigned.AssignedId,
+                    PubliclyImplementedMembers = deferredInput.PublicMembers,
+                    HasParameterlessConstructor = deferredInput.HasParameterlessConstructor,
+                }
+            );
+        }
+
+        var result = derivedStructs.ToArray();
+        Array.Sort(
+            result,
+            static (left, right) =>
+            {
+                var byId = left.AssignedId.CompareTo(right.AssignedId);
+                if (byId != 0)
+                    return byId;
+
+                return left.Name.CompareTo(right.Name, Ordinal);
+            }
+        );
+
+        return result;
     }
+
+    static bool HasHeaderInChain(Derived candidate, string headerFQN)
+        => candidate.HeaderChainFQNs.AsArray().Any(x => x.Equals(headerFQN, Ordinal));
 
     static byte GetNextAvailableId(HashSet<byte> usedIds, ref byte nextId)
     {
@@ -347,10 +428,84 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         return nextId++;
     }
 
+    static EquatableArray<string> BuildHeaderChainFQNs(INamedTypeSymbol symbol)
+    {
+        var firstHeaderFieldType = GetFirstHeaderFieldType(symbol);
+        if (firstHeaderFieldType is null)
+            return [];
+
+        var chain = new List<string>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var current = firstHeaderFieldType;
+        while (current is not null && current.HasAttribute(UnionHeaderStructAttributeFQN))
+        {
+            if (!visited.Add(current.FQN))
+                break;
+
+            chain.Add(current.FQN);
+            current = GetFirstHeaderFieldType(current);
+        }
+
+        return chain.ToArray();
+    }
+
+    static INamedTypeSymbol? GetFirstHeaderFieldType(INamedTypeSymbol symbol)
+    {
+        var firstField = symbol.GetMembers()
+            .OfType<IFieldSymbol>()
+            .Where(x => !x.IsStatic)
+            .OrderBy(x => x.Locations.FirstOrDefault()?.SourceSpan.Start ?? int.MaxValue)
+            .FirstOrDefault();
+
+        return firstField?.Type is INamedTypeSymbol headerType && headerType.HasAttribute(UnionHeaderStructAttributeFQN)
+            ? headerType
+            : null;
+    }
+
+    static INamedTypeSymbol? GetUnionInterface(INamedTypeSymbol headerType)
+    {
+        var typeMembers = headerType.GetTypeMembers().AsArray();
+        return typeMembers.FirstOrDefault(x =>
+                   x is
+                   {
+                       Name: "Interface",
+                       TypeKind: TypeKind.Interface,
+                       DeclaredAccessibility: Accessibility.Public,
+                   }
+               ) ??
+               typeMembers.FirstOrDefault(x => x is { TypeKind: TypeKind.Interface, DeclaredAccessibility: Accessibility.Public });
+    }
+
+    static INamedTypeSymbol GetRootHeader(INamedTypeSymbol headerSymbol, INamedTypeSymbol headerInterface)
+    {
+        var currentHeader = headerSymbol;
+        var currentInterface = headerInterface;
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+
+        while (visited.Add(currentHeader.FQN))
+        {
+            var parentHeader = GetFirstHeaderFieldType(currentHeader);
+            if (parentHeader is null)
+                break;
+
+            var parentInterface = GetUnionInterface(parentHeader);
+            if (parentInterface is null)
+                break;
+
+            if (!currentInterface.AllInterfaces.Any(x => x.Is(parentInterface)))
+                break;
+
+            currentHeader = parentHeader;
+            currentInterface = parentInterface;
+        }
+
+        return currentHeader;
+    }
+
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
         var derivedStructs = input.DerivedStructsBuilderFunc.Value?.Invoke() ?? [];
-        if (derivedStructs.Length == 0)
+        if (derivedStructs.Length == 0 && input.IsRootTypeIDOwner)
             return;
 
         var interfaceMembers = input.InterfaceMembersBuilderFunc.Value?.Invoke() ?? [];
@@ -361,38 +516,39 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         src.Linebreak();
 
         // 1. derived structs generated members
-        foreach (var derived in derivedStructs)
-        {
-            foreach (var x in derived.Declaration.AsSpan())
+        if (input.IsRootTypeIDOwner)
+            foreach (var derived in derivedStructs)
             {
-                src.Line.Write(x);
-                src.Line.Write('{');
-                src.IncreaseIndent();
-            }
-
-            src.Line.Write($"public const {input.TypeIDEnumFQN} TypeID = {input.TypeIDEnumFQN}.{derived.Name};");
-            src.Linebreak();
-
-            if (input.LangVersion >= LanguageVersion.CSharp10 && !derived.HasParameterlessConstructor)
-            {
-                src.Line.Write($"public {derived.Name}()");
-                using (src.Braces)
+                foreach (var x in derived.Declaration.AsSpan())
                 {
-                    src.Line.Write("this = default;");
-                    src.Line.Write($"{m}UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}>(ref this).{input.TypeIDFieldName} = TypeID;");
+                    src.Line.Write(x);
+                    src.Line.Write('{');
+                    src.IncreaseIndent();
                 }
+
+                src.Line.Write($"public const {input.TypeIDEnumFQN} TypeID = {input.TypeIDEnumFQN}.{derived.Name};");
+                src.Linebreak();
+
+                if (input.LangVersion >= LanguageVersion.CSharp10 && !derived.HasParameterlessConstructor)
+                {
+                    src.Line.Write($"public {derived.Name}()");
+                    using (src.Braces)
+                    {
+                        src.Line.Write("this = default;");
+                        src.Line.Write($"{m}UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}>(ref this).{input.TypeIDFieldName} = TypeID;");
+                    }
+                }
+
+                src.TrimEndWhitespace();
+
+                foreach (var _ in derived.Declaration.AsSpan())
+                {
+                    src.DecreaseIndent();
+                    src.Line.Write('}');
+                }
+
+                src.Linebreak();
             }
-
-            src.TrimEndWhitespace();
-
-            foreach (var _ in derived.Declaration.AsSpan())
-            {
-                src.DecreaseIndent();
-                src.Line.Write('}');
-            }
-
-            src.Linebreak();
-        }
 
         // 2. base struct generated members
         {
@@ -403,75 +559,98 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.IncreaseIndent();
             }
 
-            src.Line.Write("public enum TypeIDs : byte");
-            using (src.Braces)
+            if (input.IsRootTypeIDOwner)
             {
-                src.Line.Write("Unset = 0,");
-                foreach (var derived in derivedStructs)
-                    src.Line.Write($"{derived.Name} = {derived.AssignedId},");
-            }
-
-            src.Linebreak();
-
-            src.Line.Write("static readonly int[] derivedStructSizes =");
-            using (src.Braces)
-            {
-                var maxId = derivedStructs[^1].AssignedId;
-                var sizes = new string[maxId + 1];
-                for (int i = 0; i < sizes.Length; i++)
-                    sizes[i] = "-1";
-
-                foreach (var derived in derivedStructs)
-                    sizes[derived.AssignedId] = $"{m}UnsafeUtility.SizeOf<{derived.FQN}>()";
-
-                for (int i = 0; i < sizes.Length; i++)
-                    src.Line.Write($"{sizes[i]},");
-            }
-
-            src.Write(';').Linebreak();
-
-            src.Line.Write("static readonly string[] derivedStructNames =");
-            using (src.Braces)
-            {
-                var maxId = derivedStructs[^1].AssignedId;
-                var names = new string[maxId + 1];
-                for (int i = 0; i < names.Length; i++)
-                    names[i] = $"\"Undefined (TypeID={i})\"";
-
-                foreach (var derived in derivedStructs)
-                    names[derived.AssignedId] = $"\"{derived.Name}\"";
-
-                for (int i = 0; i < names.Length; i++)
-                    src.Line.Write($"{names[i]},");
-            }
-
-            src.Write(';').Linebreak();
-
-            src.Line.Write("public int SizeInBytes");
-            using (src.Indent)
-            {
-                src.Line.Write("=> TypeID switch");
+                src.Line.Write("public enum TypeIDs : byte");
                 using (src.Braces)
                 {
-                    src.Line.Write($"<= TypeIDs.{derivedStructs[^1].Name} => derivedStructSizes[(int)TypeID],");
-                    src.Line.Write("_ => -1,");
+                    src.Line.Write("Unset = 0,");
+                    foreach (var derived in derivedStructs)
+                        src.Line.Write($"{derived.Name} = {derived.AssignedId},");
                 }
-            }
 
-            src.Write(';').Linebreak();
+                src.Linebreak();
 
-            src.Line.Write("public string TypeName");
-            using (src.Indent)
-            {
-                src.Line.Write("=> TypeID switch");
+                src.Line.Write("static readonly int[] derivedStructSizes =");
                 using (src.Braces)
                 {
-                    src.Line.Write($"<= TypeIDs.{derivedStructs[^1].Name} => derivedStructNames[(int)TypeID],");
-                    src.Line.Write("var unknown => $\"Unknown (TypeID={(byte)unknown})\",");
-                }
-            }
+                    var maxId = derivedStructs[^1].AssignedId;
+                    var sizes = new string[maxId + 1];
+                    for (int i = 0; i < sizes.Length; i++)
+                        sizes[i] = "-1";
 
-            src.Write(';').Linebreak();
+                    foreach (var derived in derivedStructs)
+                        sizes[derived.AssignedId] = $"{m}UnsafeUtility.SizeOf<{derived.FQN}>()";
+
+                    for (int i = 0; i < sizes.Length; i++)
+                        src.Line.Write($"{sizes[i]},");
+                }
+
+                src.Write(';').Linebreak();
+
+                src.Line.Write("static readonly string[] derivedStructNames =");
+                using (src.Braces)
+                {
+                    var maxId = derivedStructs[^1].AssignedId;
+                    var names = new string[maxId + 1];
+                    for (int i = 0; i < names.Length; i++)
+                        names[i] = $"\"Undefined (TypeID={i})\"";
+
+                    foreach (var derived in derivedStructs)
+                        names[derived.AssignedId] = $"\"{derived.Name}\"";
+
+                    for (int i = 0; i < names.Length; i++)
+                        src.Line.Write($"{names[i]},");
+                }
+
+                src.Write(';').Linebreak();
+
+                src.Line.Write("public int SizeInBytes");
+                using (src.Indent)
+                {
+                    src.Line.Write("=> TypeID switch");
+                    using (src.Braces)
+                    {
+                        src.Line.Write($"<= TypeIDs.{derivedStructs[^1].Name} => derivedStructSizes[(int)TypeID],");
+                        src.Line.Write("_ => -1,");
+                    }
+                }
+
+                src.Write(';').Linebreak();
+
+                src.Line.Write("public string TypeName");
+                using (src.Indent)
+                {
+                    src.Line.Write("=> TypeID switch");
+                    using (src.Braces)
+                    {
+                        src.Line.Write($"<= TypeIDs.{derivedStructs[^1].Name} => derivedStructNames[(int)TypeID],");
+                        src.Line.Write("var unknown => $\"Unknown (TypeID={(byte)unknown})\",");
+                    }
+                }
+
+                src.Write(';').Linebreak();
+            }
+            else
+            {
+                src.Line.Write($"public {input.TypeIDEnumFQN} TypeID");
+                using (src.Indent)
+                    src.Line.Write($"=> {m}UnsafeUtility.As<{input.BaseTypeFQN}, {input.ParentTypeFQN}>(ref this).TypeID");
+
+                src.Write(';').Linebreak();
+
+                src.Line.Write("public int SizeInBytes");
+                using (src.Indent)
+                    src.Line.Write($"=> {m}UnsafeUtility.As<{input.BaseTypeFQN}, {input.ParentTypeFQN}>(ref this).SizeInBytes");
+
+                src.Write(';').Linebreak();
+
+                src.Line.Write("public string TypeName");
+                using (src.Indent)
+                    src.Line.Write($"=> {m}UnsafeUtility.As<{input.BaseTypeFQN}, {input.ParentTypeFQN}>(ref this).TypeName");
+
+                src.Write(';').Linebreak();
+            }
 
             foreach (var _ in input.BaseDeclaration.AsSpan())
             {
@@ -681,6 +860,54 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             src.Line.Write("static void ThrowUnexpectedTypeException(string expected, string got)");
             using (src.Indent)
                 src.Line.Write("=> throw new global::System.InvalidOperationException($\"Invalid struct type ID: expected {expected}, got {got}\");");
+
+            src.Linebreak();
+        }
+
+        if (input.HasParentHeader && derivedStructs.Length > 0)
+        {
+            string parentPublic = input.IsPublic ? "public " : "";
+            string helperMethodName = $"ThrowIncompatibleCastTo{input.BaseTypeName}Exception";
+
+            src.Line.Write($"{parentPublic}static partial class {input.ParentTypeName}Extensions");
+            using (src.Braces)
+            {
+                src.Line.Write($"public static bool Is{input.BaseTypeName}(this in {input.ParentTypeFQN} self)");
+                using (src.Indent)
+                {
+                    src.Line.Write("=> self.TypeID switch");
+                    using (src.Braces)
+                    {
+                        foreach (var derived in derivedStructs)
+                            src.Line.Write($"{input.TypeIDEnumFQN}.{derived.Name} => true,");
+
+                        src.Line.Write("_ => false,");
+                    }
+                }
+
+                src.Write(';').Linebreak();
+                src.Linebreak();
+
+                src.Line.Write($"public static unsafe ref {input.BaseTypeFQN} As{input.BaseTypeName}(this ref {input.ParentTypeFQN} self)");
+                using (src.Braces)
+                {
+                    src.Write("\n#if DEBUG");
+                    src.Line.Write($"if (!self.Is{input.BaseTypeName}())");
+                    using (src.Indent)
+                        src.Line.Write($"{helperMethodName}(self.TypeID);");
+
+                    src.Write("\n#endif");
+                    src.Line.Write($"return ref {m}UnsafeUtility.As<{input.ParentTypeFQN}, {input.BaseTypeFQN}>(ref self);");
+                }
+
+                src.Linebreak();
+
+                src.Line.Write($"[{m}BurstDiscard]");
+                src.Line.Write(Alias.NoInline);
+                src.Line.Write($"static void {helperMethodName}({input.RootTypeIDEnumFQN} typeId)");
+                using (src.Indent)
+                    src.Line.Write($"=> throw new global::System.InvalidOperationException($\"Cannot cast {input.ParentTypeName} to {input.BaseTypeName} - type ID is not compatible: {{typeId}}\");");
+            }
 
             src.Linebreak();
         }
