@@ -37,6 +37,7 @@ DiagnosticTest[] cases =
     Med029Test.Case,
     Med030Test.Case,
     Med031Test.Case,
+    Med032Test.Case,
     InjectSourceGeneratorTest.Case,
     TrackSourceGeneratorTest.Case,
     SingletonSourceGeneratorTest.Case,

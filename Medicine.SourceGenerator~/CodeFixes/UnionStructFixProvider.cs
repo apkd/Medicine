@@ -6,13 +6,14 @@ using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Editing;
+using Microsoft.CodeAnalysis.Formatting;
 using static Constants;
 
 [ExportCodeFixProvider(LanguageNames.CSharp), Shared]
 public sealed class UnionStructFixProvider : CodeFixProvider
 {
     public override ImmutableArray<string> FixableDiagnosticIds { get; }
-        = ImmutableArray.Create("MED019", "MED020", "MED021", "MED022", "MED023", "MED024");
+        = ImmutableArray.Create("MED019", "MED020", "MED021", "MED022", "MED023", "MED024", "MED032");
 
     public override FixAllProvider? GetFixAllProvider()
         => null;
@@ -29,6 +30,7 @@ public sealed class UnionStructFixProvider : CodeFixProvider
                 "MED022" => "Add [UnionHeader] field",
                 "MED023" => "Move [UnionHeader] field to first position",
                 "MED024" => "Add [Union] attribute",
+                "MED032" => "Assign header TypeID in constructor",
                 _        => "",
             };
 
@@ -76,6 +78,9 @@ public sealed class UnionStructFixProvider : CodeFixProvider
                 break;
             case "MED024":
                 FixMED024(editor, node);
+                break;
+            case "MED032":
+                await FixMED032(editor, node, document, ct).ConfigureAwait(false);
                 break;
         }
 
@@ -204,4 +209,114 @@ public sealed class UnionStructFixProvider : CodeFixProvider
 
         editor.AddAttribute(structDecl, attributeList);
     }
+
+    static async Task FixMED032(DocumentEditor editor, SyntaxNode node, Document document, CancellationToken ct)
+    {
+        var constructor = node as ConstructorDeclarationSyntax
+                          ?? node.AncestorsAndSelf().OfType<ConstructorDeclarationSyntax>().FirstOrDefault();
+        if (constructor is null)
+            return;
+
+        var semanticModel = await document.GetSemanticModelAsync(ct).ConfigureAwait(false);
+        if (semanticModel?.GetDeclaredSymbol(constructor, ct)?.ContainingType is not INamedTypeSymbol unionType)
+            return;
+
+        if (!TryGetTypeIdAssignmentPath(unionType, out var typeIdPath))
+            return;
+
+        var assignment = SyntaxFactory.ExpressionStatement(
+                SyntaxFactory.AssignmentExpression(
+                    SyntaxKind.SimpleAssignmentExpression,
+                    SyntaxFactory.ParseExpression(typeIdPath),
+                    SyntaxFactory.IdentifierName("TypeID")
+                )
+            )
+            .WithTrailingTrivia(SyntaxFactory.ElasticCarriageReturnLineFeed)
+            .WithAdditionalAnnotations(Formatter.Annotation);
+
+        if (constructor.Body is { } body)
+        {
+            var updatedConstructor = constructor.WithBody(
+                    body.WithStatements(body.Statements.Insert(0, assignment))
+                        .WithAdditionalAnnotations(Formatter.Annotation)
+                )
+                .WithAdditionalAnnotations(Formatter.Annotation);
+            editor.ReplaceNode(constructor, updatedConstructor);
+            return;
+        }
+
+        if (constructor.ExpressionBody is null)
+            return;
+
+        var expression = constructor.ExpressionBody.Expression;
+        StatementSyntax expressionStatement = expression is ThrowExpressionSyntax throwExpression
+            ? SyntaxFactory.ThrowStatement(throwExpression.Expression)
+            : SyntaxFactory.ExpressionStatement(expression);
+
+        var blockBody = SyntaxFactory.Block(
+                assignment,
+                expressionStatement.WithTrailingTrivia(SyntaxFactory.ElasticCarriageReturnLineFeed)
+            )
+            .WithAdditionalAnnotations(Formatter.Annotation);
+        var replaced = constructor
+            .WithExpressionBody(null)
+            .WithSemicolonToken(default)
+            .WithBody(blockBody)
+            .WithAdditionalAnnotations(Formatter.Annotation);
+
+        editor.ReplaceNode(constructor, replaced);
+    }
+
+    static bool TryGetTypeIdAssignmentPath(INamedTypeSymbol unionType, out string path)
+    {
+        path = "";
+        var instanceFields = GetInstanceFields(unionType);
+        if (instanceFields.Length == 0)
+            return false;
+
+        if (instanceFields[0].Type is not INamedTypeSymbol headerType || !headerType.HasAttribute(UnionHeaderStructAttributeFQN))
+            return false;
+
+        var segments = new List<string> { instanceFields[0].Name };
+        var visited = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+        var currentHeaderType = headerType;
+
+        while (visited.Add(currentHeaderType))
+        {
+            if (HasTypeIdField(currentHeaderType))
+            {
+                path = $"{string.Join(".", segments)}.TypeID";
+                return true;
+            }
+
+            var parentHeaderField = GetInstanceFields(currentHeaderType)
+                .FirstOrDefault(x => x.Type.HasAttribute(UnionHeaderStructAttributeFQN));
+
+            if (parentHeaderField?.Type is not INamedTypeSymbol parentHeaderType)
+                break;
+
+            segments.Add(parentHeaderField.Name);
+            currentHeaderType = parentHeaderType;
+        }
+
+        return false;
+    }
+
+    static IFieldSymbol[] GetInstanceFields(INamedTypeSymbol type)
+        => type.GetMembers()
+            .OfType<IFieldSymbol>()
+            .Where(x => !x.IsStatic)
+            .OrderBy(x => x.Locations.FirstOrDefault()?.SourceSpan.Start ?? int.MaxValue)
+            .ToArray();
+
+    static bool HasTypeIdField(INamedTypeSymbol headerType)
+        => headerType.GetMembers()
+            .OfType<IFieldSymbol>()
+            .Any(x => x is
+                {
+                    Name: "TypeID",
+                    Type.Name: "TypeIDs",
+                    DeclaredAccessibility: Accessibility.Public,
+                    IsStatic: false,
+                });
 }

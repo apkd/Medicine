@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using static System.StringComparison;
 using static Constants;
@@ -90,8 +92,18 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
         description: "Structs implementing nested UnionHeader interfaces must use a first-field header chain compatible with those interfaces."
     );
 
+    static readonly DiagnosticDescriptor MED032 = new(
+        id: nameof(MED032),
+        title: "Union struct constructor must assign header TypeID",
+        messageFormat: "Struct '{0}' tagged with [Union] has a custom constructor that must assign header TypeID from TypeID",
+        category: "Medicine",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Custom constructors in [Union] structs must assign the header TypeID from the generated TypeID constant."
+    );
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; }
-        = ImmutableArray.Create(MED019, MED020, MED021, MED022, MED023, MED024, MED025, MED031);
+        = ImmutableArray.Create(MED019, MED020, MED021, MED022, MED023, MED024, MED025, MED031, MED032);
 
     readonly record struct UnionEntry(INamedTypeSymbol Symbol, INamedTypeSymbol HeaderInterface, byte Id, Location Location);
 
@@ -320,6 +332,9 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
                 );
             }
 
+            if (AnalyzeCustomConstructors(unionType, fields[0], context.CancellationToken) is { } ctorDiagnostic)
+                return ctorDiagnostic;
+
             return null;
         }
     }
@@ -423,6 +438,192 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
             return false;
 
         return headerInterface.AllInterfaces.Any(x => x.Is(parentInterface));
+    }
+
+    static Diagnostic? AnalyzeCustomConstructors(INamedTypeSymbol unionType, IFieldSymbol firstHeaderField, CancellationToken ct)
+    {
+        if (!TryGetTypeIdAssignmentTarget(firstHeaderField, out var headerFieldPath, out var typeIdField))
+            return null;
+
+        foreach (var constructor in unionType.InstanceConstructors)
+        {
+            if (constructor.IsImplicitlyDeclared)
+                continue;
+
+            foreach (var syntaxReference in constructor.DeclaringSyntaxReferences)
+            {
+                if (syntaxReference.GetSyntax(ct) is not ConstructorDeclarationSyntax constructorDecl)
+                    continue;
+
+                if (constructorDecl.Initializer?.Kind() is SyntaxKind.ThisConstructorInitializer)
+                    continue;
+
+                if (HasRequiredTypeIdAssignment(
+                        constructorDecl,
+                        unionType,
+                        headerFieldPath,
+                        typeIdField
+                    ))
+                    continue;
+
+                return Diagnostic.Create(MED032, constructorDecl.Identifier.GetLocation(), unionType.Name);
+            }
+        }
+
+        return null;
+    }
+
+    static bool TryGetTypeIdAssignmentTarget(IFieldSymbol firstHeaderField, out IFieldSymbol[] headerFieldPath, out IFieldSymbol typeIdField)
+    {
+        headerFieldPath = [];
+        typeIdField = null!;
+
+        if (firstHeaderField.Type is not INamedTypeSymbol currentHeaderType)
+            return false;
+
+        var visitedHeaders = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+        var path = new List<IFieldSymbol> { firstHeaderField };
+
+        while (visitedHeaders.Add(currentHeaderType))
+        {
+            if (GetTypeIdField(currentHeaderType) is { } resolvedTypeIdField)
+            {
+                headerFieldPath = [.. path];
+                typeIdField = resolvedTypeIdField;
+                return true;
+            }
+
+            var parentHeaderField = GetInstanceFields(currentHeaderType)
+                .FirstOrDefault(x => x.Type.HasAttribute(UnionHeaderStructAttributeFQN));
+
+            if (parentHeaderField?.Type is not INamedTypeSymbol parentHeaderType)
+                break;
+
+            path.Add(parentHeaderField);
+            currentHeaderType = parentHeaderType;
+        }
+
+        return false;
+    }
+
+    static IFieldSymbol? GetTypeIdField(INamedTypeSymbol headerType)
+        => headerType.GetMembers()
+            .OfType<IFieldSymbol>()
+            .FirstOrDefault(x => x is
+                {
+                    Name: "TypeID",
+                    Type.Name: "TypeIDs",
+                    DeclaredAccessibility: Accessibility.Public,
+                    IsStatic: false,
+                });
+
+    static bool HasRequiredTypeIdAssignment(
+        ConstructorDeclarationSyntax constructorDecl,
+        INamedTypeSymbol unionType,
+        IFieldSymbol[] headerFieldPath,
+        IFieldSymbol typeIdField
+    )
+    {
+        var expectedPath = headerFieldPath
+            .Select(x => x.Name)
+            .Append(typeIdField.Name)
+            .ToArray();
+
+        foreach (var assignment in GetAssignmentExpressions(constructorDecl))
+        {
+            if (assignment.Kind() is not SyntaxKind.SimpleAssignmentExpression)
+                continue;
+
+            if (!IsHeaderTypeIdTarget(assignment.Left, expectedPath))
+                continue;
+
+            if (IsUnionTypeIdValue(assignment.Right, unionType))
+                return true;
+        }
+
+        return false;
+    }
+
+    static IEnumerable<AssignmentExpressionSyntax> GetAssignmentExpressions(ConstructorDeclarationSyntax constructorDecl)
+    {
+        if (constructorDecl.Body is { } body)
+            foreach (var assignment in body.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+                yield return assignment;
+
+        if (constructorDecl.ExpressionBody?.Expression is AssignmentExpressionSyntax expressionBodyAssignment)
+            yield return expressionBodyAssignment;
+    }
+
+    static bool IsHeaderTypeIdTarget(ExpressionSyntax targetExpression, string[] expectedPath)
+    {
+        if (!TryGetMemberAccessPath(targetExpression, out var accessPath))
+            return false;
+
+        if (accessPath.Length != expectedPath.Length)
+            return false;
+
+        for (int i = 0; i < accessPath.Length; i++)
+            if (!accessPath[i].Equals(expectedPath[i], Ordinal))
+                return false;
+
+        return true;
+    }
+
+    static bool IsUnionTypeIdValue(ExpressionSyntax valueSyntax, INamedTypeSymbol unionType)
+    {
+        var expression = UnwrapParentheses(valueSyntax);
+        if (expression is IdentifierNameSyntax { Identifier.ValueText: "TypeID" })
+            return true;
+
+        if (expression is not MemberAccessExpressionSyntax { Name.Identifier.ValueText: "TypeID" } memberAccess)
+            return false;
+
+        var qualifier = memberAccess.Expression.ToString();
+        if (qualifier.Equals(unionType.Name, Ordinal))
+            return true;
+
+        return qualifier.EndsWith($".{unionType.Name}", Ordinal);
+    }
+
+    static bool TryGetMemberAccessPath(ExpressionSyntax expression, out string[] path)
+    {
+        var segments = new List<string>();
+        if (!CollectSegments(UnwrapParentheses(expression), segments))
+        {
+            path = [];
+            return false;
+        }
+
+        path = [.. segments];
+        return true;
+
+        static bool CollectSegments(ExpressionSyntax node, List<string> segments)
+        {
+            switch (UnwrapParentheses(node))
+            {
+                case ThisExpressionSyntax:
+                    return true;
+                case IdentifierNameSyntax identifier:
+                    segments.Add(identifier.Identifier.ValueText);
+                    return true;
+                case MemberAccessExpressionSyntax memberAccess:
+                    if (!CollectSegments(memberAccess.Expression, segments))
+                        return false;
+
+                    segments.Add(memberAccess.Name.Identifier.ValueText);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+
+    static ExpressionSyntax UnwrapParentheses(ExpressionSyntax expression)
+    {
+        while (expression is ParenthesizedExpressionSyntax parenthesized)
+            expression = parenthesized.Expression;
+
+        return expression;
     }
 
     static INamedTypeSymbol? GetRootUnionInterface(INamedTypeSymbol unionInterface)
