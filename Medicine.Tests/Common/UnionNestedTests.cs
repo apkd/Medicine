@@ -199,6 +199,18 @@ public partial class UnionNestedTests
     }
 
     [Test]
+    public void NestedHeaderFieldProperties_ForwardToHeaderStorage()
+    {
+        var childA = CreateChildAState();
+
+        childA.Counter = 10;
+        Assert.That(childA.Header.Counter, Is.EqualTo(10));
+
+        childA.Header.Counter = 13;
+        Assert.That(childA.Counter, Is.EqualTo(13));
+    }
+
+    [Test]
     public void UnknownTypeIds_ExposeUnknownMetadata_AndThrowOnDispatch()
     {
         var child = new ChildState

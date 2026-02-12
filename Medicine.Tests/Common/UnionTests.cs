@@ -22,6 +22,7 @@ public partial class UnionTests
         }
 
         public TypeIDs TypeID;
+        public int Generation;
     }
 
     [Union(1)]
@@ -201,5 +202,17 @@ public partial class UnionTests
 
         var unknownEx = Assert.Throws<InvalidOperationException>(() => state.Execute());
         Assert.That(unknownEx!.Message, Does.Contain("Unknown HeaderWithoutDerived type ID"));
+    }
+
+    [Test]
+    public void HeaderFieldProperties_ForwardToHeaderStorage()
+    {
+        var triangle = new Triangle { Header = { TypeID = Shape.TypeIDs.Triangle } };
+
+        triangle.Generation = 5;
+        Assert.That(triangle.Header.Generation, Is.EqualTo(5));
+
+        triangle.Header.Generation = 8;
+        Assert.That(triangle.Generation, Is.EqualTo(8));
     }
 }

@@ -10,58 +10,36 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 {
     record struct InterfaceMemberInput
     {
-        public string Name;
-        public string ReturnTypeFQN;
-        public EquatableArray<string> Parameters;
-        public EquatableArray<byte> ParameterRefKinds;
-        public bool IsProperty;
+        public string Name { get; init; }
+        public string ReturnTypeFQN { get; init; }
+        public EquatableArray<string> Parameters { get; init; }
+        public EquatableArray<byte> ParameterRefKinds { get; init; }
+        public bool IsProperty { get; init; }
+    }
+
+    record struct HeaderFieldInput
+    {
+        public string Name { get; init; }
+        public string TypeFQN { get; init; }
     }
 
     record struct DerivedInput
     {
-        public string Name;
-        public string FQN;
-        public EquatableArray<string> Declaration;
-        public byte AssignedId;
-        public EquatableArray<string> PubliclyImplementedMembers;
-        public bool HasParameterlessConstructor;
-    }
-
-    record struct GeneratorInput : IGeneratorTransformOutput
-    {
-        public string? SourceGeneratorOutputFilename { get; init; }
-        public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
-
-        public LanguageVersion LangVersion { get; init; }
-        public EquatableArray<string> BaseDeclaration;
-        public string BaseTypeName;
-        public string BaseTypeFQN;
-        public string InterfaceName;
-        public string InterfaceFQN;
-        public string TypeIDEnumFQN;
-        public string TypeIDFieldName;
-        public string RootTypeName;
-        public string RootTypeFQN;
-        public string RootInterfaceFQN;
-        public string RootTypeIDEnumFQN;
-        public bool IsRootTypeIDOwner;
-        public bool HasParentHeader;
-        public string ParentTypeName;
-        public string ParentTypeFQN;
-        public bool IsPublic;
-
-        public EquatableIgnore<Func<InterfaceMemberInput[]>?> InterfaceMembersBuilderFunc;
-        public EquatableIgnore<Func<DerivedInput[]>?> DerivedStructsBuilderFunc;
-
-        // ReSharper disable once NotAccessedField.Local
-        public EquatableArray<byte> BaseTextCheckSumForCache;
+        public string Name { get; init; }
+        public string FQN { get; init; }
+        public EquatableArray<string> Declaration { get; init; }
+        public string HeaderFieldName { get; init; }
+        public byte AssignedId { get; init; }
+        public EquatableArray<string> PubliclyImplementedMembers { get; init; }
+        public EquatableArray<string> MemberNames { get; init; }
+        public bool HasParameterlessConstructor { get; init; }
     }
 
     record struct DerivedDeferredInput
     {
-        public EquatableArray<string> PublicMembers;
-        public bool HasParameterlessConstructor;
+        public EquatableArray<string> PublicMembers { get; init; }
+        public EquatableArray<string> MemberNames { get; init; }
+        public bool HasParameterlessConstructor { get; init; }
     }
 
     record struct Derived : IGeneratorTransformOutput
@@ -73,14 +51,47 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public string DerivedFQN { get; init; }
         public string DerivedName { get; init; }
         public EquatableArray<string> Declaration { get; init; }
+        public string HeaderFieldName { get; init; }
         public EquatableArray<string> HeaderChainFQNs { get; init; }
         public byte? ForcedId { get; init; }
 
-        public EquatableIgnore<Func<string, bool>?> ImplementsUnionInterfaceFunc;
-        public EquatableIgnore<Func<DerivedDeferredInput>?> DeferredInputBuilderFunc;
+        public EquatableIgnore<Func<string, bool>?> ImplementsUnionInterfaceFunc { get; init; }
+        public EquatableIgnore<Func<DerivedDeferredInput>?> DeferredInputBuilderFunc { get; init; }
 
         // ReSharper disable once NotAccessedField.Local
-        public EquatableArray<byte> DerivedTextCheckSumForCache;
+        public EquatableArray<byte> DerivedTextCheckSumForCache { get; init; }
+    }
+
+    record struct GeneratorInput : IGeneratorTransformOutput
+    {
+        public string? SourceGeneratorOutputFilename { get; init; }
+        public string? SourceGeneratorError { get; init; }
+        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+
+        public LanguageVersion LangVersion { get; init; }
+        public EquatableArray<string> BaseDeclaration { get; init; }
+        public string BaseTypeName { get; init; }
+        public string BaseTypeFQN { get; init; }
+        public string InterfaceName { get; init; }
+        public string InterfaceFQN { get; init; }
+        public string TypeIDEnumFQN { get; init; }
+        public string TypeIDFieldName { get; init; }
+        public string RootTypeName { get; init; }
+        public string RootTypeFQN { get; init; }
+        public string RootInterfaceFQN { get; init; }
+        public string RootTypeIDEnumFQN { get; init; }
+        public bool IsRootTypeIDOwner { get; init; }
+        public bool HasParentHeader { get; init; }
+        public string ParentTypeName { get; init; }
+        public string ParentTypeFQN { get; init; }
+        public bool IsPublic { get; init; }
+
+        public EquatableIgnore<Func<InterfaceMemberInput[]>?> InterfaceMembersBuilderFunc { get; init; }
+        public EquatableIgnore<Func<HeaderFieldInput[]>?> HeaderFieldsBuilderFunc { get; init; }
+        public EquatableIgnore<Func<DerivedInput[]>?> DerivedStructsBuilderFunc { get; init; }
+
+        // ReSharper disable once NotAccessedField.Local
+        public EquatableArray<byte> BaseTextCheckSumForCache { get; init; }
     }
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -191,6 +202,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             ParentTypeFQN = hasNestedParent ? parentHeader!.FQN : "",
             IsPublic = structDecl.Modifiers.Any(SyntaxKind.PublicKeyword),
             InterfaceMembersBuilderFunc = new(() => BuildInterfaceMembers(interfaceSymbol)),
+            HeaderFieldsBuilderFunc = new(() => BuildHeaderFields(baseSymbol)),
             BaseTextCheckSumForCache = structDecl.GetText().GetChecksum().AsArray(),
         };
     }
@@ -241,6 +253,19 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         return members.ToArray();
     }
 
+    static HeaderFieldInput[] BuildHeaderFields(INamedTypeSymbol headerSymbol)
+        => headerSymbol.GetMembers()
+            .OfType<IFieldSymbol>()
+            .Where(x => !x.IsStatic)
+            .OrderBy(x => x.Locations.FirstOrDefault()?.SourceSpan.Start ?? int.MaxValue)
+            .Select(x => new HeaderFieldInput
+                {
+                    Name = x.Name,
+                    TypeFQN = x.Type.FQN,
+                }
+            )
+            .ToArray();
+
     static Derived TransformDerivedCandidate(GeneratorAttributeSyntaxContext context, CancellationToken ct)
     {
         if (context.TargetNode is not StructDeclarationSyntax structDecl)
@@ -262,6 +287,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             DerivedFQN = symbol.FQN,
             DerivedName = symbol.Name,
             Declaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
+            HeaderFieldName = GetFirstHeaderField(symbol)?.Name ?? "Header",
             HeaderChainFQNs = BuildHeaderChainFQNs(symbol),
             ForcedId = forcedId,
             ImplementsUnionInterfaceFunc = new(interfaceFQN => symbol.AllInterfaces.Any(x => x.FQN == interfaceFQN)),
@@ -278,9 +304,15 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             .Distinct()
             .ToArray();
 
+        var memberNames = symbol.GetMembers()
+            .Select(x => x.Name)
+            .Distinct()
+            .ToArray();
+
         return new()
         {
             PublicMembers = publicMembers,
+            MemberNames = memberNames,
             HasParameterlessConstructor = symbol.InstanceConstructors.Any(x => x is { Parameters.Length: 0, IsImplicitlyDeclared: false }),
         };
     }
@@ -304,7 +336,8 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         return result with
         {
             DerivedStructsBuilderFunc = new(()
-                => BuildDerivedStructs(candidates, result.InterfaceFQN, result.RootInterfaceFQN, result.BaseTypeFQN, result.RootTypeFQN)),
+                => BuildDerivedStructs(candidates, result.InterfaceFQN, result.RootInterfaceFQN, result.BaseTypeFQN, result.RootTypeFQN)
+            ),
             SourceGeneratorError = firstError?.error,
             SourceGeneratorErrorLocation = firstError?.location,
         };
@@ -385,8 +418,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     Name = candidate.DerivedName,
                     FQN = candidate.DerivedFQN,
                     Declaration = candidate.Declaration,
+                    HeaderFieldName = candidate.HeaderFieldName,
                     AssignedId = assigned.AssignedId,
                     PubliclyImplementedMembers = deferredInput.PublicMembers,
+                    MemberNames = deferredInput.MemberNames,
                     HasParameterlessConstructor = deferredInput.HasParameterlessConstructor,
                 }
             );
@@ -440,15 +475,18 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         return chain.ToArray();
     }
 
-    static INamedTypeSymbol? GetFirstHeaderFieldType(INamedTypeSymbol symbol)
-    {
-        var firstField = symbol.GetMembers()
+    static IFieldSymbol? GetFirstHeaderField(INamedTypeSymbol symbol)
+        => symbol.GetMembers()
             .OfType<IFieldSymbol>()
             .Where(x => !x.IsStatic)
             .OrderBy(x => x.Locations.FirstOrDefault()?.SourceSpan.Start ?? int.MaxValue)
             .FirstOrDefault();
 
-        return firstField?.Type is INamedTypeSymbol headerType && headerType.HasAttribute(UnionHeaderStructAttributeFQN)
+    static INamedTypeSymbol? GetFirstHeaderFieldType(INamedTypeSymbol symbol)
+    {
+        var firstField = GetFirstHeaderField(symbol);
+
+        return firstField is { Type: INamedTypeSymbol headerType } && headerType.HasAttribute(UnionHeaderStructAttributeFQN)
             ? headerType
             : null;
     }
@@ -497,6 +535,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     {
         var derivedStructs = input.DerivedStructsBuilderFunc.Value?.Invoke() ?? [];
         var interfaceMembers = input.InterfaceMembersBuilderFunc.Value?.Invoke() ?? [];
+        var headerFields = input.HeaderFieldsBuilderFunc.Value?.Invoke() ?? [];
 
         src.Line.Write(Alias.UsingInline);
         src.Line.Write($"using {m}UnsafeUtility = global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility;");
@@ -504,17 +543,36 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         src.Linebreak();
 
         // 1. derived structs generated members
-        if (input.IsRootTypeIDOwner)
+        foreach (var derived in derivedStructs)
         {
-            foreach (var derived in derivedStructs)
+            foreach (var x in derived.Declaration.AsSpan())
             {
-                foreach (var x in derived.Declaration.AsSpan())
+                src.Line.Write(x);
+                src.Line.Write('{');
+                src.IncreaseIndent();
+            }
+
+            foreach (var headerField in headerFields)
+            {
+                if (input.IsRootTypeIDOwner)
+                    if (headerField.Name.Equals(input.TypeIDFieldName, Ordinal))
+                        continue;
+
+                if (derived.MemberNames.AsArray().Contains(headerField.Name))
+                    continue;
+
+                src.Line.Write($"public {headerField.TypeFQN} {headerField.Name}");
+                using (src.Braces)
                 {
-                    src.Line.Write(x);
-                    src.Line.Write('{');
-                    src.IncreaseIndent();
+                    src.Line.Write($"get => {derived.HeaderFieldName}.{headerField.Name};");
+                    src.Line.Write($"set => {derived.HeaderFieldName}.{headerField.Name} = value;");
                 }
 
+                src.Linebreak();
+            }
+
+            if (input.IsRootTypeIDOwner)
+            {
                 src.Line.Write($"public const {input.TypeIDEnumFQN} TypeID = {input.TypeIDEnumFQN}.{derived.Name};");
                 src.Linebreak();
 
@@ -527,17 +585,17 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                         src.Line.Write($"{m}UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}>(ref this).{input.TypeIDFieldName} = TypeID;");
                     }
                 }
-
-                src.TrimEndWhitespace();
-
-                foreach (var _ in derived.Declaration.AsSpan())
-                {
-                    src.DecreaseIndent();
-                    src.Line.Write('}');
-                }
-
-                src.Linebreak();
             }
+
+            src.TrimEndWhitespace();
+
+            foreach (var _ in derived.Declaration.AsSpan())
+            {
+                src.DecreaseIndent();
+                src.Line.Write('}');
+            }
+
+            src.Linebreak();
         }
 
         // 2. base struct generated members
@@ -677,6 +735,13 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             // polymorphic methods/properties
             foreach (var member in interfaceMembers)
             {
+                static string GetParameterName(string parameterDeclaration)
+                    => parameterDeclaration.LastIndexOf(' ') switch
+                    {
+                        0     => parameterDeclaration,
+                        var i => parameterDeclaration[(i + 1)..]
+                    };
+
                 var parametersEnumerable
                     = member
                         .Parameters
@@ -918,13 +983,5 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
             src.Linebreak();
         }
-    }
-
-    static string GetParameterName(string parameterDeclaration)
-    {
-        int lastSpaceIndex = parameterDeclaration.LastIndexOf(' ');
-        return lastSpaceIndex >= 0
-            ? parameterDeclaration[(lastSpaceIndex + 1)..]
-            : parameterDeclaration;
     }
 }
