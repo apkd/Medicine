@@ -62,6 +62,17 @@ public partial class UnionTests
             => new(x + 4);
     }
 
+    [UnionHeader]
+    public partial struct HeaderWithoutDerived
+    {
+        public interface Interface
+        {
+            int Execute();
+        }
+
+        public TypeIDs TypeID;
+    }
+
     [Test]
     public void GeneratedTypesAndMembersExist()
     {
@@ -161,5 +172,34 @@ public partial class UnionTests
             shape.TryGetScaledPerimeter(2, out perimeter);
             Assert.That(perimeter, Is.EqualTo(0));
         });
+    }
+
+    [Test]
+    public void HeaderWithoutDerived_GeneratesAndCompiles()
+    {
+        _ = typeof(HeaderWithoutDerived.TypeIDs);
+        _ = typeof(HeaderWithoutDerivedExtensions);
+
+        var state = default(HeaderWithoutDerived);
+
+        Assert.That((int)HeaderWithoutDerived.TypeIDs.Unset, Is.EqualTo(0));
+        Assert.That(Enum.GetNames(typeof(HeaderWithoutDerived.TypeIDs)), Is.EqualTo(new[] { "Unset" }));
+        Assert.That(state.TypeName, Is.EqualTo("Undefined (TypeID=0)"));
+        Assert.That(state.SizeInBytes, Is.EqualTo(-1));
+    }
+
+    [Test]
+    public void HeaderWithoutDerived_DispatchThrowsForUnsetAndUnknownTypeIds()
+    {
+        var state = default(HeaderWithoutDerived);
+        var unsetEx = Assert.Throws<InvalidOperationException>(() => state.Execute());
+        Assert.That(unsetEx!.Message, Does.Contain("Unknown HeaderWithoutDerived type ID"));
+
+        state.TypeID = (HeaderWithoutDerived.TypeIDs)200;
+        Assert.That(state.TypeName, Is.EqualTo("Unknown (TypeID=200)"));
+        Assert.That(state.SizeInBytes, Is.EqualTo(-1));
+
+        var unknownEx = Assert.Throws<InvalidOperationException>(() => state.Execute());
+        Assert.That(unknownEx!.Message, Does.Contain("Unknown HeaderWithoutDerived type ID"));
     }
 }

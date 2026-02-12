@@ -505,8 +505,6 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
         var derivedStructs = input.DerivedStructsBuilderFunc.Value?.Invoke() ?? [];
-        if (derivedStructs.Length == 0 && input.IsRootTypeIDOwner)
-            return;
 
         var interfaceMembers = input.InterfaceMembersBuilderFunc.Value?.Invoke() ?? [];
 
@@ -574,7 +572,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Line.Write("static readonly int[] derivedStructSizes =");
                 using (src.Braces)
                 {
-                    var maxId = derivedStructs[^1].AssignedId;
+                    byte maxId = derivedStructs.Length > 0
+                        ? derivedStructs[^1].AssignedId
+                        : (byte)0;
+
                     var sizes = new string[maxId + 1];
                     for (int i = 0; i < sizes.Length; i++)
                         sizes[i] = "-1";
@@ -591,7 +592,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Line.Write("static readonly string[] derivedStructNames =");
                 using (src.Braces)
                 {
-                    var maxId = derivedStructs[^1].AssignedId;
+                    byte maxId = derivedStructs.Length > 0
+                        ? derivedStructs[^1].AssignedId
+                        : (byte)0;
+
                     var names = new string[maxId + 1];
                     for (int i = 0; i < names.Length; i++)
                         names[i] = $"\"Undefined (TypeID={i})\"";
@@ -608,11 +612,18 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Line.Write("public int SizeInBytes");
                 using (src.Indent)
                 {
-                    src.Line.Write("=> TypeID switch");
-                    using (src.Braces)
+                    if (derivedStructs.Length > 0)
                     {
-                        src.Line.Write($"<= TypeIDs.{derivedStructs[^1].Name} => derivedStructSizes[(int)TypeID],");
-                        src.Line.Write("_ => -1,");
+                        src.Line.Write("=> TypeID switch");
+                        using (src.Braces)
+                        {
+                            src.Line.Write($"<= TypeIDs.{derivedStructs[^1].Name} => derivedStructSizes[(int)TypeID],");
+                            src.Line.Write("_ => -1,");
+                        }
+                    }
+                    else
+                    {
+                        src.Line.Write("=> -1");
                     }
                 }
 
@@ -624,7 +635,11 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     src.Line.Write("=> TypeID switch");
                     using (src.Braces)
                     {
-                        src.Line.Write($"<= TypeIDs.{derivedStructs[^1].Name} => derivedStructNames[(int)TypeID],");
+                        if (derivedStructs.Length > 0)
+                            src.Line.Write($"<= TypeIDs.{derivedStructs[^1].Name} => derivedStructNames[(int)TypeID],");
+                        else
+                            src.Line.Write("TypeIDs.Unset => \"Undefined (TypeID=0)\",");
+
                         src.Line.Write("var unknown => $\"Unknown (TypeID={(byte)unknown})\",");
                     }
                 }

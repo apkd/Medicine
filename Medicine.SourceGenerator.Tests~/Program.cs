@@ -41,6 +41,7 @@ DiagnosticTest[] cases =
     TrackSourceGeneratorTest.Case,
     SingletonSourceGeneratorTest.Case,
     UnionSourceGeneratorTest.Case,
+    UnionSourceGeneratorTest.NoDerivedHeaderCase,
     UnionNestedSourceGeneratorTest.Case,
     UnmanagedAccessSourceGeneratorTest.Case,
     WrapValueEnumerableSourceGeneratorTest.Case,
