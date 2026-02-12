@@ -525,7 +525,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Linebreak();
 
             src.Line.Write(Alias.Hidden);
-            src.Line.Write($"int {m}MedicineInternalInstanceIndex = -1;");
+            src.Line.Write($"[{m}NS] int {m}MedicineInternalInstanceIndex = -1;");
             src.Linebreak();
         }
 
@@ -853,7 +853,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             {
                 src.Linebreak();
                 src.Line.Write(Alias.Hidden);
-                src.Line.Write($"bool {m}MedicineInternalCachedEnabledState;");
+                src.Line.Write($"[{m}NS] bool {m}MedicineInternalCachedEnabledState;");
 
                 src.Linebreak();
                 src.Line.Write($"/// <summary>");
