@@ -441,6 +441,140 @@ public partial class UnmanagedAccessTests
     }
 
     [Test]
+    public void UnmanagedAccess_TrackedAccessArray_RangeEnumeration_ReadWrite()
+    {
+        TestUtility.DestroyAllGameObjects();
+
+        try
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                var gameObject = new GameObject($"TrackedAccessRangeRW_{i}", typeof(TrackedAccessComponent));
+                gameObject.GetComponent<TrackedAccessComponent>().Value = i + 1;
+            }
+
+            Assert.That(TrackedAccessComponent.Instances.Count, Is.EqualTo(6));
+            var accessArray = TrackedAccessComponent.Unmanaged.Instances;
+            Assert.That(accessArray.Length, Is.EqualTo(6));
+            var before = new int[accessArray.Length];
+            for (int i = 0; i < before.Length; i++)
+                before[i] = accessArray[i].Value;
+
+            var slice = accessArray[1..4];
+            Assert.That(slice.Length, Is.EqualTo(3));
+
+            int sum = 0;
+            foreach (var access in slice)
+            {
+                sum += access.Value;
+                access.Value += 100;
+            }
+
+            Assert.That(sum, Is.EqualTo(before[1] + before[2] + before[3]));
+
+            for (int i = 0; i < accessArray.Length; i++)
+            {
+                int expected = before[i] + (i is >= 1 and < 4 ? 100 : 0);
+                Assert.That(accessArray[i].Value, Is.EqualTo(expected));
+            }
+        }
+        finally
+        {
+            TestUtility.DestroyAllGameObjects();
+        }
+    }
+
+    [Test]
+    public void UnmanagedAccess_TrackedAccessArray_RangeEnumeration_ReadOnly()
+    {
+        TestUtility.DestroyAllGameObjects();
+
+        try
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                var gameObject = new GameObject($"TrackedAccessRangeRO_{i}", typeof(TrackedAccessComponent));
+                gameObject.GetComponent<TrackedAccessComponent>().Value = i + 10;
+            }
+
+            Assert.That(TrackedAccessComponent.Instances.Count, Is.EqualTo(6));
+            var accessArray = TrackedAccessComponent.Unmanaged.Instances;
+            Assert.That(accessArray.Length, Is.EqualTo(6));
+            var readOnly = accessArray.AsReadOnly();
+            var slice = readOnly[2..5];
+
+            Assert.That(slice.Length, Is.EqualTo(3));
+            Assert.That(slice[0].Value, Is.EqualTo(readOnly[2].Value));
+            Assert.That(slice[2].Value, Is.EqualTo(readOnly[4].Value));
+
+            int sum = 0;
+            foreach (var access in slice)
+                sum += access.Value;
+
+            Assert.That(sum, Is.EqualTo(readOnly[2].Value + readOnly[3].Value + readOnly[4].Value));
+        }
+        finally
+        {
+            TestUtility.DestroyAllGameObjects();
+        }
+    }
+
+    [Test]
+    public void UnmanagedAccess_TrackedAccessArray_RangeIndexingAndNestedSlices()
+    {
+        TestUtility.DestroyAllGameObjects();
+
+        try
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                var gameObject = new GameObject($"TrackedAccessRangeNested_{i}", typeof(TrackedAccessComponent));
+                gameObject.GetComponent<TrackedAccessComponent>().Value = i * 10;
+            }
+
+            Assert.That(TrackedAccessComponent.Instances.Count, Is.EqualTo(6));
+            var accessArray = TrackedAccessComponent.Unmanaged.Instances;
+            Assert.That(accessArray.Length, Is.EqualTo(6));
+            var slice = accessArray[1..5];
+            var nested = slice[1..3];
+
+            Assert.That(slice.Length, Is.EqualTo(4));
+            Assert.That(nested.Length, Is.EqualTo(2));
+            Assert.That(slice[0].Value, Is.EqualTo(accessArray[1].Value));
+            Assert.That(slice[3].Value, Is.EqualTo(accessArray[4].Value));
+            Assert.That(nested[0].Value, Is.EqualTo(accessArray[2].Value));
+            Assert.That(nested[1].Value, Is.EqualTo(accessArray[3].Value));
+        }
+        finally
+        {
+            TestUtility.DestroyAllGameObjects();
+        }
+    }
+
+    [Test]
+    public void UnmanagedAccess_TrackedAccessArray_RangeIndexer_InvalidRangesThrow()
+    {
+        TestUtility.DestroyAllGameObjects();
+
+        try
+        {
+            for (int i = 0; i < 4; i++)
+                _ = new GameObject($"TrackedAccessRangeInvalid_{i}", typeof(TrackedAccessComponent));
+
+            var accessArray = TrackedAccessComponent.Unmanaged.Instances;
+            var readOnly = accessArray.AsReadOnly();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => _ = accessArray[3..2]);
+            Assert.Throws<ArgumentOutOfRangeException>(() => _ = accessArray[new Range(0, accessArray.Length + 1)]);
+            Assert.Throws<ArgumentOutOfRangeException>(() => _ = readOnly[new Range(0, readOnly.Length + 1)]);
+        }
+        finally
+        {
+            TestUtility.DestroyAllGameObjects();
+        }
+    }
+
+    [Test]
     public void UnmanagedRef_Read_UsesLayoutOffsets()
     {
         var obj = new BasicFields();

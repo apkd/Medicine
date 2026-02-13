@@ -21,6 +21,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public bool IsTracked;
         public MedicineSettings MedicineSettings;
         public AttributeSettings AttributeSettings;
+        public EquatableIgnore<Func<bool>?> HasCachedEnableBuilderFunc;
+        public EquatableIgnore<Func<bool>?> HasIInstanceIndexBuilderFunc;
         public EquatableArray<FieldInfo> Fields;
     }
 
@@ -103,13 +105,6 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
         var trackAttribute = context.TargetSymbol.GetAttribute(knownSymbols.TrackAttribute);
 
-        bool hasCachedEnable = trackAttribute?
-            .GetAttributeConstructorArguments(ct)
-            .Get("cacheEnabledState", false) ?? false;
-
-        bool hasIInstanceIndex
-            = typeSymbol.HasInterface(knownSymbols.IInstanceIndexInterface, checkAllInterfaces: false);
-
         var output = new GeneratorInput
         {
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
@@ -124,41 +119,30 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             ClassFQN = typeSymbol.FQN,
             IsUnityObject = typeSymbol.InheritsFrom(knownSymbols.UnityObject),
             IsTracked = trackAttribute is not null,
+            SourceGeneratorErrorLocation = new(typeDecl.Identifier.GetLocation()),
+            HasCachedEnableBuilderFunc = new(() =>
+                {
+                    if (trackAttribute is null)
+                        return false;
+
+                    bool hasBaseCachedEnable = typeSymbol
+                        .GetBaseTypes()
+                        .Select(x => x.GetAttribute(knownSymbols.TrackAttribute))
+                        .OfType<AttributeData>()
+                        .Any(x => x.GetAttributeConstructorArguments().Get("cacheEnabledState", false));
+
+                    return trackAttribute
+                               .GetAttributeConstructorArguments()
+                               .Get("cacheEnabledState", false)
+                           && !hasBaseCachedEnable;
+                }
+            ),
+            HasIInstanceIndexBuilderFunc = new(() =>
+                typeSymbol.HasInterface(knownSymbols.IInstanceIndexInterface, checkAllInterfaces: false)
+            ),
         };
 
         var fields = new List<FieldInfo>(capacity: 16);
-
-        if (hasCachedEnable)
-        {
-            fields.Add(
-                new()
-                {
-                    Name = "enabled",
-                    MetadataName = $"{m}MedicineInternalCachedEnabledState",
-                    TypeFQN = "global::System.Boolean",
-                    IsPublic = false,
-                    IsReadOnly = true,
-                    IsReferenceType = false,
-                    IsUnmanagedType = true,
-                }
-            );
-        }
-
-        if (hasIInstanceIndex)
-        {
-            fields.Add(
-                new()
-                {
-                    Name = "InstanceIndex",
-                    MetadataName = $"{m}MedicineInternalInstanceIndex",
-                    TypeFQN = "global::System.Int32",
-                    IsPublic = false,
-                    IsReadOnly = true,
-                    IsReferenceType = false,
-                    IsUnmanagedType = true,
-                }
-            );
-        }
 
         foreach (var member in typeSymbol.GetMembers().AsArray())
             CollectField(member, isFromBaseType: false);
@@ -167,15 +151,6 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             CollectField(member, isFromBaseType: true);
 
         output.Fields = fields.ToArray();
-
-        if (output.Fields.Length is 0)
-        {
-            return output with
-            {
-                SourceGeneratorError = "Class marked with [UnmanagedAccess] has no instance fields or properties with backing fields.",
-                SourceGeneratorErrorLocation = new LocationInfo(typeDecl.Identifier.GetLocation()),
-            };
-        }
 
         return output;
 
@@ -205,24 +180,79 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
     static string ToBindingFlagsVisibility(bool isPublic)
         => isPublic ? "Public" : "NonPublic";
 
+    static FieldInfo CachedEnabledField()
+        => new()
+        {
+            Name = "enabled",
+            MetadataName = $"{m}MedicineInternalCachedEnabledState",
+            TypeFQN = "global::System.Boolean",
+            IsPublic = false,
+            IsReadOnly = true,
+            IsReferenceType = false,
+            IsUnmanagedType = true,
+        };
+
+    static FieldInfo InstanceIndexField()
+        => new()
+        {
+            Name = "InstanceIndex",
+            MetadataName = $"{m}MedicineInternalInstanceIndex",
+            TypeFQN = "global::System.Int32",
+            IsPublic = false,
+            IsReadOnly = true,
+            IsReferenceType = false,
+            IsUnmanagedType = true,
+        };
+
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
         var symbols = input.MedicineSettings.PreprocessorSymbolNames;
+        var fields = input.Fields.AsArray();
+
+        bool hasCachedEnable = input.HasCachedEnableBuilderFunc.Value?.Invoke() ?? false;
+        bool hasIInstanceIndex = input.HasIInstanceIndexBuilderFunc.Value?.Invoke() ?? false;
+
+        if ((hasCachedEnable ? 1 : 0) + (hasIInstanceIndex ? 1 : 0) is > 0 and var generatedFieldCount)
+        {
+            var fieldsWithGenerated = new FieldInfo[fields.Length + generatedFieldCount];
+            int generatedIndex = 0;
+
+            if (hasCachedEnable)
+                fieldsWithGenerated[generatedIndex++] = CachedEnabledField();
+
+            if (hasIInstanceIndex)
+                fieldsWithGenerated[generatedIndex++] = InstanceIndexField();
+
+            Array.Copy(fields, sourceIndex: 0, fieldsWithGenerated, destinationIndex: generatedIndex, length: fields.Length);
+            fields = fieldsWithGenerated;
+        }
 
         if (!symbols.Has(DEBUG))
             input.AttributeSettings = input.AttributeSettings with { SafetyChecks = false };
 
         if (input.AttributeSettings.MemberNames is { Length: > 0 })
-            input.Fields = input.Fields.AsArray().Where(x => input.AttributeSettings.MemberNames.Contains(x.Name)).ToArray();
+            fields = fields.Where(x => input.AttributeSettings.MemberNames.AsArray().Contains(x.Name)).ToArray();
 
         if (input.AttributeSettings is { IncludePublic: false, IncludePrivate: false })
             throw new InvalidOperationException("Must include at least one visibility modifier.");
 
         if (!input.AttributeSettings.IncludePublic)
-            input.Fields = input.Fields.AsArray().Where(x => !x.IsPublic).ToArray();
+            fields = fields.Where(x => !x.IsPublic).ToArray();
 
         if (!input.AttributeSettings.IncludePrivate)
-            input.Fields = input.Fields.AsArray().Where(x => x.IsPublic).ToArray();
+            fields = fields.Where(x => x.IsPublic).ToArray();
+
+        if (fields.Length is 0)
+        {
+            context.ReportDiagnostic(
+                Diagnostic.Create(
+                    descriptor: Utility.ExceptionDiagnosticDescriptor,
+                    location: input.SourceGeneratorErrorLocation?.ToLocation() ?? Location.None,
+                    messageArgs: "Class marked with [UnmanagedAccess] has no instance fields or properties with backing fields."
+                )
+            );
+            return;
+        }
 
         src.Line.Write($"#pragma warning disable CS0108");
         src.Line.Write(Alias.UsingStorage);
@@ -290,7 +320,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             src.Line.Write("public readonly struct Layout");
             using (src.Braces)
             {
-                foreach (var x in input.Fields.AsArray())
+                foreach (var x in fields)
                     src.Line.Write($"public ushort {x.Name} {{ get; init; }}");
 
                 src.Linebreak();
@@ -305,7 +335,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 using (src.Indent)
                 using (src.Braces)
-                    foreach (var x in input.Fields.AsArray())
+                    foreach (var x in fields)
                         src.Line.Write($"{x.Name} = ᵐUtility.GetFieldOffset(typeof({m}Self), \"{x.MetadataName}\", ᵐBF.{ToBindingFlagsVisibility(x.IsPublic)} | ᵐBF.Instance),");
 
                 src.Write(';');
@@ -343,6 +373,20 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
+                src.Line.Write("public AccessArray this[global::System.Range range]");
+                using (src.Braces)
+                {
+                    src.Line.Write("get");
+                    using (src.Braces)
+                    {
+                        src.Line.Write("AccessArray accessArray = new();");
+                        src.Line.Write("accessArray.impl = impl[range];");
+                        src.Line.Write("return accessArray;");
+                    }
+                }
+
+                src.Linebreak();
+
                 src.Line.Write(Alias.Inline);
                 src.Line.Write("public ReadOnly AsReadOnly()");
                 using (src.Indent)
@@ -372,6 +416,12 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Linebreak();
 
+                    src.Line.Write($"public ReadOnly(Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.ReadOnly accessArray)");
+                    using (src.Indent)
+                        src.Line.Write("=> impl = accessArray;");
+
+                    src.Linebreak();
+
                     src.Line.Write($"public int Length");
                     using (src.Indent)
                         src.Line.Write("=> impl.Length;");
@@ -381,6 +431,12 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     src.Line.Write("public AccessRO this[int index]");
                     using (src.Braces)
                         src.Line.Write($"{Alias.Inline} get => impl[index];");
+
+                    src.Linebreak();
+
+                    src.Line.Write("public ReadOnly this[global::System.Range range]");
+                    using (src.Indent)
+                        src.Line.Write("=> new(impl[range]);");
 
                     src.Linebreak();
 
@@ -475,7 +531,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         PropertyWithSafetyChecks($"Medicine.UnmanagedRefExtensions.GetInstanceID(Ref);");
                     }
 
-                    foreach (var x in input.Fields.AsArray())
+                    foreach (var x in fields)
                     {
                         string ro = isReadOnly || x.IsReadOnly ? " readonly" : "";
 

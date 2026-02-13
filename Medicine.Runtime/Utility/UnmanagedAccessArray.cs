@@ -26,6 +26,8 @@ namespace Medicine.Internal
             = SharedStatic<TLayout>.GetOrCreate<TLayout>();
 
         UnsafeList<UnmanagedRef<TClass>> classRefArray;
+        int rangeStart;
+        int rangeLength;
 
         [NativeDisableUnsafePtrRestriction]
         readonly TLayout* layoutInfo;
@@ -44,7 +46,7 @@ namespace Medicine.Internal
         public readonly int Length
         {
             [MethodImpl(AggressiveInlining)]
-            get => classRefArray.Length;
+            get => rangeLength;
         }
 
         public readonly bool IsCreated
@@ -56,6 +58,8 @@ namespace Medicine.Internal
         public void UpdateBuffer(UnsafeList<UnmanagedRef<TClass>> classRefArray)
         {
             this.classRefArray = classRefArray;
+            rangeStart = 0;
+            rangeLength = classRefArray.Length;
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             m_Length = classRefArray.Length;
             m_MinIndex = 0;
@@ -66,6 +70,8 @@ namespace Medicine.Internal
         public UnmanagedAccessArray(UnsafeList<UnmanagedRef<TClass>> classRefArray)
         {
             this.classRefArray = classRefArray;
+            rangeStart = 0;
+            rangeLength = classRefArray.Length;
             layoutInfo = (TLayout*)unmanagedLayoutStorage.UnsafeDataPointer;
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
@@ -75,6 +81,31 @@ namespace Medicine.Internal
             m_Safety = AtomicSafetyHandle.Create();
             CollectionHelper.SetStaticSafetyId<UnmanagedAccessArray<TClass, TLayout, TAccessRW, TAccessRO>>(ref m_Safety, ref s_staticSafetyId.Data);
             AtomicSafetyHandle.SetBumpSecondaryVersionOnScheduleWrite(m_Safety, value: true);
+#endif
+        }
+
+        UnmanagedAccessArray(
+            UnsafeList<UnmanagedRef<TClass>> classRefArray,
+            TLayout* layoutInfo,
+            int rangeStart,
+            int rangeLength
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            , int length,
+            int minIndex,
+            int maxIndex,
+            AtomicSafetyHandle safety
+#endif
+        )
+        {
+            this.classRefArray = classRefArray;
+            this.layoutInfo = layoutInfo;
+            this.rangeStart = rangeStart;
+            this.rangeLength = rangeLength;
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            m_Length = length;
+            m_MinIndex = minIndex;
+            m_MaxIndex = maxIndex;
+            m_Safety = safety;
 #endif
         }
 
@@ -98,8 +129,18 @@ namespace Medicine.Internal
         readonly void CheckIndexInRange(int index)
         {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-            if ((uint)index >= (uint)classRefArray.Length)
+            if ((uint)index >= (uint)rangeLength)
                 ThrowIndexOutOfRange(index);
+#endif
+        }
+
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        [MethodImpl(AggressiveInlining)]
+        readonly void CheckAbsoluteIndexInRange(int index)
+        {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            if ((uint)index >= (uint)classRefArray.Length)
+                ThrowAbsoluteIndexOutOfRange(index);
 #endif
         }
 
@@ -125,6 +166,10 @@ namespace Medicine.Internal
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
         [MethodImpl(NoInlining)]
         readonly void ThrowIndexOutOfRange(int index)
+            => throw new IndexOutOfRangeException($"Index {index} is out of range of [0..{rangeLength - 1}].");
+
+        [MethodImpl(NoInlining)]
+        readonly void ThrowAbsoluteIndexOutOfRange(int index)
             => throw new IndexOutOfRangeException($"Index {index} is out of range of [0..{m_Length - 1}].");
 
         [MethodImpl(NoInlining)]
@@ -160,13 +205,40 @@ namespace Medicine.Internal
             [MethodImpl(AggressiveInlining)]
             get
             {
-                CheckWriteAccess();
                 CheckIndexInRange(index);
-                CheckIndexInParallelWriteRange(index);
-
-                var access = new UntypedAccess(classRefArray[index], layoutInfo);
-                return UnsafeUtility.As<UntypedAccess, TAccessRW>(ref access);
+                return AccessAt(rangeStart + index);
             }
+        }
+
+        public readonly UnmanagedAccessArray<TClass, TLayout, TAccessRW, TAccessRO> this[Range range]
+        {
+            [MethodImpl(AggressiveInlining)]
+            get
+            {
+                var (offset, length) = range.GetOffsetAndLength(rangeLength);
+                return new(
+                    classRefArray,
+                    layoutInfo,
+                    rangeStart + offset,
+                    length
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                    , m_Length,
+                    m_MinIndex,
+                    m_MaxIndex,
+                    m_Safety
+#endif
+                );
+            }
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        readonly TAccessRW AccessAt(int absoluteIndex)
+        {
+            CheckWriteAccess();
+            CheckAbsoluteIndexInRange(absoluteIndex);
+            CheckIndexInParallelWriteRange(absoluteIndex);
+            var access = new UntypedAccess(classRefArray[absoluteIndex], layoutInfo);
+            return UnsafeUtility.As<UntypedAccess, TAccessRW>(ref access);
         }
 
         public readonly Enumerator GetEnumerator()
@@ -174,7 +246,7 @@ namespace Medicine.Internal
 
         public readonly ReadOnly AsReadOnly()
             => new(
-                classRefArray, layoutInfo
+                classRefArray, layoutInfo, rangeStart, rangeLength
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                 , m_Safety
 #endif
@@ -185,21 +257,23 @@ namespace Medicine.Internal
         {
             readonly UnmanagedAccessArray<TClass, TLayout, TAccessRW, TAccessRO> array;
             int index;
+            readonly int endExclusive;
 
             public Enumerator(UnmanagedAccessArray<TClass, TLayout, TAccessRW, TAccessRO> array)
             {
                 this.array = array;
-                index = -1;
+                index = array.rangeStart - 1;
+                endExclusive = array.rangeStart + array.rangeLength;
 
                 array.CheckWriteAccess();
 
 #if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC && !MEDICINE_DISABLE_UNMANAGEDACCESSARRAY_PREFETCH
-                var len = array.classRefArray.Length;
+                var len = array.rangeLength;
                 if (len > 0)
                 {
                     int count = len < PrefetchDistance ? len : PrefetchDistance;
                     for (int i = 0; i < count; i++)
-                        Common.Prefetch((void*)array.classRefArray.Ptr[i].Ptr, Common.ReadWrite.Write);
+                        Common.Prefetch((void*)array.classRefArray.Ptr[array.rangeStart + i].Ptr, Common.ReadWrite.Write);
                 }
 #endif
             }
@@ -209,12 +283,12 @@ namespace Medicine.Internal
             {
                 array.CheckWriteAccess();
 
-                if (++index >= array.classRefArray.Length)
+                if (++index >= endExclusive)
                     return false;
 
 #if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC && !MEDICINE_DISABLE_UNMANAGEDACCESSARRAY_PREFETCH
                 int prefetchOffset = index + PrefetchDistance;
-                if ((uint)prefetchOffset < (uint)array.classRefArray.Length)
+                if ((uint)prefetchOffset < (uint)endExclusive)
                     Common.Prefetch((void*)array.classRefArray.Ptr[prefetchOffset].Ptr, Common.ReadWrite.Write);
 #endif
 
@@ -224,7 +298,7 @@ namespace Medicine.Internal
             public TAccessRW Current
             {
                 [MethodImpl(AggressiveInlining)]
-                get => array[index];
+                get => array.AccessAt(index);
             }
         }
 
@@ -233,6 +307,8 @@ namespace Medicine.Internal
         public readonly struct ReadOnly
         {
             readonly UnsafeList<UnmanagedRef<TClass>> classRefArray;
+            readonly int rangeStart;
+            readonly int rangeLength;
 
             [NativeDisableUnsafePtrRestriction]
             readonly TLayout* layoutInfo;
@@ -244,7 +320,7 @@ namespace Medicine.Internal
             public int Length
             {
                 [MethodImpl(AggressiveInlining)]
-                get => classRefArray.Length;
+                get => rangeLength;
             }
 
             public bool IsCreated
@@ -254,7 +330,10 @@ namespace Medicine.Internal
             }
 
             public ReadOnly(
-                UnsafeList<UnmanagedRef<TClass>> classRefArray, TLayout* layoutInfo
+                UnsafeList<UnmanagedRef<TClass>> classRefArray,
+                TLayout* layoutInfo,
+                int rangeStart,
+                int rangeLength
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                 , AtomicSafetyHandle safety
 #endif
@@ -262,6 +341,8 @@ namespace Medicine.Internal
             {
                 this.classRefArray = classRefArray;
                 this.layoutInfo = layoutInfo;
+                this.rangeStart = rangeStart;
+                this.rangeLength = rangeLength;
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                 m_Safety = safety;
 #endif
@@ -272,8 +353,18 @@ namespace Medicine.Internal
             void CheckIndexInRange(int index)
             {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-                if ((uint)index >= (uint)classRefArray.Length)
+                if ((uint)index >= (uint)rangeLength)
                     ThrowIndexOutOfRange(index);
+#endif
+            }
+
+            [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+            [MethodImpl(AggressiveInlining)]
+            void CheckAbsoluteIndexInRange(int index)
+            {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                if ((uint)index >= (uint)classRefArray.Length)
+                    ThrowAbsoluteIndexOutOfRange(index);
 #endif
             }
 
@@ -289,6 +380,10 @@ namespace Medicine.Internal
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             [MethodImpl(NoInlining)]
             void ThrowIndexOutOfRange(int index)
+                => throw new IndexOutOfRangeException($"Index {index} is out of range of [0..{rangeLength - 1}].");
+
+            [MethodImpl(NoInlining)]
+            void ThrowAbsoluteIndexOutOfRange(int index)
                 => throw new IndexOutOfRangeException($"Index {index} is out of range of [0..{classRefArray.Length - 1}].");
 #endif
 
@@ -297,12 +392,36 @@ namespace Medicine.Internal
                 [MethodImpl(AggressiveInlining)]
                 get
                 {
-                    CheckReadAccess();
                     CheckIndexInRange(index);
-
-                    var access = new UntypedAccess(classRefArray[index], layoutInfo);
-                    return UnsafeUtility.As<UntypedAccess, TAccessRO>(ref access);
+                    return AccessAt(rangeStart + index);
                 }
+            }
+
+            public ReadOnly this[Range range]
+            {
+                [MethodImpl(AggressiveInlining)]
+                get
+                {
+                    var (offset, length) = range.GetOffsetAndLength(rangeLength);
+                    return new(
+                        classRefArray,
+                        layoutInfo,
+                        rangeStart + offset,
+                        length
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                        , m_Safety
+#endif
+                    );
+                }
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            TAccessRO AccessAt(int absoluteIndex)
+            {
+                CheckReadAccess();
+                CheckAbsoluteIndexInRange(absoluteIndex);
+                var access = new UntypedAccess(classRefArray[absoluteIndex], layoutInfo);
+                return UnsafeUtility.As<UntypedAccess, TAccessRO>(ref access);
             }
 
             public Enumerator GetEnumerator()
@@ -314,19 +433,21 @@ namespace Medicine.Internal
             {
                 readonly ReadOnly array;
                 int index;
+                readonly int endExclusive;
 
                 public Enumerator(in ReadOnly array)
                 {
                     this.array = array;
-                    index = -1;
+                    index = array.rangeStart - 1;
+                    endExclusive = array.rangeStart + array.rangeLength;
 
 #if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC && !MEDICINE_DISABLE_UNMANAGEDACCESSARRAY_PREFETCH
-                    var len = array.Length;
+                    var len = array.rangeLength;
                     if (len > 0)
                     {
                         int count = len < PrefetchDistance ? len : PrefetchDistance;
                         for (int i = 0; i < count; i++)
-                            Common.Prefetch((void*)array.classRefArray.Ptr[i].Ptr, Common.ReadWrite.Read);
+                            Common.Prefetch((void*)array.classRefArray.Ptr[array.rangeStart + i].Ptr, Common.ReadWrite.Read);
                     }
 #endif
                 }
@@ -336,12 +457,12 @@ namespace Medicine.Internal
                 {
                     array.CheckReadAccess();
 
-                    if (++index >= array.classRefArray.Length)
+                    if (++index >= endExclusive)
                         return false;
 
 #if MODULE_BURST && UNITY_BURST_EXPERIMENTAL_PREFETCH_INTRINSIC && !MEDICINE_DISABLE_UNMANAGEDACCESSARRAY_PREFETCH
                     int prefetchOffset = index + PrefetchDistance;
-                    if ((uint)prefetchOffset < (uint)array.classRefArray.Length)
+                    if ((uint)prefetchOffset < (uint)endExclusive)
                         Common.Prefetch((void*)array.classRefArray.Ptr[prefetchOffset].Ptr, Common.ReadWrite.Read);
 #endif
 
@@ -351,7 +472,7 @@ namespace Medicine.Internal
                 public TAccessRO Current
                 {
                     [MethodImpl(AggressiveInlining)]
-                    get => array[index];
+                    get => array.AccessAt(index);
                 }
             }
         }

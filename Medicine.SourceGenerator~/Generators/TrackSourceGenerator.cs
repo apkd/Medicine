@@ -191,6 +191,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             );
 
         bool hasBaseDeclarationsWithAttribute = false;
+        bool hasBaseCachedEnabledState = false;
         bool manualInheritanceMismatch = false;
         foreach (var baseType in classSymbol.GetBaseTypes())
         {
@@ -198,18 +199,25 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             if (baseAttribute is null)
                 continue;
 
+            var baseAttributeArguments = baseAttribute.GetAttributeConstructorArguments(ct);
+
+            if (attributeName is TrackAttributeMetadataName)
+                hasBaseCachedEnabledState |= baseAttributeArguments.Get("cacheEnabledState", false);
+
             if (baseAttribute.ConstructorArguments.Length is 0)
                 if (attributeData.ConstructorArguments.Length is 0)
                     continue;
 
             hasBaseDeclarationsWithAttribute = true;
-            manualInheritanceMismatch = baseAttribute
-                .GetAttributeConstructorArguments(ct)
-                .Select(x => x.Get("manual", false)) != attributeArguments.Manual;
+            manualInheritanceMismatch = baseAttributeArguments.Get("manual", false) != attributeArguments.Manual;
 
             if (manualInheritanceMismatch)
                 break;
         }
+
+        if (attributeName is TrackAttributeMetadataName)
+            if (hasBaseCachedEnabledState && attributeArguments.CacheEnabledState)
+                attributeArguments = attributeArguments with { CacheEnabledState = false };
 
         var sourceLocation = attributeData.ApplicationSyntaxReference.GetLocation()
                              ?? typeDeclaration.Identifier.GetLocation();
