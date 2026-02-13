@@ -34,7 +34,11 @@ public sealed class InstanceIndexAnalyzer : DiagnosticAnalyzer
         if (context.Symbol is not INamedTypeSymbol { TypeKind: TypeKind.Class } type)
             return;
 
-        if (!type.HasInterface(x => x is { Name: IInstanceIndexInterfaceName, IsInMedicineNamespace: true }))
+        if (!type.HasInterface(
+                x => x is { Name: IInstanceIndexInterfaceName, IsInMedicineNamespace: true },
+                checkAllInterfaces: false
+            )
+        )
             return;
 
         if (type.HasAttribute(x => x is { Name: TrackAttributeName, IsInMedicineNamespace: true }))

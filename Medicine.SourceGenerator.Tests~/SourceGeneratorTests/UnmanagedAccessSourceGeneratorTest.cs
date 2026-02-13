@@ -13,6 +13,9 @@ static class UnmanagedAccessSourceGeneratorTest
     public static readonly DiagnosticTest DirectIInstanceIndexCase =
         new("UnmanagedAccess generator handles direct IInstanceIndex", RunDirectIInstanceIndex);
 
+    public static readonly DiagnosticTest ImplicitIInstanceIndexCase =
+        new("UnmanagedAccess generator handles tracked types without direct IInstanceIndex", RunImplicitIInstanceIndex);
+
     public static readonly DiagnosticTest RangeIndexerCase =
         new("UnmanagedAccess generator emits AccessArray range indexers", RunRangeIndexerContract);
 
@@ -75,6 +78,70 @@ partial class UnmanagedAccessDirectInstanceIndexComponent : MonoBehaviour, IInst
 }
 """
         );
+
+    static void RunImplicitIInstanceIndex()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+using UnityEngine;
+
+[Track]
+[UnmanagedAccess]
+partial class UnmanagedAccessImplicitInstanceIndexComponent : MonoBehaviour
+{
+    int counter;
+}
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new UnmanagedAccessSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "tracked unmanaged-access generation should not throw without direct IInstanceIndex"
+        );
+
+        int generatedFieldReferenceCount = 0;
+        foreach (var result in run.Results)
+        foreach (var generatedSource in result.GeneratedSources)
+        {
+            var text = generatedSource.SourceText.ToString();
+            generatedFieldReferenceCount += CountOccurrences(text, "MedicineInternalInstanceIndex");
+        }
+
+        if (generatedFieldReferenceCount > 0)
+            return;
+
+        throw new InvalidOperationException(
+            "Expected tracked UnmanagedAccess generation to include the internal instance-index field."
+        );
+
+        static int CountOccurrences(string source, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while (true)
+            {
+                index = source.IndexOf(value, index, StringComparison.Ordinal);
+                if (index < 0)
+                    return count;
+
+                count++;
+                index += value.Length;
+            }
+        }
+    }
 
     static void RunRangeIndexerContract()
     {

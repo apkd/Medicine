@@ -9,6 +9,7 @@ using System.Linq;
 using System.Reflection;
 using JetBrains.Annotations;
 using Medicine;
+using Medicine.Internal;
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
@@ -48,7 +49,7 @@ public partial class TrackAttributePlayModeTests
     //////////////////////////////////////////////////////////////////////////////
 
     [Track]
-    sealed partial class MBTrackInstanceIndex : MonoBehaviour, IInstanceIndex { }
+    sealed partial class MBTrackInstanceIndex : MonoBehaviour { }
 
     [Test]
     public void Track_InstanceIndex()
@@ -103,12 +104,50 @@ public partial class TrackAttributePlayModeTests
         }
     }
 
+    [Test]
+    public void Track_ByInterface_InstanceIndexPerInterfaceStorage()
+    {
+        var mb1a = new GameObject("mb1a", typeof(MBTrackByInterface1)).GetComponent<MBTrackByInterface1>();
+        var mb1b = new GameObject("mb1b", typeof(MBTrackByInterface1)).GetComponent<MBTrackByInterface1>();
+        var mb2a = new GameObject("mb2a", typeof(MBTrackByInterface2)).GetComponent<MBTrackByInterface2>();
+        var mb2b = new GameObject("mb2b", typeof(MBTrackByInterface2)).GetComponent<MBTrackByInterface2>();
+
+        AssertInterfaceIndicesByListOrder();
+
+        mb2a.enabled = false;
+        Assert.That(((IInstanceIndex<ITrackByInterface1>)mb2a).InstanceIndex, Is.EqualTo(-1));
+        Assert.That(((IInstanceIndex<ITrackByInterface1>)mb2b).InstanceIndex, Is.GreaterThanOrEqualTo(0));
+        Assert.That(((IInstanceIndex<ITrackByInterface2>)mb1a).InstanceIndex, Is.EqualTo(0));
+        Assert.That(((IInstanceIndex<ITrackByInterface2>)mb1b).InstanceIndex, Is.EqualTo(1));
+        AssertInterfaceIndicesByListOrder();
+
+        mb1a.enabled = false;
+        Assert.That(((IInstanceIndex<ITrackByInterface1>)mb1a).InstanceIndex, Is.EqualTo(-1));
+        Assert.That(((IInstanceIndex<ITrackByInterface2>)mb1a).InstanceIndex, Is.EqualTo(-1));
+        Assert.That(((IInstanceIndex<ITrackByInterface2>)mb1b).InstanceIndex, Is.EqualTo(0));
+        AssertInterfaceIndicesByListOrder();
+
+        mb2a.enabled = true;
+        mb1a.enabled = true;
+        AssertInterfaceIndicesByListOrder();
+
+        void AssertInterfaceIndicesByListOrder()
+        {
+            using (Find.Instances<ITrackByInterface1>().ToPooledList(out var listI1))
+                for (int i = 0; i < listI1.Count; ++i)
+                    Assert.That(((IInstanceIndex<ITrackByInterface1>)listI1[i]).InstanceIndex, Is.EqualTo(i));
+
+            using (Find.Instances<ITrackByInterface2>().ToPooledList(out var listI2))
+                for (int i = 0; i < listI2.Count; ++i)
+                    Assert.That(((IInstanceIndex<ITrackByInterface2>)listI2[i]).InstanceIndex, Is.EqualTo(i));
+        }
+    }
+
     //////////////////////////////////////////////////////////////////////////////
 
     [Track(instanceIdArray: true, transformAccessArray: true)]
     sealed partial class MBTrackStressTest
         : MonoBehaviour,
-            IInstanceIndex,
             IFindByID<int>,
             IFindByID<ulong>,
             IUnmanagedData<float>,
@@ -174,7 +213,6 @@ public partial class TrackAttributePlayModeTests
     [Track(instanceIdArray: true, transformAccessArray: true)]
     abstract partial class MBTrackStressTestGeneric<TID, TData>
         : MonoBehaviour,
-            IInstanceIndex,
             IFindByID<TID>,
             IUnmanagedData<TData>
         where TID : unmanaged, IEquatable<TID>

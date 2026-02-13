@@ -81,9 +81,8 @@ namespace Medicine.Internal
                 }
 #endif
                 int index = List.Count;
-
-                if (instance is IInstanceIndex<T> trackIndex)
-                    trackIndex.InstanceIndex = index;
+                var trackIndex = (IInstanceIndex<T>)instance;
+                trackIndex.InstanceIndex = index;
 
                 List.Add(instance);
                 return index;
@@ -119,8 +118,8 @@ namespace Medicine.Internal
                 // - returns the removed element index so we can unregister it from the
                 //   TransformAccessArray using RemoveAtSwapBack
                 // - needs to be kept in sync with the TransformAccessArray behavior
-                // - if the class implements IInstanceIndex, we can skip the array search
-                //   and retrieve the stored index
+                // - tracked types implement IInstanceIndex<T>, so we can skip array search
+                //   and retrieve the stored index directly
 
                 var listView = list.AsInternalsView();
                 var array = listView.Array;
@@ -138,80 +137,40 @@ namespace Medicine.Internal
                 }
 #endif
 
-                int index = -1;
-
-                if (instance is IInstanceIndex<T> selfTrackIndex)
-                {
-                    // get the stored index - no array search
-                    index = selfTrackIndex.InstanceIndex;
+                int index;
+                var selfTrackIndex = (IInstanceIndex<T>)instance;
+                index = selfTrackIndex.InstanceIndex;
 #if DEBUG
-                    if ((uint)index >= (uint)listView.Count)
-                    {
-                        Debug.LogError(
-                            $"Invalid InstanceIndex for {typeof(T).Name}: {index} (count: {listView.Count}). " +
-                            "This probably indicates a logic error in your code, and will cause errors in release builds."
-                        );
-                        index = -1;
-                    }
-                    else if (!ReferenceEquals(array[index], instance))
-                    {
-                        Debug.LogError(
-                            $"InstanceIndex mismatch for {typeof(T).Name}: stored index {index} does not match instance. " +
-                            "This probably indicates a logic error in your code, and will cause errors in release builds."
-                        );
-                        index = -1;
-                    }
+                if ((uint)index >= (uint)listView.Count)
+                {
+                    Debug.LogError(
+                        $"Invalid InstanceIndex for {typeof(T).Name}: {index} (count: {listView.Count}). " +
+                        "This probably indicates a logic error in your code, and will cause errors in release builds."
+                    );
+                    return -1;
+                }
+                else if (!ReferenceEquals(array[index], instance))
+                {
+                    Debug.LogError(
+                        $"InstanceIndex mismatch for {typeof(T).Name}: stored index {index} does not match instance. " +
+                        "This probably indicates a logic error in your code, and will cause errors in release builds."
+                    );
+                    return -1;
+                }
 
-                    if (index < 0)
-                    {
-                        int length = listView.Count;
-                        for (int i = length - 1; i >= 0; --i)
-                        {
-                            if (!ReferenceEquals(array[i], instance))
-                                continue;
-
-                            index = i;
-                            break;
-                        }
-
-                        if (index < 0)
-                            return -1;
-
-                        if (index != listView.Count - 1)
-                            if (array[listView.Count - 1] is IInstanceIndex<T> lastIndex)
-                                lastIndex.InstanceIndex = index;
-                    }
-                    else if (index != listView.Count - 1)
-                    {
-                        var lastElement = (IInstanceIndex<T>)array[listView.Count - 1];
-                        lastElement.InstanceIndex = index;
-                    }
-
-                    selfTrackIndex.InstanceIndex = -1;
+                if (index != listView.Count - 1)
+                {
+                    var lastElement = (IInstanceIndex<T>)array[listView.Count - 1];
+                    lastElement.InstanceIndex = index;
+                }
 #else
-                    // update swapped instance's index
-                    // (unsafe cast - we know the other element also implements the interface)
+                if (index != listView.Count - 1)
+                {
                     var lastElement = UnsafeUtility.As<T, IInstanceIndex<T>>(ref array[listView.Count - 1]);
                     lastElement.InstanceIndex = index;
-
-                    selfTrackIndex.InstanceIndex = -1;
+                }
 #endif
-                }
-                else // search from end
-                {
-                    int length = listView.Count;
-                    for (int i = length - 1; i >= 0; --i)
-                    {
-                        if (ReferenceEquals(array[i], instance))
-                        {
-                            index = i;
-                            break;
-                        }
-                    }
-
-                    if (index < 0)
-                        return -1;
-                }
+                selfTrackIndex.InstanceIndex = -1;
 
                 int last = listView.Count - 1;
 

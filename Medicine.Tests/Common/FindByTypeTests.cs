@@ -5,12 +5,13 @@ using Medicine;
 using Medicine.Internal;
 using Object = UnityEngine.Object;
 
-public class FindByTypeTests
+public partial class FindByTypeTests
 {
     sealed class TestComponentA : MonoBehaviour { }
     sealed class TestComponentB : MonoBehaviour { }
     sealed class TestScriptableObject : ScriptableObject { }
-    sealed class AnyObjectTestComponent : MonoBehaviour { }
+    [Track]
+    sealed partial class AnyObjectTestComponent : MonoBehaviour { }
 
     static void CreateWithComponent<T>(string name, bool active)
         where T : Component
@@ -111,11 +112,7 @@ public class FindByTypeTests
     public void AnyObjectByType_DoesNotThrow_WhenTypeRegisteredButNoInstances()
     {
         var go = new GameObject();
-        var component = go.AddComponent<AnyObjectTestComponent>();
-
-        Storage.Instances<AnyObjectTestComponent>.Register(component);
-        Storage.Instances<AnyObjectTestComponent>.Unregister(component);
-        Storage.Instances<AnyObjectTestComponent>.List.Clear();
+        _ = go.AddComponent<AnyObjectTestComponent>();
 
         Object.DestroyImmediate(go);
 

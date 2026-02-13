@@ -82,8 +82,6 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                             return input with
                                 {
                                     EffectiveSingletonStrategy = input.AttributeSettings.SingletonStrategy ?? settings.SingletonStrategy,
-                                    HasIInstanceIndex = input.HasIInstanceIndex || settings.AlwaysTrackInstanceIndices,
-                                    EmitIInstanceIndex = input.EmitIInstanceIndex || settings.AlwaysTrackInstanceIndices,
                                     Symbols = settings.PreprocessorSymbolNames,
                                 };
                         }
@@ -335,7 +333,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         if (input.Attribute is TrackAttributeMetadataName)
         {
-            input.HasIInstanceIndex |= input.EmitIInstanceIndex;
+            input.EmitIInstanceIndex |= !input.HasIInstanceIndex;
+            input.HasIInstanceIndex = true;
         }
         else
         {
@@ -363,6 +362,14 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         bool hasFindByAssetId = input.TrackingIdRegistrations.AsArray()
             .Any(x => x is { LookupTypeFQN: FindByAssetIdInterfaceFQN, IDTypeFQN: AssetIdTypeFQN });
 
+        string[] trackedStorageTypes = input.Attribute is TrackAttributeMetadataName
+            ? input.InterfacesWithAttribute.AsArray()
+                .Prepend(input.TypeFQN!)
+                .Distinct()
+                .OrderBy(x => x, StringComparer.Ordinal)
+                .ToArray()
+            : Array.Empty<string>();
+
         var declarations = input.ContainingTypeDeclaration.AsSpan();
         int lastDeclaration = declarations.Length - 1;
         for (int i = 0; i < declarations.Length; i++)
@@ -377,16 +384,13 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     src.Line.Write($"/// <list type=\"bullet\">");
                     WriteGeneratedArraysComment();
                     src.Line.Write($"/// </list>");
-                    if (input.HasIInstanceIndex)
-                    {
-                        src.Line.Write($"/// And the following additional instance properties:");
-                        src.Line.Write($"/// <list type=\"bullet\">");
-                        src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIndex\"/> property, which is the instance's index into the above arrays </item>");
-                        foreach (var (_, dataTypeShort) in unmanagedDataInfo)
-                            src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Local{dataTypeShort}\"/> per-instance data accessor </item>");
+                    src.Line.Write($"/// And the following additional instance properties:");
+                    src.Line.Write($"/// <list type=\"bullet\">");
+                    src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIndex\"/> property, which is the instance's index into the above arrays </item>");
+                    foreach (var (_, dataTypeShort) in unmanagedDataInfo)
+                        src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Local{dataTypeShort}\"/> per-instance data accessor </item>");
 
-                        src.Line.Write($"/// </list>");
-                    }
+                    src.Line.Write($"/// </list>");
 
                     src.Line.Write("/// </remarks>");
                 }
@@ -403,8 +407,12 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             if (i == lastDeclaration)
             {
-                if (input.HasIInstanceIndex)
-                    src.Write($" : {IInstanceIndexInternalInterfaceFQN}<{input.TypeFQN}>");
+                if (input.Attribute is TrackAttributeMetadataName && trackedStorageTypes.Length > 0)
+                {
+                    src.Write($" : {IInstanceIndexInternalInterfaceFQN}<{trackedStorageTypes[0]}>");
+                    for (int j = 1; j < trackedStorageTypes.Length; j++)
+                        src.Write($", {IInstanceIndexInternalInterfaceFQN}<{trackedStorageTypes[j]}>");
+                }
 
                 if (input.EmitIInstanceIndex)
                     src.Write($", {IInstanceIndexInterfaceFQN}");
@@ -489,29 +497,22 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/> data array </item>");
         }
 
-        if (input.HasIInstanceIndex)
+        if (input.Attribute is TrackAttributeMetadataName)
         {
-            if (input.Attribute is SingletonAttributeMetadataName)
+            if (input.Symbols.Has(UNITY_EDITOR))
             {
-                src.Line.Write($"#error The IInstanceIndex interface is invalid for singleton type {input.TypeDisplayName}.");
-            }
-            else
-            {
-                if (input.Symbols.Has(UNITY_EDITOR))
-                {
-                    src.Line.Write($"/// <summary>");
-                    src.Line.Write($"/// Represents the index of this instance in the following static storage arrays:");
-                    src.Line.Write($"/// <list type=\"bullet\">");
-                    WriteGeneratedArraysComment();
-                    src.Line.Write($"/// </list>");
-                    src.Line.Write($"/// </summary>");
-                    src.Line.Write($"/// <remarks>");
-                    src.Line.Write($"/// This property is automatically updated.");
-                    src.Line.Write($"/// Note that the instance index will change during the lifetime of the instance - never store it.");
-                    src.Line.Write($"/// <br/><br/>");
-                    src.Line.Write($"/// A value of -1 indicates that the instance is not currently active/registered.");
-                    src.Line.Write($"/// </remarks>");
-                }
+                src.Line.Write($"/// <summary>");
+                src.Line.Write($"/// Represents the index of this instance in the following static storage arrays:");
+                src.Line.Write($"/// <list type=\"bullet\">");
+                WriteGeneratedArraysComment();
+                src.Line.Write($"/// </list>");
+                src.Line.Write($"/// </summary>");
+                src.Line.Write($"/// <remarks>");
+                src.Line.Write($"/// This property is automatically updated.");
+                src.Line.Write($"/// Note that the instance index will change during the lifetime of the instance - never store it.");
+                src.Line.Write($"/// <br/><br/>");
+                src.Line.Write($"/// A value of -1 indicates that the instance is not currently active/registered.");
+                src.Line.Write($"/// </remarks>");
             }
 
             src.Line.Write($"public int InstanceIndex => {m}MedicineInternalInstanceIndex;");
@@ -536,6 +537,28 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Line.Write(Alias.Hidden);
             src.Line.Write($"[{m}NS] int {m}MedicineInternalInstanceIndex = -1;");
             src.Linebreak();
+
+            var trackedInterfaceStorageTypes = trackedStorageTypes
+                .Where(x => x != input.TypeFQN)
+                .ToArray();
+            for (int i = 0; i < trackedInterfaceStorageTypes.Length; i++)
+            {
+                string interfaceStorageType = trackedInterfaceStorageTypes[i];
+                string indexFieldName = $"{m}MedicineInternalInstanceIndexFor{i}_{interfaceStorageType.Sanitize()}";
+
+                src.Line.Write($"int {IInstanceIndexInternalInterfaceFQN}<{interfaceStorageType}>.InstanceIndex");
+                using (src.Braces)
+                {
+                    src.Line.Write($"{Alias.Inline} get => {indexFieldName};");
+                    src.Line.Write($"{Alias.Inline} set => {indexFieldName} = value;");
+                }
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Hidden);
+                src.Line.Write($"[{m}NS] int {indexFieldName} = -1;");
+                src.Linebreak();
+            }
         }
 
         if (hasFindByAssetId)
@@ -665,8 +688,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                         src.Line.Write($"/// </summary>");
                         src.Line.Write($"/// <remarks>");
                         src.Line.Write($"/// Each element in the native array corresponds to the tracked instance with the appropriate instance index.");
-                        src.Line.Write($"/// Implementing the <see cref=\"Medicine.IInstanceIndex\"/> interface will generate a property that lets each");
-                        src.Line.Write($"/// instance access its own data. Otherwise, you can access the data statically via this array, and");
+                        src.Line.Write($"/// You can access per-instance data via the generated <see cref=\"{input.TypeDisplayName}.Local{dataTypeShort}\"/> property,");
+                        src.Line.Write($"/// or you can access data statically via this array and");
                         src.Line.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
                         src.Line.Write($"/// </remarks>");
                         src.Line.Write($"/// <codegen>Generated because of the following implemented interface: <c>IUnmanagedData&lt;{dataTypeShort}&gt;</c></codegen>");
@@ -679,7 +702,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 }
             }
 
-            if (input.HasIInstanceIndex)
+            if (input.Attribute is TrackAttributeMetadataName)
             {
                 src.Linebreak();
                 foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
@@ -693,9 +716,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                         src.Line.Write($"/// </summary>");
                         src.Line.Write($"/// <remarks>");
                         src.Line.Write($"/// The reference corresponds to the tracked instance with the appropriate instance index.");
-                        src.Line.Write($"/// Implementing the <see cref=\"Medicine.IInstanceIndex\"/> interface will generate a property that lets each");
-                        src.Line.Write($"/// instance access its own data. Otherwise, you can access the data statically via this array, and");
-                        src.Line.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
+                        src.Line.Write($"/// You can also access data statically via <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/>");
+                        src.Line.Write($"/// and initialize/dispose it by overriding methods in <see cref=\"Medicine.IUnmanagedData{{T}}\"/>.");
                     }
 
                     src.Line.Write($"public ref {dataType} Local{dataTypeShort}");

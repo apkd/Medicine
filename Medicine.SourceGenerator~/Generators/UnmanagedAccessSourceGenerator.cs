@@ -138,7 +138,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 }
             ),
             HasIInstanceIndexBuilderFunc = new(() =>
-                typeSymbol.HasInterface(knownSymbols.IInstanceIndexInterface, checkAllInterfaces: false)
+                trackAttribute is not null
             ),
         };
 
