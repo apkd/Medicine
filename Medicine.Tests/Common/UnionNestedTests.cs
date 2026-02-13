@@ -1,6 +1,8 @@
 using System;
+using System.Runtime.InteropServices;
 using Medicine;
 using NUnit.Framework;
+using Unity.Collections.LowLevel.Unsafe;
 
 public partial class UnionNestedTests
 {
@@ -414,4 +416,84 @@ public partial class UnionNestedTests
             },
             B = 5,
         };
+
+    [Test]
+    public void Wrapper_IsGenerated_ForNestedHeaders_WithExplicitLayout()
+    {
+        var rootWrapperType = typeof(RootState).GetNestedType("Wrapper");
+        Assert.That(rootWrapperType, Is.Not.Null);
+
+        var rootLayout = rootWrapperType!.StructLayoutAttribute;
+        Assert.That(rootLayout, Is.Not.Null);
+        Assert.That(rootLayout!.Value, Is.EqualTo(LayoutKind.Explicit));
+
+        var expectedRootSize = Math.Max(
+            UnsafeUtility.SizeOf<PlainState>(),
+            Math.Max(UnsafeUtility.SizeOf<ChildAState>(), UnsafeUtility.SizeOf<ChildBState>())
+        );
+        Assert.That(rootLayout.Size, Is.EqualTo(expectedRootSize));
+
+        var childWrapperType = typeof(ChildState).GetNestedType("Wrapper");
+        Assert.That(childWrapperType, Is.Not.Null);
+
+        var childLayout = childWrapperType!.StructLayoutAttribute;
+        Assert.That(childLayout, Is.Not.Null);
+        Assert.That(childLayout!.Value, Is.EqualTo(LayoutKind.Explicit));
+
+        var expectedChildSize = Math.Max(UnsafeUtility.SizeOf<ChildAState>(), UnsafeUtility.SizeOf<ChildBState>());
+        Assert.That(childLayout.Size, Is.EqualTo(expectedChildSize));
+    }
+
+    [Test]
+    public void ChildWrapper_ForwardsInheritedAndDeclaredInterfaceMembers()
+    {
+        var wrapper = new ChildState.Wrapper
+        {
+            Header = new()
+            {
+                Header = { TypeID = RootState.TypeIDs.ChildAState },
+            },
+        };
+
+        ChildState.IDerivedChild polymorphic = wrapper;
+        Assert.That(polymorphic.IsReady(10), Is.True);
+        Assert.That(polymorphic.CanRun(10), Is.True);
+
+        ref var asChildA = ref wrapper.AsChildAState();
+        Assert.That(asChildA.A, Is.EqualTo(0));
+
+        var childA = CreateChildAState();
+        ref var wrappedChildA = ref childA.Wrap();
+        wrappedChildA.Counter = 12;
+        Assert.That(childA.Header.Counter, Is.EqualTo(12));
+
+        ref var wrappedChildHeader = ref childA.Header.Wrap();
+        wrappedChildHeader.Counter = 14;
+        Assert.That(childA.Header.Counter, Is.EqualTo(14));
+
+        ref var asRootFromChild = ref childA.Header.AsRootState();
+        asRootFromChild.RootCounter = 22;
+        Assert.That(childA.Header.Header.RootCounter, Is.EqualTo(22));
+
+        ref var asRootWrapperFromChild = ref wrappedChildHeader.AsRootState();
+        asRootWrapperFromChild.RootCounter = 24;
+        Assert.That(childA.Header.Header.RootCounter, Is.EqualTo(24));
+
+        wrapper.Counter = 6;
+        Assert.That(wrapper.Header.Counter, Is.EqualTo(6));
+        Assert.That(wrapper.ChildGetOnly, Is.EqualTo(201));
+
+        wrapper.ChildSetOnly = 17;
+        Assert.That(wrapper.Header.ReadChildSetOnly(), Is.EqualTo(17));
+
+        wrapper.ChildPrivateGetPublicSet = 23;
+        Assert.That(wrapper.Header.ReadChildPrivateGetPublicSet(), Is.EqualTo(23));
+
+        wrapper.Header.SetChildPublicGetPrivateSet(29);
+        Assert.That(wrapper.ChildPublicGetPrivateSet, Is.EqualTo(29));
+
+        wrapper.Header.Counter = 3;
+        polymorphic.Run(10);
+        Assert.That(wrapper.Header.Counter, Is.EqualTo(3));
+    }
 }

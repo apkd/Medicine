@@ -14,6 +14,12 @@ static class UnionSourceGeneratorTest
     public static readonly DiagnosticTest HeaderPropertyAccessorForwardingCase =
         new("Union generator forwards only accessible header property accessors", RunHeaderPropertyAccessorForwarding);
 
+    public static readonly DiagnosticTest WrapperCase =
+        new("Union generator emits Wrapper for non-generic headers", RunWrapper);
+
+    public static readonly DiagnosticTest GenericWrapperSkipCase =
+        new("Union generator does not emit Wrapper for generic headers", RunGenericWrapperSkip);
+
     static void Run()
         => SourceGeneratorTester.AssertGeneratesSource(
             source: """
@@ -263,6 +269,164 @@ static class UsageNegative
         throw new InvalidOperationException(
             "Expected inaccessible accessors to be omitted from forwarded properties." + Environment.NewLine +
             $"Actual diagnostics:{Environment.NewLine}{RoslynHarness.FormatDiagnostics(expectedInaccessibleAccessorErrors)}"
+        );
+    }
+
+    static void RunWrapper()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+
+[UnionHeader]
+public partial struct ContractUnion
+{
+    public interface Interface
+    {
+        int Value { get; }
+        int Scale(int amount);
+    }
+
+    public TypeIDs TypeID;
+    public int Version { get; set; }
+}
+
+[Union(1)]
+public partial struct ContractUnionA : ContractUnion.Interface
+{
+    public ContractUnion Header;
+    public int Value => 42;
+    public int Scale(int amount) => amount * 2;
+}
+
+static class Usage
+{
+    public static int Run()
+    {
+        var raw = new ContractUnion.Wrapper();
+        raw.Version = 7;
+        ref var typed = ref raw.AsContractUnionA();
+        var variant = new ContractUnionA
+        {
+            Header =
+            {
+                TypeID = ContractUnion.TypeIDs.ContractUnionA,
+            },
+        };
+        ref var wrappedVariant = ref variant.Wrap();
+        wrappedVariant.Version = 5;
+        ref var wrappedHeader = ref variant.Header.Wrap();
+        wrappedHeader.Version = 6;
+
+        ContractUnion.Interface wrapper = new ContractUnion.Wrapper
+        {
+            Header = new ContractUnion
+            {
+                TypeID = ContractUnion.TypeIDs.ContractUnionA,
+            },
+        };
+
+        return raw.Version + typed.Scale(2) + wrappedVariant.Version + wrappedHeader.Version + wrapper.Value + wrapper.Scale(3);
+    }
+}
+"""
+        );
+
+        var run = RoslynHarness.RunGenerators(
+            compilation,
+            [new UnionStructSourceGenerator()],
+            []
+        );
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.GeneratorDiagnostics,
+            id: "MED911",
+            because: "wrapper generation should not throw in generator"
+        );
+
+        var missingWrapperTypeErrors = run.CompilationDiagnostics
+            .Where(x => x.Severity == DiagnosticSeverity.Error)
+            .Where(x => x.Id is "CS0426" && x.GetMessage().Contains("Wrapper", StringComparison.Ordinal))
+            .ToArray();
+
+        if (missingWrapperTypeErrors.Length > 0)
+            throw new InvalidOperationException(
+                "Expected generated Wrapper type to exist for non-generic [UnionHeader]." + Environment.NewLine +
+                $"Actual diagnostics:{Environment.NewLine}{RoslynHarness.FormatDiagnostics(missingWrapperTypeErrors)}"
+            );
+
+        var wrapperInterfaceErrors = run.CompilationDiagnostics
+            .Where(x => x.Severity == DiagnosticSeverity.Error)
+            .Where(x => x.Id is "CS0535" && x.GetMessage().Contains("Wrapper", StringComparison.Ordinal))
+            .ToArray();
+
+        if (wrapperInterfaceErrors.Length == 0)
+            return;
+
+        throw new InvalidOperationException(
+            "Expected generated Wrapper to implement all interface members." + Environment.NewLine +
+            $"Actual diagnostics:{Environment.NewLine}{RoslynHarness.FormatDiagnostics(wrapperInterfaceErrors)}"
+        );
+    }
+
+    static void RunGenericWrapperSkip()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+
+[UnionHeader]
+public partial struct ContractUnion<T>
+{
+    public interface Interface
+    {
+        int Value { get; }
+    }
+
+    public TypeIDs TypeID;
+}
+
+[Union(1)]
+public partial struct ContractUnionA : ContractUnion<int>.Interface
+{
+    public ContractUnion<int> Header;
+    public int Value => 42;
+}
+
+static class Usage
+{
+    public static object Run()
+    {
+        return new ContractUnion<int>.Wrapper();
+    }
+}
+"""
+        );
+
+        var run = RoslynHarness.RunGenerators(
+            compilation,
+            [new UnionStructSourceGenerator()],
+            []
+        );
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.GeneratorDiagnostics,
+            id: "MED911",
+            because: "generic-wrapper suppression should not throw in generator"
+        );
+
+        var missingWrapperDiagnostic = run.CompilationDiagnostics
+            .Where(x => x.Severity == DiagnosticSeverity.Error)
+            .FirstOrDefault(x => x.Id is "CS0426" && x.GetMessage().Contains("Wrapper", StringComparison.Ordinal));
+
+        if (missingWrapperDiagnostic is not null)
+            return;
+
+        throw new InvalidOperationException(
+            "Expected generic [UnionHeader] to skip Wrapper emission and fail when Wrapper is referenced." + Environment.NewLine +
+            $"Actual diagnostics:{Environment.NewLine}{RoslynHarness.FormatDiagnostics(run.CompilationDiagnostics)}"
         );
     }
 }

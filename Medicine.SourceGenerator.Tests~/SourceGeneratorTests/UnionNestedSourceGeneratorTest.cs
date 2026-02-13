@@ -69,6 +69,7 @@ public partial struct RootState
     }
 
     public TypeIDs TypeID;
+    public int RootCounter;
 }
 
 [UnionHeader]
@@ -97,7 +98,15 @@ static class Usage
     {
         var child = new ChildAState();
         child.Counter = 9;
-        return child.Counter;
+        ref var childHeader = ref child.Header;
+        ref var root = ref childHeader.AsRootState();
+        root.RootCounter = 10;
+
+        ref var childWrapper = ref child.Wrap();
+        ref var rootWrapper = ref childWrapper.AsRootState();
+        rootWrapper.RootCounter = 20;
+
+        return child.Counter + root.RootCounter + rootWrapper.RootCounter;
     }
 }
 """
@@ -118,7 +127,11 @@ static class Usage
         var missingForwardingMembers = run.CompilationDiagnostics
             .Where(x => x.Severity == DiagnosticSeverity.Error)
             .Where(x => x.Id is "CS1061")
-            .Where(x => x.GetMessage().Contains("Counter", StringComparison.Ordinal))
+            .Where(x =>
+                x.GetMessage().Contains("Counter", StringComparison.Ordinal) ||
+                x.GetMessage().Contains("AsRootState", StringComparison.Ordinal) ||
+                x.GetMessage().Contains("Wrap", StringComparison.Ordinal)
+            )
             .ToArray();
 
         if (missingForwardingMembers.Length == 0)

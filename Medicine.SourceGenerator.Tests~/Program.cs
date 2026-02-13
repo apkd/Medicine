@@ -45,6 +45,8 @@ DiagnosticTest[] cases =
     UnionSourceGeneratorTest.NoDerivedHeaderCase,
     UnionSourceGeneratorTest.HeaderFieldForwardingCase,
     UnionSourceGeneratorTest.HeaderPropertyAccessorForwardingCase,
+    UnionSourceGeneratorTest.WrapperCase,
+    UnionSourceGeneratorTest.GenericWrapperSkipCase,
     UnionNestedSourceGeneratorTest.Case,
     UnionNestedSourceGeneratorTest.HeaderFieldForwardingCase,
     UnmanagedAccessSourceGeneratorTest.Case,

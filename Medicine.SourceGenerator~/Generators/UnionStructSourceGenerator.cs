@@ -16,6 +16,8 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public EquatableArray<string> Parameters { get; init; }
         public EquatableArray<byte> ParameterRefKinds { get; init; }
         public bool IsProperty { get; init; }
+        public bool CanGet { get; init; }
+        public bool CanSet { get; init; }
     }
 
     record struct HeaderFieldInput
@@ -32,8 +34,11 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public string FQN { get; init; }
         public EquatableArray<string> Declaration { get; init; }
         public byte AssignedId { get; init; }
+        public int EstimatedSizeInBytes { get; init; }
+        public bool HasDirectHeader { get; init; }
         public EquatableArray<string> PubliclyImplementedMembers { get; init; }
         public EquatableArray<string> MemberNames { get; init; }
+        public EquatableArray<string> ConstructorMemberInitializers { get; init; }
         public bool HasParameterlessConstructor { get; init; }
     }
 
@@ -41,6 +46,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     {
         public EquatableArray<string> PublicMembers { get; init; }
         public EquatableArray<string> MemberNames { get; init; }
+        public EquatableArray<string> ConstructorMemberInitializers { get; init; }
         public bool HasParameterlessConstructor { get; init; }
     }
 
@@ -56,7 +62,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public byte? ForcedId { get; init; }
 
         public EquatableIgnore<Func<string, bool>?> HasHeaderInChainFunc { get; init; }
+        public EquatableIgnore<Func<string, bool>?> HasDirectHeaderFunc { get; init; }
         public EquatableIgnore<Func<string, bool>?> ImplementsUnionInterfaceFunc { get; init; }
+        public EquatableIgnore<Func<int>?> EstimatedSizeInBytesBuilderFunc { get; init; }
         public EquatableIgnore<Func<DerivedDeferredInput>?> DeferredInputBuilderFunc { get; init; }
 
         // ReSharper disable once UnusedAutoPropertyAccessor.Local
@@ -83,7 +91,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public bool HasParentHeader { get; init; }
         public string ParentTypeName { get; init; }
         public string ParentTypeFQN { get; init; }
+        public bool ParentIsGenericType { get; init; }
         public bool IsPublic { get; init; }
+        public bool IsGenericType { get; init; }
+        public int EstimatedBaseSizeInBytes { get; init; }
 
         public EquatableIgnore<Func<InterfaceMemberInput[]>?> InterfaceMembersBuilderFunc { get; init; }
         public EquatableIgnore<Func<HeaderFieldInput[]>?> HeaderFieldsBuilderFunc { get; init; }
@@ -203,9 +214,12 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             HasParentHeader = hasNestedParent,
             ParentTypeName = hasNestedParent ? parentHeader!.Name : "",
             ParentTypeFQN = hasNestedParent ? parentHeader!.FQN : "",
+            ParentIsGenericType = hasNestedParent && parentHeader!.IsGenericType,
             IsPublic = structDecl.Modifiers.Any(SyntaxKind.PublicKeyword),
             InterfaceMembersBuilderFunc = new(() => BuildInterfaceMembers(interfaceSymbol)),
             HeaderFieldsBuilderFunc = new(() => BuildHeaderFields(baseSymbol)),
+            IsGenericType = baseSymbol.IsGenericType,
+            EstimatedBaseSizeInBytes = StructSizeEstimator.EstimateTypeSizeInBytes(baseSymbol),
             BaseTextCheckSumForCache = structDecl.GetText().GetChecksum().AsArray(),
         };
     }
@@ -213,47 +227,81 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     static InterfaceMemberInput[] BuildInterfaceMembers(INamedTypeSymbol interfaceSymbol)
     {
         var members = new List<InterfaceMemberInput>();
+        var seenMethods = new HashSet<MethodSignatureKey>(MethodSignatureComparer.Instance);
+        var seenProperties = new HashSet<PropertySignatureKey>(PropertySignatureComparer.Instance);
 
-        foreach (var member in interfaceSymbol.GetMembers())
+        var interfaces = interfaceSymbol.AllInterfaces.AsArray();
+        Array.Sort(interfaces, static (left, right) => left.FQN.CompareTo(right.FQN, Ordinal));
+
+        AddMembers(interfaceSymbol);
+        foreach (var @interface in interfaces)
+            AddMembers(@interface);
+
+        return members.ToArray();
+
+        void AddMembers(INamedTypeSymbol @interface)
         {
-            if (member is IMethodSymbol { MethodKind: MethodKind.Ordinary } method)
-            {
-                int parameterCount = method.Parameters.Length;
-                string[] parameters = new string[parameterCount];
-                byte[] parameterRefKinds = new byte[parameterCount];
+            var declaredMembers = @interface.GetMembers()
+                .OrderBy(x => x.Locations.FirstOrDefault()?.SourceTree?.FilePath, StringComparer.Ordinal)
+                .ThenBy(x => x.Locations.FirstOrDefault()?.SourceSpan.Start ?? int.MaxValue)
+                .ThenBy(x => x.Name, StringComparer.Ordinal);
 
-                for (int i = 0; i < parameterCount; i++)
+            foreach (var member in declaredMembers)
+            {
+                if (member is IMethodSymbol { MethodKind: MethodKind.Ordinary } method)
                 {
-                    var parameter = method.Parameters[i];
-                    parameters[i] = $"{parameter.Type.FQN} {parameter.Name}";
-                    parameterRefKinds[i] = (byte)parameter.RefKind;
+                    if (!seenMethods.Add(new(method)))
+                        continue;
+
+                    int parameterCount = method.Parameters.Length;
+                    var parameterRefKinds = new byte[parameterCount];
+                    string[] parameters = new string[parameterCount];
+
+                    for (int i = 0; i < parameterCount; i++)
+                    {
+                        var parameter = method.Parameters[i];
+                        parameterRefKinds[i] = (byte)parameter.RefKind;
+                        parameters[i] = $"{parameter.Type.FQN} {parameter.Name}";
+                    }
+
+                    members.Add(
+                        new()
+                        {
+                            Name = method.Name,
+                            ReturnTypeFQN = method.ReturnType.FQN,
+                            Parameters = parameters,
+                            ParameterRefKinds = parameterRefKinds,
+                            IsProperty = false,
+                        }
+                    );
+
+                    continue;
                 }
 
-                members.Add(
-                    new()
-                    {
-                        Name = method.Name,
-                        ReturnTypeFQN = method.ReturnType.FQN,
-                        Parameters = parameters,
-                        ParameterRefKinds = parameterRefKinds,
-                        IsProperty = false,
-                    }
-                );
-            }
-            else if (member is IPropertySymbol property)
-            {
+                if (member is not IPropertySymbol property)
+                    continue;
+
+                bool canGet = property.GetMethod is not null;
+                bool canSet = property.SetMethod is not null;
+
+                if (!canGet && !canSet)
+                    continue;
+
+                if (!seenProperties.Add(new(property)))
+                    continue;
+
                 members.Add(
                     new()
                     {
                         Name = property.Name,
                         ReturnTypeFQN = property.Type.FQN,
                         IsProperty = true,
+                        CanGet = canGet,
+                        CanSet = canSet,
                     }
                 );
             }
         }
-
-        return members.ToArray();
     }
 
     static HeaderFieldInput[] BuildHeaderFields(INamedTypeSymbol headerSymbol)
@@ -281,6 +329,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                             CanSet = !field.IsReadOnly && !field.IsConst,
                         }
                     );
+
                     break;
                 }
                 case IPropertySymbol { IsStatic: false, IsIndexer: false } property:
@@ -300,6 +349,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                             CanSet = canSet,
                         }
                     );
+
                     break;
                 }
             }
@@ -331,32 +381,88 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             Declaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
             ForcedId = forcedId,
             HasHeaderInChainFunc = new(headerFQN => HasHeaderInChain(symbol, headerFQN)),
+            HasDirectHeaderFunc = new(headerFQN => HasDirectHeader(symbol, headerFQN)),
             ImplementsUnionInterfaceFunc = new(interfaceFQN => symbol.AllInterfaces.Any(x => x.FQN == interfaceFQN)),
+            EstimatedSizeInBytesBuilderFunc = new(() => StructSizeEstimator.EstimateTypeSizeInBytes(symbol)),
             DeferredInputBuilderFunc = new(() => BuildDerivedDeferredInput(symbol)),
             DerivedTextCheckSumForCache = structDecl.GetText().GetChecksum().AsArray(),
         };
     }
 
     static DerivedDeferredInput BuildDerivedDeferredInput(INamedTypeSymbol symbol)
-    {
-        var publicMembers = symbol.GetMembers()
-            .Where(x => x is { DeclaredAccessibility: Public } and not IMethodSymbol { MethodKind: not MethodKind.Ordinary })
-            .Select(x => x.Name)
-            .Distinct()
-            .ToArray();
-
-        var memberNames = symbol.GetMembers()
-            .Select(x => x.Name)
-            .Distinct()
-            .ToArray();
-
-        return new()
+        => new()
         {
-            PublicMembers = publicMembers,
-            MemberNames = memberNames,
+            PublicMembers = symbol.GetMembers()
+                .Where(x => x is { DeclaredAccessibility: Public } and not IMethodSymbol { MethodKind: not MethodKind.Ordinary })
+                .Select(x => x.Name)
+                .Distinct()
+                .ToArray(),
+            MemberNames = symbol.GetMembers()
+                .Select(x => x.Name)
+                .Distinct()
+                .ToArray(),
+            ConstructorMemberInitializers = BuildConstructorMemberInitializers(symbol),
             HasParameterlessConstructor = symbol.InstanceConstructors.Any(x => x is { Parameters.Length: 0, IsImplicitlyDeclared: false }),
         };
+
+    static string[] BuildConstructorMemberInitializers(INamedTypeSymbol symbol)
+    {
+        var members = new List<string>(capacity: 8);
+
+        var declarations = symbol.DeclaringSyntaxReferences
+            .Select(x => x.GetSyntax())
+            .OfType<StructDeclarationSyntax>()
+            .OrderBy(x => x.SyntaxTree.FilePath, StringComparer.Ordinal)
+            .ThenBy(x => x.SpanStart);
+
+        foreach (var declaration in declarations)
+        foreach (var member in declaration.Members)
+        {
+            if (member is FieldDeclarationSyntax field)
+            {
+                if (field.Modifiers.Any(SyntaxKind.StaticKeyword))
+                    continue;
+
+                if (field.Modifiers.Any(SyntaxKind.ConstKeyword))
+                    continue;
+
+                if (field.Modifiers.Any(SyntaxKind.FixedKeyword))
+                    continue;
+
+                foreach (var variable in field.Declaration.Variables)
+                    if (variable.Initializer is null)
+                        members.Add(variable.Identifier.Text);
+
+                continue;
+            }
+
+            if (member is not PropertyDeclarationSyntax property)
+                continue;
+
+            if (property.Modifiers.Any(SyntaxKind.StaticKeyword))
+                continue;
+
+            if (property.Initializer is not null)
+                continue;
+
+            if (property.ExplicitInterfaceSpecifier is not null)
+                continue;
+
+            if (!IsAutoProperty(property))
+                continue;
+
+            members.Add(property.Identifier.Text);
+        }
+
+        return members.ToArray();
     }
+
+    static bool IsAutoProperty(PropertyDeclarationSyntax property)
+        => property is
+        {
+            ExpressionBody: null,
+            AccessorList.Accessors.Count: > 0,
+        } && property.AccessorList.Accessors.All(x => x is { Body: null, ExpressionBody: null });
 
     static GeneratorInput CombineBaseAndDerived((GeneratorInput Base, ImmutableArray<Derived> Candidates) input, CancellationToken ct)
     {
@@ -364,15 +470,11 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         var candidates = input.Candidates.AsArray();
 
         var firstError = result.GetError();
+
         if (firstError is null)
-        {
             foreach (var candidate in candidates)
-            {
-                firstError = candidate.GetError();
-                if (firstError is not null)
+                if ((firstError = candidate.GetError()) is not null)
                     break;
-            }
-        }
 
         return result with
         {
@@ -387,6 +489,103 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     readonly record struct CandidateSortItem(int CandidateIndex, string CandidateName, bool HasForcedId);
 
     readonly record struct AssignedCandidate(int CandidateIndex, byte AssignedId);
+
+    readonly struct MethodSignatureKey(IMethodSymbol symbol)
+    {
+        public readonly IMethodSymbol Symbol = symbol;
+    }
+
+    sealed class MethodSignatureComparer : IEqualityComparer<MethodSignatureKey>
+    {
+        public static readonly MethodSignatureComparer Instance = new();
+        readonly SymbolEqualityComparer comparer = SymbolEqualityComparer.Default;
+
+        bool IEqualityComparer<MethodSignatureKey>.Equals(MethodSignatureKey left, MethodSignatureKey right)
+        {
+            var leftSymbol = left.Symbol;
+            var rightSymbol = right.Symbol;
+
+            if (!leftSymbol.Name.Equals(rightSymbol.Name, Ordinal))
+                return false;
+
+            if (!comparer.Equals(leftSymbol.ReturnType, rightSymbol.ReturnType))
+                return false;
+
+            var leftParameters = leftSymbol.Parameters;
+            var rightParameters = rightSymbol.Parameters;
+
+            if (leftParameters.Length != rightParameters.Length)
+                return false;
+
+            for (int i = 0; i < leftParameters.Length; i++)
+            {
+                var lp = leftParameters[i];
+                var rp = rightParameters[i];
+
+                if (lp.RefKind != rp.RefKind)
+                    return false;
+
+                if (!comparer.Equals(lp.Type, rp.Type))
+                    return false;
+            }
+
+            return true;
+        }
+
+        int IEqualityComparer<MethodSignatureKey>.GetHashCode(MethodSignatureKey key)
+        {
+            var symbol = key.Symbol;
+
+            unchecked
+            {
+                int hash = StringComparer.Ordinal.GetHashCode(symbol.Name);
+                hash = (hash * 397) ^ comparer.GetHashCode(symbol.ReturnType);
+                foreach (var parameter in symbol.Parameters)
+                {
+                    hash = (hash * 397) ^ (int)parameter.RefKind;
+                    hash = (hash * 397) ^ comparer.GetHashCode(parameter.Type);
+                }
+
+                return hash;
+            }
+        }
+    }
+
+    readonly struct PropertySignatureKey(IPropertySymbol symbol)
+    {
+        public readonly IPropertySymbol Symbol = symbol;
+    }
+
+    sealed class PropertySignatureComparer : IEqualityComparer<PropertySignatureKey>
+    {
+        public static readonly PropertySignatureComparer Instance = new();
+        readonly SymbolEqualityComparer comparer = SymbolEqualityComparer.Default;
+
+        bool IEqualityComparer<PropertySignatureKey>.Equals(PropertySignatureKey left, PropertySignatureKey right)
+        {
+            var leftSymbol = left.Symbol;
+            var rightSymbol = right.Symbol;
+
+            return leftSymbol.Name.Equals(rightSymbol.Name, Ordinal)
+                   && comparer.Equals(leftSymbol.Type, rightSymbol.Type)
+                   && leftSymbol.GetMethod is not null == rightSymbol.GetMethod is not null
+                   && leftSymbol.SetMethod is not null == rightSymbol.SetMethod is not null;
+        }
+
+        int IEqualityComparer<PropertySignatureKey>.GetHashCode(PropertySignatureKey key)
+        {
+            var symbol = key.Symbol;
+
+            unchecked
+            {
+                int hash = StringComparer.Ordinal.GetHashCode(symbol.Name);
+                hash = (hash * 397) ^ comparer.GetHashCode(symbol.Type);
+                hash = (hash * 397) ^ (symbol.GetMethod is not null ? 1 : 0);
+                hash = (hash * 397) ^ (symbol.SetMethod is not null ? 1 : 0);
+                return hash;
+            }
+        }
+    }
 
     static DerivedInput[] BuildDerivedStructs(Derived[] candidates, string interfaceFQN, string rootInterfaceFQN, string headerFQN, string rootHeaderFQN)
     {
@@ -460,8 +659,11 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     FQN = candidate.DerivedFQN,
                     Declaration = candidate.Declaration,
                     AssignedId = assigned.AssignedId,
+                    EstimatedSizeInBytes = candidate.EstimatedSizeInBytesBuilderFunc.Value?.Invoke() ?? -1,
+                    HasDirectHeader = candidate.HasDirectHeaderFunc.Value?.Invoke(headerFQN) is true,
                     PubliclyImplementedMembers = deferredInput.PublicMembers,
                     MemberNames = deferredInput.MemberNames,
+                    ConstructorMemberInitializers = deferredInput.ConstructorMemberInitializers,
                     HasParameterlessConstructor = deferredInput.HasParameterlessConstructor,
                 }
             );
@@ -504,6 +706,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
         return false;
     }
+
+    static bool HasDirectHeader(INamedTypeSymbol symbol, string headerFQN)
+        => GetFirstHeaderFieldType(symbol)?.FQN.Equals(headerFQN, Ordinal) ?? false;
 
     static byte GetNextAvailableId(HashSet<byte> usedIds, ref byte nextId)
     {
@@ -574,6 +779,13 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         var derivedStructs = input.DerivedStructsBuilderFunc.Value?.Invoke() ?? [];
         var interfaceMembers = input.InterfaceMembersBuilderFunc.Value?.Invoke() ?? [];
         var headerFields = input.HeaderFieldsBuilderFunc.Value?.Invoke() ?? [];
+        int wrapperSizeInBytes = input.EstimatedBaseSizeInBytes;
+
+        foreach (var derived in derivedStructs)
+            if (derived.EstimatedSizeInBytes > wrapperSizeInBytes)
+                wrapperSizeInBytes = derived.EstimatedSizeInBytes;
+
+        bool emitWrapper = !input.IsGenericType && wrapperSizeInBytes > 0;
 
         src.Line.Write(Alias.UsingInline);
         src.Line.Write($"using {m}UnsafeUtility = global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility;");
@@ -622,7 +834,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     src.Line.Write($"public {derived.Name}()");
                     using (src.Braces)
                     {
-                        src.Line.Write("this = default;");
+                        foreach (var initializer in derived.ConstructorMemberInitializers.AsSpan())
+                            src.Line.Write($"{initializer} = default;");
+
                         src.Line.Write($"{m}UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}>(ref this).{input.TypeIDFieldName} = TypeID;");
                     }
                 }
@@ -758,6 +972,90 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Write(';').Linebreak();
             }
 
+            if (emitWrapper)
+            {
+                src.Line.Write($"[global::System.Runtime.InteropServices.StructLayout(global::System.Runtime.InteropServices.LayoutKind.Explicit, Size = {wrapperSizeInBytes})]");
+                src.Line.Write("public struct Wrapper : " + input.InterfaceFQN);
+                using (src.Braces)
+                {
+                    src.Line.Write("[global::System.Runtime.InteropServices.FieldOffset(0)]");
+                    src.Line.Write($"public {input.BaseTypeFQN} Header;");
+                    src.Linebreak();
+
+                    foreach (var headerField in headerFields)
+                    {
+                        if (input.IsRootTypeIDOwner)
+                            if (headerField.Name.Equals(input.TypeIDFieldName, Ordinal))
+                                continue;
+
+                        if (headerField.Name.Equals("Header", Ordinal))
+                            continue;
+
+                        src.Line.Write($"public {headerField.TypeFQN} {headerField.Name}");
+                        using (src.Braces)
+                        {
+                            if (headerField.CanGet)
+                                src.Line.Write($"get => Header.{headerField.Name};");
+
+                            if (headerField.CanSet)
+                                src.Line.Write($"set => Header.{headerField.Name} = value;");
+                        }
+
+                        src.Linebreak();
+                    }
+
+                    foreach (var member in interfaceMembers)
+                    {
+                        static string GetParameterName(string parameterDeclaration)
+                            => parameterDeclaration.LastIndexOf(' ') switch
+                            {
+                                0     => parameterDeclaration,
+                                var i => parameterDeclaration[(i + 1)..]
+                            };
+
+                        var parametersEnumerable = member.Parameters
+                            .AsArray()
+                            .Zip(member.ParameterRefKinds.AsArray().Cast<RefKind>(), (call, refKind) => (call, refKind))
+                            .Select(x => $"{x.refKind.AsRefString()}{x.call}");
+
+                        string parameters = parametersEnumerable.Join(", ");
+
+                        var callParametersEnumerable = member.Parameters
+                            .AsArray()
+                            .Zip(member.ParameterRefKinds.AsArray().Cast<RefKind>(), (call, refKind) => (call, refKind))
+                            .Select(x => $"{x.refKind.AsRefString()}{GetParameterName(x.call)}");
+
+                        string callParameters = callParametersEnumerable.Join(", ");
+                        string callParametersWithInvoke = $"({callParameters})";
+
+                        if (!member.IsProperty)
+                        {
+                            src.Line.Write($"public {member.ReturnTypeFQN} {member.Name}({parameters})");
+                            using (src.Indent)
+                                src.Line.Write($"=> Header.{member.Name}{callParametersWithInvoke}");
+
+                            src.Write(';').Linebreak();
+                            src.Linebreak();
+                            continue;
+                        }
+
+                        src.Line.Write($"public {member.ReturnTypeFQN} {member.Name}");
+                        using (src.Braces)
+                        {
+                            if (member.CanGet)
+                                src.Line.Write($"get => Header.{member.Name}();");
+
+                            if (member.CanSet)
+                                src.Line.Write($"set => Header.{member.Name}(value);");
+                        }
+
+                        src.Linebreak();
+                    }
+                }
+
+                src.Linebreak();
+            }
+
             foreach (var _ in input.BaseDeclaration.AsSpan())
             {
                 src.DecreaseIndent();
@@ -816,110 +1114,189 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 bool emitGenericInvokeHelper = false;
                 string genericInvokeName = $"{member.Name}_GenericInvoke";
 
-                src.Line.Write($"public static unsafe {member.ReturnTypeFQN} {member.Name}(this ref {input.BaseTypeFQN} self{methodParameters})");
-                if (member.ReturnTypeFQN is "void")
+                bool emitGetter = !member.IsProperty || member.CanGet;
+                if (emitGetter)
                 {
-                    using (src.Braces)
+                    src.Line.Write($"public static unsafe {member.ReturnTypeFQN} {member.Name}(this ref {input.BaseTypeFQN} self{methodParameters})");
+                    if (member.ReturnTypeFQN is "void")
                     {
-                        src.Line.Write($"switch (self.{input.TypeIDFieldName})");
                         using (src.Braces)
                         {
-                            foreach (var derived in derivedStructs)
+                            src.Line.Write($"switch (self.{input.TypeIDFieldName})");
+                            using (src.Braces)
                             {
-                                src.Line.Write($"case {input.TypeIDEnumFQN}.{derived.Name}:");
-                                using (src.Indent)
+                                foreach (var derived in derivedStructs)
                                 {
-                                    string comma = member is { IsProperty: false, Parameters.Length: > 0 }
-                                        ? ", "
-                                        : "";
+                                    src.Line.Write($"case {input.TypeIDEnumFQN}.{derived.Name}:");
+                                    using (src.Indent)
+                                    {
+                                        string comma = member is { IsProperty: false, Parameters.Length: > 0 }
+                                            ? ", "
+                                            : "";
 
-                                    if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
-                                    {
-                                        src.Line.Write($"{m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke}; return;");
-                                    }
-                                    else
-                                    {
-                                        src.Line.Write($"{genericInvokeName}(ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}); return;");
-                                        emitGenericInvokeHelper = true;
+                                        if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
+                                        {
+                                            src.Line.Write($"{m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke}; return;");
+                                        }
+                                        else
+                                        {
+                                            src.Line.Write($"{genericInvokeName}(ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}); return;");
+                                            emitGenericInvokeHelper = true;
+                                        }
                                     }
                                 }
-                            }
 
-                            src.Line.Write("default:");
-                            using (src.Indent)
+                                src.Line.Write("default:");
+                                using (src.Indent)
+                                {
+                                    var outParameters = member.Parameters
+                                        .AsArray()
+                                        .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call: GetParameterName(call), refKind))
+                                        .Where(x => x.refKind is (byte)RefKind.Out)
+                                        .ToArray();
+
+                                    foreach (var (call, _) in outParameters)
+                                        src.Line.Write($"{call} = default;");
+
+                                    if (outParameters.Length > 0)
+                                        emitWithAssignHelper = true;
+
+                                    src.Line.Write($"ThrowUnknownTypeException(self.{input.TypeIDFieldName}); return;");
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        using (src.Indent)
+                        {
+                            src.Line.Write($"=> self.{input.TypeIDFieldName} switch");
+                            using (src.Braces)
                             {
+                                foreach (var derived in derivedStructs)
+                                {
+                                    src.Line.Write($"{input.TypeIDEnumFQN}.{derived.Name}");
+                                    using (src.Indent)
+                                    {
+                                        string comma = member is { IsProperty: false, Parameters.Length: > 0 }
+                                            ? ", "
+                                            : "";
+
+                                        if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
+                                        {
+                                            src.Line.Write($"=> {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke},");
+                                        }
+                                        else
+                                        {
+                                            src.Line.Write($"=> {genericInvokeName}(ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}),");
+                                            emitGenericInvokeHelper = true;
+                                        }
+                                    }
+                                }
+
                                 var outParameters = member.Parameters
                                     .AsArray()
                                     .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call: GetParameterName(call), refKind))
                                     .Where(x => x.refKind is (byte)RefKind.Out)
                                     .ToArray();
 
-                                foreach (var (call, _) in outParameters)
-                                    src.Line.Write($"{call} = default;");
-
                                 if (outParameters.Length > 0)
                                     emitWithAssignHelper = true;
 
-                                src.Line.Write($"ThrowUnknownTypeException(self.{input.TypeIDFieldName}); return;");
+                                string outInit = outParameters
+                                    .Select(x => $".WithAssign(out {x.call})")
+                                    .Join(", ");
+
+                                src.Line.Write($"_ => *({member.ReturnTypeFQN}*)ThrowUnknownTypeException(self.{input.TypeIDFieldName}){outInit},");
                             }
+
+                            src.Write(';');
                         }
                     }
-                }
-                else
-                {
-                    using (src.Indent)
+
+                    src.Linebreak();
+
+                    if (emitGenericInvokeHelper)
                     {
-                        src.Line.Write($"=> self.{input.TypeIDFieldName} switch");
-                        using (src.Braces)
+                        src.Line.Write($"static {member.ReturnTypeFQN} {genericInvokeName}<T>(this ref T self{methodParameters}) where T : struct, {input.InterfaceFQN}");
+                        using (src.Indent)
+                            src.Line.Write($"=> self.{member.Name}{callParametersWithInvoke};");
+
+                        src.Linebreak();
+                    }
+                }
+
+                if (member is not { IsProperty: true, CanSet: true })
+                    continue;
+
+                string setterGenericInvokeName = $"{member.Name}_Set_GenericInvoke";
+                src.Line.Write($"public static unsafe void {member.Name}(this ref {input.BaseTypeFQN} self, {member.ReturnTypeFQN} value)");
+                using (src.Braces)
+                {
+                    src.Line.Write($"switch (self.{input.TypeIDFieldName})");
+                    using (src.Braces)
+                    {
+                        foreach (var derived in derivedStructs)
                         {
-                            foreach (var derived in derivedStructs)
+                            src.Line.Write($"case {input.TypeIDEnumFQN}.{derived.Name}:");
+                            using (src.Indent)
                             {
-                                src.Line.Write($"{input.TypeIDEnumFQN}.{derived.Name}");
-                                using (src.Indent)
-                                {
-                                    string comma = member is { IsProperty: false, Parameters.Length: > 0 }
-                                        ? ", "
-                                        : "";
-
-                                    if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
-                                    {
-                                        src.Line.Write($"=> {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke},");
-                                    }
-                                    else
-                                    {
-                                        src.Line.Write($"=> {genericInvokeName}(ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self){comma}{callParameters}),");
-                                        emitGenericInvokeHelper = true;
-                                    }
-                                }
+                                if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
+                                    src.Line.Write($"{m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name} = value; return;");
+                                else
+                                    src.Line.Write($"{setterGenericInvokeName}(ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self), value); return;");
                             }
-
-                            var outParameters = member.Parameters
-                                .AsArray()
-                                .Zip(member.ParameterRefKinds.AsArray(), (call, refKind) => (call: GetParameterName(call), refKind))
-                                .Where(x => x.refKind is (byte)RefKind.Out)
-                                .ToArray();
-
-                            if (outParameters.Length > 0)
-                                emitWithAssignHelper = true;
-
-                            string outInit = outParameters
-                                .Select(x => $".WithAssign(out {x.call})")
-                                .Join(", ");
-
-                            src.Line.Write($"_ => *({member.ReturnTypeFQN}*)ThrowUnknownTypeException(self.{input.TypeIDFieldName}){outInit},");
                         }
 
-                        src.Write(';');
+                        src.Line.Write("default:");
+                        using (src.Indent)
+                            src.Line.Write($"ThrowUnknownTypeException(self.{input.TypeIDFieldName}); return;");
                     }
                 }
 
                 src.Linebreak();
+                src.Line.Write($"static void {setterGenericInvokeName}<T>(this ref T self, {member.ReturnTypeFQN} value) where T : struct, {input.InterfaceFQN}");
+                using (src.Indent)
+                    src.Line.Write($"=> self.{member.Name} = value;");
 
-                if (emitGenericInvokeHelper)
+                src.Linebreak();
+            }
+
+            // AsDerivedStruct methods
+            if (emitWrapper)
+            {
+                src.Line.Write($"public static unsafe ref {input.BaseTypeFQN}.Wrapper Wrap(this ref {input.BaseTypeFQN} self)");
+                using (src.Indent)
+                    src.Line.Write($"=> ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {input.BaseTypeFQN}.Wrapper>(ref self);");
+
+                src.Linebreak();
+
+                foreach (var derived in derivedStructs)
                 {
-                    src.Line.Write($"static {member.ReturnTypeFQN} {genericInvokeName}<T>(this ref T self{methodParameters}) where T : struct, {input.InterfaceFQN}");
+                    if (!derived.HasDirectHeader)
+                        continue;
+
+                    src.Line.Write($"public static unsafe ref {input.BaseTypeFQN}.Wrapper Wrap(this ref {derived.FQN} self)");
                     using (src.Indent)
-                        src.Line.Write($"=> self.{member.Name}{callParametersWithInvoke};");
+                        src.Line.Write($"=> ref {m}UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}.Wrapper>(ref self);");
+
+                    src.Linebreak();
+                }
+            }
+
+            if (input.HasParentHeader)
+            {
+                src.Line.Write($"public static unsafe ref {input.ParentTypeFQN} As{input.ParentTypeName}(this ref {input.BaseTypeFQN} self)");
+                using (src.Indent)
+                    src.Line.Write($"=> ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {input.ParentTypeFQN}>(ref self);");
+
+                src.Linebreak();
+
+                if (emitWrapper && !input.ParentIsGenericType)
+                {
+                    src.Line.Write($"public static unsafe ref {input.ParentTypeFQN}.Wrapper As{input.ParentTypeName}(this ref {input.BaseTypeFQN}.Wrapper self)");
+                    using (src.Indent)
+                        src.Line.Write($"=> ref {m}UnsafeUtility.As<{input.BaseTypeFQN}.Wrapper, {input.ParentTypeFQN}.Wrapper>(ref self);");
 
                     src.Linebreak();
                 }
@@ -938,6 +1315,23 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
                     src.Write("\n#endif");
                     src.Line.Write($"return ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self);");
+                }
+
+                src.Linebreak();
+
+                if (!emitWrapper)
+                    continue;
+
+                src.Line.Write($"public static unsafe ref {derived.FQN} As{derived.Name}(this ref {input.BaseTypeFQN}.Wrapper self)");
+                using (src.Braces)
+                {
+                    src.Write("\n#if DEBUG");
+                    src.Line.Write($"if (self.Header.{input.TypeIDFieldName} is not {input.TypeIDEnumFQN}.{derived.Name})");
+                    using (src.Indent)
+                        src.Line.Write($"ThrowUnexpectedTypeException(\"{derived.Name}\", self.Header.TypeName);");
+
+                    src.Write("\n#endif");
+                    src.Line.Write($"return ref {m}UnsafeUtility.As<{input.BaseTypeFQN}.Wrapper, {derived.FQN}>(ref self);");
                 }
 
                 src.Linebreak();

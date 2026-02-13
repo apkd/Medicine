@@ -1,6 +1,8 @@
 using System;
+using System.Runtime.InteropServices;
 using Medicine;
 using NUnit.Framework;
+using Unity.Collections.LowLevel.Unsafe;
 
 public partial class UnionTests
 {
@@ -246,5 +248,62 @@ public partial class UnionTests
 
         triangle.Header.SetPublicGetPrivateSet(41);
         Assert.That(triangle.PublicGetPrivateSet, Is.EqualTo(41));
+    }
+
+    [Test]
+    public void Wrapper_IsGenerated_WithExplicitLayout_AndForwardsCalls()
+    {
+        var wrapperType = typeof(Shape).GetNestedType("Wrapper");
+        Assert.That(wrapperType, Is.Not.Null);
+
+        var structLayout = wrapperType!.StructLayoutAttribute;
+        Assert.That(structLayout, Is.Not.Null);
+        Assert.That(structLayout!.Value, Is.EqualTo(LayoutKind.Explicit));
+
+        var expectedSize = Math.Max(UnsafeUtility.SizeOf<Triangle>(), UnsafeUtility.SizeOf<Square>());
+        Assert.That(structLayout.Size, Is.EqualTo(expectedSize));
+
+        var wrapper = new Shape.Wrapper
+        {
+            Header = new()
+            {
+                TypeID = Shape.TypeIDs.Triangle,
+            },
+            Generation = 5,
+        };
+
+        Assert.That(wrapper.Header.Generation, Is.EqualTo(5));
+
+        wrapper.Header.Generation = 8;
+        Assert.That(wrapper.Generation, Is.EqualTo(8));
+
+        Assert.That(wrapper.GetOnly, Is.EqualTo(101));
+        wrapper.SetOnly = 21;
+        Assert.That(wrapper.Header.ReadSetOnly(), Is.EqualTo(21));
+
+        wrapper.PrivateGetPublicSet = 31;
+        Assert.That(wrapper.Header.ReadPrivateGetPublicSet(), Is.EqualTo(31));
+
+        wrapper.Header.SetPublicGetPrivateSet(41);
+        Assert.That(wrapper.PublicGetPrivateSet, Is.EqualTo(41));
+
+        ref var asTriangle = ref wrapper.AsTriangle();
+        Assert.That(asTriangle.Sides, Is.EqualTo(3));
+
+        var triangle = new Triangle { Header = { TypeID = Shape.TypeIDs.Triangle } };
+        ref var wrappedTriangle = ref triangle.Wrap();
+        wrappedTriangle.Generation = 13;
+        Assert.That(triangle.Header.Generation, Is.EqualTo(13));
+
+        ref var wrappedHeader = ref triangle.Header.Wrap();
+        wrappedHeader.Generation = 17;
+        Assert.That(triangle.Header.Generation, Is.EqualTo(17));
+
+        Shape.Interface polymorphic = wrapper;
+        Assert.That(polymorphic.Sides, Is.EqualTo(3));
+        Assert.That(polymorphic.Perimeter(2), Is.EqualTo(6));
+        Assert.That(polymorphic.TryGetScaledPerimeter(3, out var perimeter), Is.True);
+        Assert.That(perimeter, Is.EqualTo(9));
+        Assert.That(polymorphic.GetResult(10).Value, Is.EqualTo(13));
     }
 }
