@@ -2,7 +2,6 @@ using System.ComponentModel;
 using UnityEngine;
 using UnityEngine.Jobs;
 using static System.ComponentModel.EditorBrowsableState;
-using Component = UnityEngine.Component;
 
 // ReSharper disable UnusedType.Global
 // ReSharper disable UnusedMember.Global
@@ -13,23 +12,34 @@ namespace Medicine.Internal
     public static partial class Storage
     {
         [EditorBrowsable(Never)]
-        public static class TransformAccess<T> where T : Component
+        public static class TransformAccess<T> where T : class
         {
             public static TransformAccessArray Transforms;
 
-            public static void Initialize(int initialCapacity, int desiredJobCount)
+            // ReSharper disable once UnusedMethodReturnValue.Global
+            public static int Initialize(int initialCapacity, int desiredJobCount)
             {
                 if (Transforms.isCreated)
-                    return;
+                    return 0;
 
                 Transforms = new(initialCapacity, desiredJobCount);
 #if UNITY_EDITOR
                 beforeAssemblyUnload += static () => Transforms.Dispose();
 #endif
+                return 0;
             }
 
             public static void Register(Transform transform)
-                => Transforms.Add(transform);
+            {
+                if (!Transforms.isCreated)
+                {
+                    // initialize with default settings when no statically-provided capacity
+                    // and job count values were provided
+                    Initialize(64, -1);
+                }
+
+                Transforms.Add(transform);
+            }
 
             public static void Unregister(int transformIndex)
             {

@@ -76,7 +76,7 @@ public readonly struct AttributeConstructorArgumentsDict
             {
                 if (arg.NameColon is not null)
                 {
-                    var name = arg.NameColon.Name.Identifier.ValueText;
+                    var name = arg.NameColon.Name.Text;
                     parameterOrdinalsByName ??= BuildParameterOrdinals();
                     if (parameterOrdinalsByName.TryGetValue(name, out int namedOrdinal))
                         ordinals.Add(namedOrdinal);

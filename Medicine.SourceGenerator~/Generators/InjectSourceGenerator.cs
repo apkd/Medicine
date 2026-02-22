@@ -51,13 +51,14 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         isEnabledByDefault: true
     );
 
-    record struct GeneratorInput() : IGeneratorTransformOutput
+    record struct GeneratorInput() : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
         public LocationInfo? SourceGeneratorErrorLocation { get; set; }
 
         public ActivePreprocessorSymbolNames Symbols;
+        public bool ShouldEmitDocs;
         public string? InjectMethodName;
         public string? InjectMethodOrLocalFunctionName;
         public bool IsSealed;
@@ -107,8 +108,6 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var generatorEnvironment = context.GetGeneratorEnvironment();
-
         var syntaxProvider = context.SyntaxProvider
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: InjectAttributeMetadataName,
@@ -121,12 +120,13 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     },
                 transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
             )
-            .Combine(generatorEnvironment)
+            .CombineWithGeneratorEnvironment(context)
             .SelectEx((x, ct) =>
                 {
-                    var input = TransformSyntaxContext(x.Left.Context.Value, x.Right.KnownSymbols, ct);
-                    input.MakePublic ??= x.Right.MedicineSettings.MakePublic;
-                    input.Symbols = x.Right.MedicineSettings.PreprocessorSymbolNames;
+                    var input = TransformSyntaxContext(x.Values.Context, x.Environment.KnownSymbols, ct);
+                    input.MakePublic ??= x.Environment.MedicineSettings.MakePublic;
+                    input.Symbols = x.Environment.PreprocessorSymbols;
+                    input.ShouldEmitDocs = x.Environment.ShouldEmitDocs;
                     return input;
                 }
             );
@@ -175,7 +175,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
         if (targetNode.SyntaxTree.GetRoot(ct) is CompilationUnitSyntax compilationUnit)
         {
-            var list = new List<string>();
+            using var r1 = Scratch.RentA<List<string>>(out var list);
 
             foreach (var usingDirectiveSyntax in compilationUnit.Usings)
                 list.Add(usingDirectiveSyntax.ToString());
@@ -187,8 +187,8 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             .GetAttributeConstructorArguments(ct)
             .Select(x => x.Get<bool>("makePublic", null));
 
-        output.IsSealed = classDecl.Modifiers.Any(SyntaxKind.SealedKeyword);
-        output.IsStatic = injectMethodModifiers.Any(SyntaxKind.StaticKeyword);
+        output.IsSealed = classDecl.Modifiers.IsSealed;
+        output.IsStatic = injectMethodModifiers.IsStatic;
 
         // defer the expensive calls to the source gen phase
 
@@ -383,7 +383,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         => right is MemberAccess
                            {
                                Expression: { } classIdentifier,
-                               Name.Identifier.ValueText: { Length: > 0 } propertyNameIdentifierText,
+                               Name.Text: { Length: > 0 } propertyNameIdentifierText,
                            }
                            && propertyNameIdentifierText == propertyName
                            && context.SemanticModel.GetSymbolInfo(classIdentifier, ct).Symbol is ITypeSymbol accessedClassTypeSymbol
@@ -402,7 +402,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                                Expression: MemberAccess
                                {
                                    Expression: { } findClassIdentifier,
-                                   Name.Identifier.ValueText: var identifierText,
+                                   Name.Text: var identifierText,
                                },
                            }
                            && context.SemanticModel.GetSymbolInfo(findClassIdentifier, ct).Symbol is ITypeSymbol findClassType
@@ -415,7 +415,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     {
                         if (MatchOption(ref expression, IsOptional, ".Optional()".AsSpan()))
                         {
-                            if (right is Invocation { Expression: MemberAccess { Expression: { } inner, Name.Identifier.ValueText: "Optional" } })
+                            if (right is Invocation { Expression: MemberAccess { Expression: { } inner, Name.Text: "Optional" } })
                                 right = inner;
 
                             continue;
@@ -501,7 +501,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         }
                         else
                         {
-                            if (right is MemberAccess { Name.Identifier.ValueText: "Instance" } memberAccess)
+                            if (right is MemberAccess { Name.Text: "Instance" } memberAccess)
                                 if (context.SemanticModel.GetTypeInfo(memberAccess.Expression, ct).Type is { } symbol)
                                     typeSymbol = symbol;
                         }
@@ -522,7 +522,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         {
                             var first = right
                                 .DescendantNodesAndSelf()
-                                .FirstOrDefault(x => x is MemberAccess { Expression: Identifier, Name.Identifier.ValueText: "Instances" });
+                                .FirstOrDefault(x => x is MemberAccess { Expression: Identifier, Name.Text: "Instances" });
 
                             if (first is MemberAccess memberAccessExpr)
                                 if (context.SemanticModel.GetTypeInfo(memberAccessExpr.Expression, ct).Type is { } symbol)
@@ -591,77 +591,78 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
                 string[] GetEditModeLocalDeclarations(AssignmentExpressionSyntax assignment)
                 {
-                    var declarations = new List<(int SpanStart, string Statement)>();
-                    var seen = new HashSet<int>();
-                    var visitedLocals = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
-
-                    void AddDeclaration(int spanStart, string statement)
+                    using (Scratch.RentA<List<(int SpanStart, string Statement)>>(out var declarations))
+                    using (Scratch.RentA<HashSet<int>>(out var seen))
+                    using (Scratch.RentA<HashSet<ISymbol>>(out var visitedLocals))
                     {
-                        if (seen.Add(spanStart))
-                            declarations.Add((spanStart, statement));
-                    }
-
-                    void AddDependencies(Expression expr)
-                    {
-                        foreach (var identifier in expr.DescendantNodesAndSelf().OfType<Identifier>())
+                        void AddDeclaration(int spanStart, string statement)
                         {
-                            if (context.SemanticModel.GetSymbolInfo(identifier, ct).Symbol is not ILocalSymbol localSymbol)
-                                continue;
-
-                            AddLocal(localSymbol);
+                            if (seen.Add(spanStart))
+                                declarations.Add((spanStart, statement));
                         }
-                    }
 
-                    void AddLocal(ILocalSymbol localSymbol)
-                    {
-                        if (!visitedLocals.Add(localSymbol))
-                            return;
-
-                        foreach (var syntaxRef in localSymbol.DeclaringSyntaxReferences)
+                        void AddDependencies(Expression expr)
                         {
-                            var declSyntax = syntaxRef.GetSyntax(ct);
-
-                            if (!methodDecl.Span.Contains(declSyntax.SpanStart))
-                                continue;
-
-                            if (declSyntax is VariableDeclaratorSyntax varDeclarator)
+                            foreach (var identifier in expr.DescendantNodesAndSelf().OfType<Identifier>())
                             {
-                                if (varDeclarator.FirstAncestorOrSelf<LocalDeclarationStatementSyntax>() is { } localDeclStmt)
-                                    AddDeclaration(localDeclStmt.SpanStart, localDeclStmt.ToString());
-                                else if (varDeclarator.Parent is VariableDeclarationSyntax varDecl)
-                                    AddDeclaration(varDecl.SpanStart, $"{varDecl};");
+                                if (context.SemanticModel.GetSymbolInfo(identifier, ct).Symbol is not ILocalSymbol localSymbol)
+                                    continue;
 
-                                if (varDeclarator.Initializer?.Value is { } initExpr)
-                                    AddDependencies(initExpr);
-
-                                continue;
-                            }
-
-                            if (declSyntax is LocalDeclarationStatementSyntax localDecl)
-                            {
-                                AddDeclaration(localDecl.SpanStart, localDecl.ToString());
-
-                                var declarator = localDecl.Declaration.Variables
-                                    .FirstOrDefault(x => x.Identifier.ValueText == localSymbol.Name);
-
-                                if (declarator?.Initializer?.Value is { } initExpr)
-                                    AddDependencies(initExpr);
+                                AddLocal(localSymbol);
                             }
                         }
+
+                        void AddLocal(ILocalSymbol localSymbol)
+                        {
+                            if (!visitedLocals.Add(localSymbol))
+                                return;
+
+                            foreach (var syntaxRef in localSymbol.DeclaringSyntaxReferences)
+                            {
+                                var declSyntax = syntaxRef.GetSyntax(ct);
+
+                                if (!methodDecl.Span.Contains(declSyntax.SpanStart))
+                                    continue;
+
+                                if (declSyntax is VariableDeclaratorSyntax varDeclarator)
+                                {
+                                    if (varDeclarator.FirstAncestorOrSelf<LocalDeclarationStatementSyntax>() is { } localDeclStmt)
+                                        AddDeclaration(localDeclStmt.SpanStart, localDeclStmt.ToString());
+                                    else if (varDeclarator.Parent is VariableDeclarationSyntax varDecl)
+                                        AddDeclaration(varDecl.SpanStart, $"{varDecl};");
+
+                                    if (varDeclarator.Initializer?.Value is { } initExpr)
+                                        AddDependencies(initExpr);
+
+                                    continue;
+                                }
+
+                                if (declSyntax is LocalDeclarationStatementSyntax localDecl)
+                                {
+                                    AddDeclaration(localDecl.SpanStart, localDecl.ToString());
+
+                                    var declarator = localDecl.Declaration.Variables
+                                        .FirstOrDefault(x => x.Identifier.ValueText == localSymbol.Name);
+
+                                    if (declarator?.Initializer?.Value is { } initExpr)
+                                        AddDependencies(initExpr);
+                                }
+                            }
+                        }
+
+                        AddDependencies(assignment.Right);
+
+                        if (declarations.Count == 0)
+                            return [];
+
+                        declarations.Sort(static (a, b) => a.SpanStart.CompareTo(b.SpanStart));
+
+                        var result = new string[declarations.Count];
+                        for (int i = 0; i < declarations.Count; i++)
+                            result[i] = NormalizeLocalDeclarationText(declarations[i].Statement);
+
+                        return result;
                     }
-
-                    AddDependencies(assignment.Right);
-
-                    if (declarations.Count == 0)
-                        return [];
-
-                    declarations.Sort(static (a, b) => a.SpanStart.CompareTo(b.SpanStart));
-
-                    var result = new string[declarations.Count];
-                    for (int i = 0; i < declarations.Count; i++)
-                        result[i] = NormalizeLocalDeclarationText(declarations[i].Statement);
-
-                    return result;
                 }
             }
         );
@@ -711,6 +712,8 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
+        src.ShouldEmitDocs = input.ShouldEmitDocs;
+
         var expressions = input.InitExpressionInfoArrayBuilderFunc.Value();
 
         foreach (var group in expressions.GroupBy(x => x.PropertyName).Where(x => x.Count() > 1))
@@ -736,7 +739,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
         string className = input.ClassName.Value();
 
-        var deferredLines = new List<string>();
+        using var r1 = Scratch.RentA<List<string>>(out var deferredLines);
 
         void Defer(string line)
             => deferredLines.Add(line);
@@ -794,37 +797,37 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             void OpenListAndAppendOptionalDescription(string nullIf)
             {
                 if (x.Flags.Has(IsOptional))
-                    src.Line.Write($"/// This code-generated property is marked as <b>optional</b>:");
+                    src.Doc?.Write($"/// This code-generated property is marked as <b>optional</b>:");
                 else if (x.Flags.Has(NeedsNullCheck))
-                    src.Line.Write($"/// This code-generated property is checked for <c>null</c>:");
+                    src.Doc?.Write($"/// This code-generated property is checked for <c>null</c>:");
 
-                src.Line.Write($"/// <list type=\"bullet\">");
+                src.Doc?.Write($"/// <list type=\"bullet\">");
                 if (x.Flags.Has(IsOptional))
                 {
-                    src.Line.Write($"/// <item>The getter will <b>silently</b> return <c>null</c> if {nullIf}.</item>");
+                    src.Doc?.Write($"/// <item>The getter will <b>silently</b> return <c>null</c> if {nullIf}.</item>");
                     if (x.Flags.Has(IsOptionalViaComment))
-                        src.Line.Write($"/// <item>Remove <c>// optional</c> comment from the end of the assignment to re-enable the null check + error log. </item>");
+                        src.Doc?.Write($"/// <item>Remove <c>// optional</c> comment from the end of the assignment to re-enable the null check + error log. </item>");
                     else
-                        src.Line.Write($"/// <item>Remove <c>.Optional()</c> call from the end of the assignment to re-enable the null check + error log. </item>");
+                        src.Doc?.Write($"/// <item>Remove <c>.Optional()</c> call from the end of the assignment to re-enable the null check + error log. </item>");
                 }
                 else if (x.Flags.Has(NeedsNullCheck))
                 {
-                    src.Line.Write($"/// <item>The getter <b>will log an error</b> and return <c>null</c> if {nullIf}.</item>");
-                    src.Line.Write($"/// <item>Append <c>.Optional()</c> call or a <c>// optional</c> comment at the end of the assignment to suppress the null check + error log. </item>");
+                    src.Doc?.Write($"/// <item>The getter <b>will log an error</b> and return <c>null</c> if {nullIf}.</item>");
+                    src.Doc?.Write($"/// <item>Append <c>.Optional()</c> call or a <c>// optional</c> comment at the end of the assignment to suppress the null check + error log. </item>");
                 }
                 else if (x.Flags.Has(IsArray))
                 {
-                    src.Line.Write($"/// <item>The getter will never return <c>null</c> - will always fall back to an empty array.</item>");
+                    src.Doc?.Write($"/// <item>The getter will never return <c>null</c> - will always fall back to an empty array.</item>");
                 }
             }
 
             // handle unrecognized types
             if (x.TypeFQN is null)
             {
-                src.Line.Write($"/// <summary>");
-                src.Line.Write($"/// <p><b>The source generator was unable to determine the type of this property.</b></p>");
-                src.Line.Write($"/// <p>Make sure that the assignment expression is correct, and that it isn't referring to other code-generated properties.</p>");
-                src.Line.Write($"/// </summary>");
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// <p><b>The source generator was unable to determine the type of this property.</b></p>");
+                src.Doc?.Write($"/// <p>Make sure that the assignment expression is correct, and that it isn't referring to other code-generated properties.</p>");
+                src.Doc?.Write($"/// </summary>");
                 AppendInjectionDeclaredIn();
                 src.Line.Write($"{@static}object {x.PropertyName};");
                 src.Linebreak();
@@ -842,13 +845,13 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             {
                 if (input.Symbols.Has(UNITY_EDITOR))
                 {
-                    src.Line.Write($"/// <summary> Provides access to the active <see cref=\"{x.TypeXmlDocId}\"/> singleton instance. </summary>");
-                    src.Line.Write($"/// <remarks>");
+                    src.Doc?.Write($"/// <summary> Provides access to the active <see cref=\"{x.TypeXmlDocId}\"/> singleton instance. </summary>");
+                    src.Doc?.Write($"/// <remarks>");
                     OpenListAndAppendOptionalDescription(nullIf: "the singleton instance could not be found");
-                    src.Line.Write($"/// </list>");
-                    src.Line.Write($"/// Additional notes:");
-                    src.Line.Write($"/// <inheritdoc cref=\"{x.TypeFQN}.Instance\"/>");
-                    src.Line.Write($"/// </remarks>");
+                    src.Doc?.Write($"/// </list>");
+                    src.Doc?.Write($"/// Additional notes:");
+                    src.Doc?.Write($"/// <inheritdoc cref=\"{x.TypeFQN}.Instance\"/>");
+                    src.Doc?.Write($"/// </remarks>");
                     AppendInjectionDeclaredIn();
                 }
 
@@ -869,7 +872,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             {
                 if (input.Symbols.Has(UNITY_EDITOR))
                 {
-                    src.Line.Write($"/// <inheritdoc cref=\"{x.TypeFQN}.Instances\"/>");
+                    src.Doc?.Write($"/// <inheritdoc cref=\"{x.TypeFQN}.Instances\"/>");
                     AppendInjectionDeclaredIn();
                 }
 
@@ -899,20 +902,20 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
                 if (input.Symbols.Has(UNITY_EDITOR))
                 {
-                    src.Line.Write($"/// <summary> Cached <see cref=\"{x.TypeXmlDocId}\"/> {label}.");
-                    src.Line.Write($"/// <br/>Initialized from expression: <c>{x.InitExpression.HtmlEncode()}</c></summary>");
-                    src.Line.Write($"/// <remarks>");
+                    src.Doc?.Write($"/// <summary> Cached <see cref=\"{x.TypeXmlDocId}\"/> {label}.");
+                    src.Doc?.Write($"/// <br/>Initialized from expression: <c>{x.InitExpression.HtmlEncode()}</c></summary>");
+                    src.Doc?.Write($"/// <remarks>");
                     OpenListAndAppendOptionalDescription(nullIf: "the component could not be found");
                     if (x.TypeFQN?.StartsWith("global::Medicine.Internal.ComponentEnumerable<", Ordinal) is true)
-                        src.Line.Write($"/// <item> This struct lazily enumerates all components of the given type.</item>");
+                        src.Doc?.Write($"/// <item> This struct lazily enumerates all components of the given type.</item>");
                     else if (x.TypeFQN?.StartsWith("global::Medicine.Internal.ComponentsInSceneEnumerable<", Ordinal) is true)
-                        src.Line.Write($"/// <item> This struct lazily enumerates all components of the given type that exist in the given scene.</item>");
+                        src.Doc?.Write($"/// <item> This struct lazily enumerates all components of the given type that exist in the given scene.</item>");
                     else if (x.Flags.Has(IsLazy))
-                        src.Line.Write($"/// <item> This property lazily evaluates the given expression.</item>");
+                        src.Doc?.Write($"/// <item> This property lazily evaluates the given expression.</item>");
 
-                    src.Line.Write($"/// </list>");
+                    src.Doc?.Write($"/// </list>");
 
-                    src.Line.Write($"/// </remarks>");
+                    src.Doc?.Write($"/// </remarks>");
                     AppendInjectionDeclaredIn();
                 }
 
@@ -1053,6 +1056,18 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         if (expressions.Any(x => x.Flags.Any(IsCleanupDestroy | IsCleanupDispose) || x.CleanupExpression is not null))
         {
             src.Linebreak();
+
+            if (input.Symbols.Has(UNITY_EDITOR))
+            {
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Executes generated cleanup actions for injected resources.");
+                src.Doc?.Write("/// </summary>");
+                src.Doc?.Write("/// <remarks>");
+                src.Doc?.Write("/// Call this method from your lifecycle teardown (for example <c>OnDestroy</c>).");
+                src.Doc?.Write("/// In edit mode this method returns immediately.");
+                src.Doc?.Write("/// </remarks>");
+            }
+
             src.Line.Write($"{access}void Cleanup()");
             using (src.Braces)
             {

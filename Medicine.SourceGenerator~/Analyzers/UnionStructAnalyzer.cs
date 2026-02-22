@@ -482,7 +482,9 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
             return false;
 
         var visitedHeaders = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
-        var path = new List<IFieldSymbol> { firstHeaderField };
+        var path = new List<IFieldSymbol>();
+
+        path.Add(firstHeaderField);
 
         while (visitedHeaders.Add(currentHeaderType))
         {
@@ -575,7 +577,7 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
         if (expression is IdentifierNameSyntax { Identifier.ValueText: "TypeID" })
             return true;
 
-        if (expression is not MemberAccessExpressionSyntax { Name.Identifier.ValueText: "TypeID" } memberAccess)
+        if (expression is not MemberAccessExpressionSyntax { Name.Text: "TypeID" } memberAccess)
             return false;
 
         var qualifier = memberAccess.Expression.ToString();
@@ -604,13 +606,13 @@ public sealed class UnionStructAnalyzer : DiagnosticAnalyzer
                 case ThisExpressionSyntax:
                     return true;
                 case IdentifierNameSyntax identifier:
-                    segments.Add(identifier.Identifier.ValueText);
+                    segments.Add(identifier.Text);
                     return true;
                 case MemberAccessExpressionSyntax memberAccess:
                     if (!CollectSegments(memberAccess.Expression, segments))
                         return false;
 
-                    segments.Add(memberAccess.Name.Identifier.ValueText);
+                    segments.Add(memberAccess.Name.Text);
                     return true;
                 default:
                     return false;

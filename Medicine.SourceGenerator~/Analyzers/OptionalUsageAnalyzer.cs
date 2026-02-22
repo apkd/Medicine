@@ -58,7 +58,7 @@ public sealed class OptionalUsageAnalyzer : DiagnosticAnalyzer
             if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
                 return false;
 
-            if (memberAccess.Name.Identifier.ValueText != "Optional")
+            if (memberAccess.Name.Text != "Optional")
                 return false;
 
             var symbolInfo = context.SemanticModel.GetSymbolInfo(invocation, context.CancellationToken);

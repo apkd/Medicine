@@ -18,49 +18,77 @@ public static class SourceGeneratorExtensions
     extension<TSource>(IncrementalValueProvider<TSource> source)
     {
         public IncrementalValuesProvider<TResult> SelectManyEx<TResult>(Func<TSource, CancellationToken, ImmutableArray<TResult>> selector)
-            where TResult : IGeneratorTransformOutput, new()
+            where TResult : ISourceGeneratorPassData, new()
             => source.SelectMany((input, ct) => TrySelectMany(input, ct, selector));
 
         public IncrementalValuesProvider<TResult> SelectManyEx<TResult>(Func<TSource, CancellationToken, IEnumerable<TResult>> selector)
-            where TResult : IGeneratorTransformOutput, new()
+            where TResult : ISourceGeneratorPassData, new()
             => source.SelectMany((input, ct) => TrySelectMany(input, ct, (x, y) => selector(x, y).ToImmutableArray()));
 
         public IncrementalValueProvider<TResult> SelectEx<TResult>(Func<TSource, CancellationToken, TResult> selector)
-            where TResult : IGeneratorTransformOutput, new()
+            where TResult : ISourceGeneratorPassData, new()
             => source.Select((input, ct) => TrySelect(input, ct, selector));
+
+        public IncrementalValueProvider<(TSource First, T2 Second, T3 Third)> Combine<T2, T3>(IncrementalValueProvider<T2> provider2, IncrementalValueProvider<T3> provider3)
+            => source
+                .Combine(provider2)
+                .Combine(provider3)
+                .Select((tuple, token) => (tuple.Left.Left, tuple.Left.Right, tuple.Right));
     }
 
     extension<TSource>(IncrementalValuesProvider<TSource> source)
     {
         public IncrementalValuesProvider<TResult> SelectManyEx<TResult>(Func<TSource, CancellationToken, ImmutableArray<TResult>> selector)
-            where TResult : IGeneratorTransformOutput, new()
+            where TResult : ISourceGeneratorPassData, new()
             => source.SelectMany((input, ct) => TrySelectMany(input, ct, selector));
 
         public IncrementalValuesProvider<TResult> SelectManyEx<TResult>(Func<TSource, CancellationToken, IEnumerable<TResult>> selector)
-            where TResult : IGeneratorTransformOutput, new()
+            where TResult : ISourceGeneratorPassData, new()
             => source.SelectMany((input, ct) => TrySelectMany(input, ct, (x, y) => selector(x, y).ToImmutableArray()));
 
         public IncrementalValuesProvider<TResult> SelectEx<TResult>(Func<TSource, CancellationToken, TResult> selector)
-            where TResult : IGeneratorTransformOutput, new()
+            where TResult : ISourceGeneratorPassData, new()
             => source.Select((input, ct) => TrySelect(input, ct, selector));
+
+        public IncrementalValuesProvider<(TSource First, T2 Second, T3 Third)> Combine<T2, T3>(IncrementalValueProvider<T2> provider2, IncrementalValueProvider<T3> provider3)
+            => source
+                .Combine(provider2)
+                .Combine(provider3)
+                .Select((tuple, token) => (tuple.Left.Left, tuple.Left.Right, tuple.Right));
+
+        public IncrementalValuesProvider<(TSource Values, GeneratorEnvironment Environment)> CombineWithGeneratorEnvironment(IncrementalGeneratorInitializationContext context)
+            => source.Combine(context.GetGeneratorEnvironment());
     }
 
     extension(IncrementalGeneratorInitializationContext init)
     {
-        IncrementalValueProvider<MedicineSettings> GetMedicineSettingsProvider()
-            => init.CompilationProvider
+        public IncrementalValueProvider<GeneratorEnvironment> GetGeneratorEnvironment()
+            => init
+                .CompilationProvider
                 .Combine(init.ParseOptionsProvider)
-                .Select((x, ct) => new MedicineSettings(x, ct));
+                .Combine(init.GetKnownSymbolsProvider())
+                .Select((x, ct) =>
+                    {
+                        var args = x.Left.Left.Assembly
+                            .GetAttribute(Constants.MedicineSettingsAttributeFQN)
+                            .GetAttributeConstructorArguments(ct);
 
-        internal IncrementalValueProvider<GeneratorEnvironment> GetGeneratorEnvironment()
-            => init.GetKnownSymbolsProvider()
-                .Combine(init.GetMedicineSettingsProvider())
-                .Select((x, ct) => new GeneratorEnvironment(x.Left, x.Right));
+                        return new GeneratorEnvironment(
+                            KnownSymbols: x.Right,
+                            PreprocessorSymbols: x.Left.Right.GetActivePreprocessorSymbols(forceDebugValue: args.Get("debug", 0)),
+                            MedicineSettings: new()
+                            {
+                                MakePublic = args.Get("makePublic", true),
+                                SingletonStrategy = args.Get("singletonStrategy", SingletonStrategy.Replace),
+                            }
+                        );
+                    }
+                );
 
         public void RegisterSourceOutputEx<TInput>(
             IncrementalValueProvider<TInput> source,
             Action<SourceProductionContext, SourceWriter, TInput> action
-        ) where TInput : IGeneratorTransformOutput
+        ) where TInput : ISourceGeneratorPassData
             => init.RegisterSourceOutput(
                 source,
                 action: (context, input) => GenerateSource(context, input, action)
@@ -69,7 +97,7 @@ public static class SourceGeneratorExtensions
         public void RegisterSourceOutputEx<TInput>(
             IncrementalValuesProvider<TInput> source,
             Action<SourceProductionContext, SourceWriter, TInput> action
-        ) where TInput : IGeneratorTransformOutput
+        ) where TInput : ISourceGeneratorPassData
             => init.RegisterSourceOutput(
                 source,
                 action: (context, input) => GenerateSource(context, input, action)
@@ -78,7 +106,7 @@ public static class SourceGeneratorExtensions
         public void RegisterImplementationSourceOutputEx<TInput>(
             IncrementalValueProvider<TInput> source,
             Action<SourceProductionContext, SourceWriter, TInput> action
-        ) where TInput : IGeneratorTransformOutput
+        ) where TInput : ISourceGeneratorPassData
             => init.RegisterImplementationSourceOutput(
                 source,
                 action: (context, input) => GenerateSource(context, input, action)
@@ -87,7 +115,7 @@ public static class SourceGeneratorExtensions
         public void RegisterImplementationSourceOutputEx<TInput>(
             IncrementalValuesProvider<TInput> source,
             Action<SourceProductionContext, SourceWriter, TInput> action
-        ) where TInput : IGeneratorTransformOutput
+        ) where TInput : ISourceGeneratorPassData
             => init.RegisterImplementationSourceOutput(
                 source,
                 action: (context, input) => GenerateSource(context, input, action)
@@ -100,8 +128,7 @@ public static class SourceGeneratorExtensions
             string fullyQualifiedMetadataName,
             Func<SyntaxNode, CancellationToken, bool> predicate,
             Func<GeneratorAttributeSyntaxContext, CancellationToken, TResult> transform
-        )
-            where TResult : IGeneratorTransformOutput, new()
+        ) where TResult : ISourceGeneratorPassData, new()
             => provider.ForAttributeWithMetadataName<TResult>(
                 fullyQualifiedMetadataName,
                 predicate,
@@ -125,8 +152,11 @@ public static class SourceGeneratorExtensions
             );
     }
 
-    static TResult TrySelect<TSource, TResult>(TSource input, CancellationToken ct, Func<TSource, CancellationToken, TResult> selector)
-        where TResult : IGeneratorTransformOutput, new()
+    static TResult TrySelect<TSource, TResult>(
+        TSource input,
+        CancellationToken ct,
+        Func<TSource, CancellationToken, TResult> selector
+    ) where TResult : ISourceGeneratorPassData, new()
     {
         try
         {
@@ -144,8 +174,11 @@ public static class SourceGeneratorExtensions
         }
     }
 
-    static ImmutableArray<TResult> TrySelectMany<TSource, TResult>(TSource input, CancellationToken ct, Func<TSource, CancellationToken, ImmutableArray<TResult>> selector)
-        where TResult : IGeneratorTransformOutput, new()
+    static ImmutableArray<TResult> TrySelectMany<TSource, TResult>(
+        TSource input,
+        CancellationToken ct,
+        Func<TSource, CancellationToken, ImmutableArray<TResult>> selector
+    ) where TResult : ISourceGeneratorPassData, new()
     {
         try
         {
@@ -163,10 +196,10 @@ public static class SourceGeneratorExtensions
         }
     }
 
-    static TResult ErrorResult<TResult>(Exception exception, object? locationSource) where TResult : IGeneratorTransformOutput, new()
+    static TResult ErrorResult<TResult>(Exception exception, object? locationSource) where TResult : ISourceGeneratorPassData, new()
         => locationSource switch
         {
-            IGeneratorTransformOutput { SourceGeneratorErrorLocation: { IsInSource: true } location }
+            ISourceGeneratorPassData { SourceGeneratorErrorLocation: { IsInSource: true } location }
                 => new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = location },
             Location location
                 => new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = new LocationInfo(location) },
@@ -180,7 +213,7 @@ public static class SourceGeneratorExtensions
         SourceProductionContext context,
         TInput input,
         Action<SourceProductionContext, SourceWriter, TInput> action
-    ) where TInput : IGeneratorTransformOutput
+    ) where TInput : ISourceGeneratorPassData
     {
         using var writer = new SourceWriter();
         string? error = input.SourceGeneratorError;
@@ -201,7 +234,9 @@ public static class SourceGeneratorExtensions
 
                 float elapsed = (float)time.Elapsed.TotalMilliseconds;
                 MedicineMetrics.Reporter?.Report(input.SourceGeneratorOutputFilename, Stat.SourceGenerationTimeMs, elapsed);
-                AddOutputSourceTextToCompilation(input.SourceGeneratorOutputFilename!, context, writer);
+                if (writer.IsDirty)
+                    AddOutputSourceTextToCompilation(input.SourceGeneratorOutputFilename!, context, writer);
+
                 return;
             }
             catch (Exception exception)

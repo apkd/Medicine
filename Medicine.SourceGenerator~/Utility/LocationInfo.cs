@@ -14,6 +14,12 @@ public readonly record struct LocationInfo
         IsInSource = location.IsInSource;
     }
 
+    public static implicit operator LocationInfo?(Location? location)
+        => location != null ? new LocationInfo(location) : (LocationInfo?)null;
+
+    public static implicit operator LocationInfo(Location location)
+        => new(location);
+
     public Location ToLocation()
         => IsInSource
             ? Location.Create(FileLineSpan.Path, SourceSpan, FileLineSpan.Span)

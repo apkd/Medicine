@@ -50,7 +50,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public bool HasParameterlessConstructor { get; init; }
     }
 
-    record struct Derived : IGeneratorTransformOutput
+    record struct Derived : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
@@ -71,11 +71,12 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public EquatableArray<byte> DerivedTextCheckSumForCache { get; init; }
     }
 
-    record struct GeneratorInput : IGeneratorTransformOutput
+    record struct GeneratorInput : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
         public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+        public bool ShouldEmitDocs { get; init; }
 
         public LanguageVersion LangVersion { get; init; }
         public EquatableArray<string> BaseDeclaration { get; init; }
@@ -132,7 +133,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 .Combine(candidateStructs)
                 .SelectEx(CombineBaseAndDerived)
                 .Combine(languageVersion)
-                .Select((x, ct) => x.Left with { LangVersion = x.Right }),
+                .Select((x, ct) => x.Left with { LangVersion = x.Right })
+                .CombineWithGeneratorEnvironment(context)
+                .Select((x, ct) => x.Values with { ShouldEmitDocs = x.Environment.ShouldEmitDocs }),
             action: GenerateSource
         );
     }
@@ -226,9 +229,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
     static InterfaceMemberInput[] BuildInterfaceMembers(INamedTypeSymbol interfaceSymbol)
     {
-        var members = new List<InterfaceMemberInput>();
-        var seenMethods = new HashSet<MethodSignatureKey>(MethodSignatureComparer.Instance);
-        var seenProperties = new HashSet<PropertySignatureKey>(PropertySignatureComparer.Instance);
+        using var r1 = Scratch.RentA<List<InterfaceMemberInput>>(out var members);
+        using var r2 = Scratch.RentA<HashSet<MethodSignatureKey>>(out var seenMethods);
+        using var r3 = Scratch.RentA<HashSet<PropertySignatureKey>>(out var seenProperties);
 
         var interfaces = interfaceSymbol.AllInterfaces.AsArray();
         Array.Sort(interfaces, static (left, right) => left.FQN.CompareTo(right.FQN, Ordinal));
@@ -306,11 +309,13 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
     static HeaderFieldInput[] BuildHeaderFields(INamedTypeSymbol headerSymbol)
     {
-        var fieldsAndProperties = headerSymbol.GetMembers()
+        using var c1 = Scratch.RentA<List<HeaderFieldInput>>(out var result);
+
+        var fieldsAndProperties = headerSymbol
+            .GetMembers()
             .Where(x => x is IFieldSymbol or IPropertySymbol)
             .OrderBy(x => x.Locations.FirstOrDefault()?.SourceSpan.Start ?? int.MaxValue);
 
-        var result = new List<HeaderFieldInput>(capacity: 8);
         foreach (var member in fieldsAndProperties)
         {
             switch (member)
@@ -407,7 +412,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
     static string[] BuildConstructorMemberInitializers(INamedTypeSymbol symbol)
     {
-        var members = new List<string>(capacity: 8);
+        using var r1 = Scratch.RentA<List<string>>(out var members);
 
         var declarations = symbol.DeclaringSyntaxReferences
             .Select(x => x.GetSyntax())
@@ -419,50 +424,24 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         foreach (var member in declaration.Members)
         {
             if (member is FieldDeclarationSyntax field)
-            {
-                if (field.Modifiers.Any(SyntaxKind.StaticKeyword))
-                    continue;
+                if (field.Modifiers.None(SyntaxKind.StaticKeyword, SyntaxKind.ConstKeyword, SyntaxKind.FixedKeyword))
+                    foreach (var variable in field.Declaration.Variables)
+                        if (variable.Initializer is null)
+                            members.Add(variable.Identifier.Text);
 
-                if (field.Modifiers.Any(SyntaxKind.ConstKeyword))
-                    continue;
-
-                if (field.Modifiers.Any(SyntaxKind.FixedKeyword))
-                    continue;
-
-                foreach (var variable in field.Declaration.Variables)
-                    if (variable.Initializer is null)
-                        members.Add(variable.Identifier.Text);
-
-                continue;
-            }
-
-            if (member is not PropertyDeclarationSyntax property)
-                continue;
-
-            if (property.Modifiers.Any(SyntaxKind.StaticKeyword))
-                continue;
-
-            if (property.Initializer is not null)
-                continue;
-
-            if (property.ExplicitInterfaceSpecifier is not null)
-                continue;
-
-            if (!IsAutoProperty(property))
-                continue;
-
-            members.Add(property.Identifier.Text);
+            if (member is PropertyDeclarationSyntax
+                {
+                    Initializer: null,
+                    ExplicitInterfaceSpecifier: null,
+                    IsAutoProperty: true,
+                    Modifiers.IsStatic: false,
+                    Identifier.Text: { } text,
+                })
+                members.Add(text);
         }
 
         return members.ToArray();
     }
-
-    static bool IsAutoProperty(PropertyDeclarationSyntax property)
-        => property is
-        {
-            ExpressionBody: null,
-            AccessorList.Accessors.Count: > 0,
-        } && property.AccessorList.Accessors.All(x => x is { Body: null, ExpressionBody: null });
 
     static GeneratorInput CombineBaseAndDerived((GeneratorInput Base, ImmutableArray<Derived> Candidates) input, CancellationToken ct)
     {
@@ -490,107 +469,13 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
     readonly record struct AssignedCandidate(int CandidateIndex, byte AssignedId);
 
-    readonly struct MethodSignatureKey(IMethodSymbol symbol)
-    {
-        public readonly IMethodSymbol Symbol = symbol;
-    }
-
-    sealed class MethodSignatureComparer : IEqualityComparer<MethodSignatureKey>
-    {
-        public static readonly MethodSignatureComparer Instance = new();
-        readonly SymbolEqualityComparer comparer = SymbolEqualityComparer.Default;
-
-        bool IEqualityComparer<MethodSignatureKey>.Equals(MethodSignatureKey left, MethodSignatureKey right)
-        {
-            var leftSymbol = left.Symbol;
-            var rightSymbol = right.Symbol;
-
-            if (!leftSymbol.Name.Equals(rightSymbol.Name, Ordinal))
-                return false;
-
-            if (!comparer.Equals(leftSymbol.ReturnType, rightSymbol.ReturnType))
-                return false;
-
-            var leftParameters = leftSymbol.Parameters;
-            var rightParameters = rightSymbol.Parameters;
-
-            if (leftParameters.Length != rightParameters.Length)
-                return false;
-
-            for (int i = 0; i < leftParameters.Length; i++)
-            {
-                var lp = leftParameters[i];
-                var rp = rightParameters[i];
-
-                if (lp.RefKind != rp.RefKind)
-                    return false;
-
-                if (!comparer.Equals(lp.Type, rp.Type))
-                    return false;
-            }
-
-            return true;
-        }
-
-        int IEqualityComparer<MethodSignatureKey>.GetHashCode(MethodSignatureKey key)
-        {
-            var symbol = key.Symbol;
-
-            unchecked
-            {
-                int hash = StringComparer.Ordinal.GetHashCode(symbol.Name);
-                hash = (hash * 397) ^ comparer.GetHashCode(symbol.ReturnType);
-                foreach (var parameter in symbol.Parameters)
-                {
-                    hash = (hash * 397) ^ (int)parameter.RefKind;
-                    hash = (hash * 397) ^ comparer.GetHashCode(parameter.Type);
-                }
-
-                return hash;
-            }
-        }
-    }
-
-    readonly struct PropertySignatureKey(IPropertySymbol symbol)
-    {
-        public readonly IPropertySymbol Symbol = symbol;
-    }
-
-    sealed class PropertySignatureComparer : IEqualityComparer<PropertySignatureKey>
-    {
-        public static readonly PropertySignatureComparer Instance = new();
-        readonly SymbolEqualityComparer comparer = SymbolEqualityComparer.Default;
-
-        bool IEqualityComparer<PropertySignatureKey>.Equals(PropertySignatureKey left, PropertySignatureKey right)
-        {
-            var leftSymbol = left.Symbol;
-            var rightSymbol = right.Symbol;
-
-            return leftSymbol.Name.Equals(rightSymbol.Name, Ordinal)
-                   && comparer.Equals(leftSymbol.Type, rightSymbol.Type)
-                   && leftSymbol.GetMethod is not null == rightSymbol.GetMethod is not null
-                   && leftSymbol.SetMethod is not null == rightSymbol.SetMethod is not null;
-        }
-
-        int IEqualityComparer<PropertySignatureKey>.GetHashCode(PropertySignatureKey key)
-        {
-            var symbol = key.Symbol;
-
-            unchecked
-            {
-                int hash = StringComparer.Ordinal.GetHashCode(symbol.Name);
-                hash = (hash * 397) ^ comparer.GetHashCode(symbol.Type);
-                hash = (hash * 397) ^ (symbol.GetMethod is not null ? 1 : 0);
-                hash = (hash * 397) ^ (symbol.SetMethod is not null ? 1 : 0);
-                return hash;
-            }
-        }
-    }
-
     static DerivedInput[] BuildDerivedStructs(Derived[] candidates, string interfaceFQN, string rootInterfaceFQN, string headerFQN, string rootHeaderFQN)
     {
-        var rootCandidates = new List<CandidateSortItem>(candidates.Length);
-        var usedIds = new HashSet<byte>();
+        using var r1 = Scratch.RentA<List<CandidateSortItem>>(out var rootCandidates);
+        using var r2 = Scratch.RentA<HashSet<byte>>(out var usedIds);
+        using var r3 = Scratch.RentA<List<AssignedCandidate>>(out var assignedRootCandidates);
+        using var r4 = Scratch.RentA<List<DerivedInput>>(out var derivedStructs);
+        rootCandidates.EnsureCapacity(candidates.Length);
 
         for (int i = 0; i < candidates.Length; i++)
         {
@@ -627,20 +512,19 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             }
         );
 
-        var assignedRootCandidates = new List<AssignedCandidate>(rootCandidates.Count);
+        assignedRootCandidates.EnsureCapacity(rootCandidates.Count);
         byte nextId = 1;
         foreach (var rootCandidate in rootCandidates)
         {
-            var candidate = candidates[rootCandidate.CandidateIndex];
             assignedRootCandidates.Add(
                 new(
                     rootCandidate.CandidateIndex,
-                    candidate.ForcedId ?? GetNextAvailableId(usedIds, ref nextId)
+                    candidates[rootCandidate.CandidateIndex].ForcedId ?? GetNextAvailableId(usedIds, ref nextId)
                 )
             );
         }
 
-        var derivedStructs = new List<DerivedInput>(assignedRootCandidates.Count);
+        derivedStructs.EnsureCapacity(assignedRootCandidates.Count);
         foreach (var assigned in assignedRootCandidates)
         {
             var candidate = candidates[assigned.CandidateIndex];
@@ -691,17 +575,19 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         if (firstHeaderFieldType is null)
             return false;
 
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        var current = firstHeaderFieldType;
-        while (current is not null && current.HasAttribute(UnionHeaderStructAttributeFQN))
+        using (Scratch.RentA<HashSet<string>>(out var visited))
         {
-            if (!visited.Add(current.FQN))
-                break;
+            var current = firstHeaderFieldType;
+            while (current is not null && current.HasAttribute(UnionHeaderStructAttributeFQN))
+            {
+                if (!visited.Add(current.FQN))
+                    break;
 
-            if (current.FQN.Equals(headerFQN, Ordinal))
-                return true;
+                if (current.FQN.Equals(headerFQN, Ordinal))
+                    return true;
 
-            current = GetFirstHeaderFieldType(current);
+                current = GetFirstHeaderFieldType(current);
+            }
         }
 
         return false;
@@ -737,14 +623,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     static INamedTypeSymbol? GetUnionInterface(INamedTypeSymbol headerType)
     {
         var typeMembers = headerType.GetTypeMembers().AsArray();
-        return typeMembers.FirstOrDefault(x =>
-                   x is
-                   {
-                       Name: "Interface",
-                       TypeKind: TypeKind.Interface,
-                       DeclaredAccessibility: Public,
-                   }
-               ) ??
+        return typeMembers.FirstOrDefault(x => x is { Name: "Interface", TypeKind: TypeKind.Interface, DeclaredAccessibility: Public }) ??
                typeMembers.FirstOrDefault(x => x is { TypeKind: TypeKind.Interface, DeclaredAccessibility: Public });
     }
 
@@ -752,7 +631,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     {
         var currentHeader = headerSymbol;
         var currentInterface = headerInterface;
-        var visited = new HashSet<string>(StringComparer.Ordinal);
+        using var r1 = Scratch.RentA<HashSet<string>>(out var visited);
 
         while (visited.Add(currentHeader.FQN))
         {
@@ -776,6 +655,8 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
+        src.ShouldEmitDocs = input.ShouldEmitDocs;
+
         var derivedStructs = input.DerivedStructsBuilderFunc.Value?.Invoke() ?? [];
         var interfaceMembers = input.InterfaceMembersBuilderFunc.Value?.Invoke() ?? [];
         var headerFields = input.HeaderFieldsBuilderFunc.Value?.Invoke() ?? [];
@@ -826,6 +707,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
             if (input.IsRootTypeIDOwner)
             {
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Type identifier value for this union variant.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write($"public const {input.TypeIDEnumFQN} TypeID = {input.TypeIDEnumFQN}.{derived.Name};");
                 src.Linebreak();
 
@@ -864,6 +748,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
             if (input.IsRootTypeIDOwner)
             {
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Enumerates generated union type identifiers.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write("public enum TypeIDs : byte");
                 using (src.Braces)
                 {
@@ -914,6 +801,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
                 src.Write(';').Linebreak();
 
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Returns the estimated size in bytes of the current union value.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write("public int SizeInBytes");
                 using (src.Indent)
                 {
@@ -934,6 +824,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
                 src.Write(';').Linebreak();
 
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Returns the display name of the actual union type.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write("public string TypeName");
                 using (src.Indent)
                 {
@@ -953,18 +846,27 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             }
             else
             {
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Returns the type identifier of the actual union type.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write($"public {input.TypeIDEnumFQN} TypeID");
                 using (src.Indent)
                     src.Line.Write($"=> {m}UnsafeUtility.As<{input.BaseTypeFQN}, {input.ParentTypeFQN}>(ref this).TypeID");
 
                 src.Write(';').Linebreak();
 
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Returns the estimated size in bytes of the actual union type.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write("public int SizeInBytes");
                 using (src.Indent)
                     src.Line.Write($"=> {m}UnsafeUtility.As<{input.BaseTypeFQN}, {input.ParentTypeFQN}>(ref this).SizeInBytes");
 
                 src.Write(';').Linebreak();
 
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Returns the display name of the actual union type.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write("public string TypeName");
                 using (src.Indent)
                     src.Line.Write($"=> {m}UnsafeUtility.As<{input.BaseTypeFQN}, {input.ParentTypeFQN}>(ref this).TypeName");
@@ -975,10 +877,16 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             if (emitWrapper)
             {
                 src.Line.Write($"[global::System.Runtime.InteropServices.StructLayout(global::System.Runtime.InteropServices.LayoutKind.Explicit, Size = {wrapperSizeInBytes})]");
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Mutable wrapper that exposes the header through the generated union interface.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write("public struct Wrapper : " + input.InterfaceFQN);
                 using (src.Braces)
                 {
                     src.Line.Write("[global::System.Runtime.InteropServices.FieldOffset(0)]");
+                    src.Doc?.Write($"/// <summary>");
+                    src.Doc?.Write($"/// Underlying union header value.");
+                    src.Doc?.Write($"/// </summary>");
                     src.Line.Write($"public {input.BaseTypeFQN} Header;");
                     src.Linebreak();
 
@@ -1068,6 +976,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         // 3. extensions class
         bool emitWithAssignHelper = false;
         string @public = input.IsPublic ? "public " : "";
+        src.Doc?.Write($"/// <summary>");
+        src.Doc?.Write($"/// Generated extension helpers for <see cref=\"{input.BaseTypeFQN}\"/> union dispatch and casts.");
+        src.Doc?.Write($"/// </summary>");
         src.Line.Write($"{@public}static partial class {input.BaseTypeName}Extensions");
         using (src.Braces)
         {
@@ -1114,9 +1025,12 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 bool emitGenericInvokeHelper = false;
                 string genericInvokeName = $"{member.Name}_GenericInvoke";
 
-                bool emitGetter = !member.IsProperty || member.CanGet;
-                if (emitGetter)
+                bool shouldEmitGetter = !member.IsProperty || member.CanGet;
+                if (shouldEmitGetter)
                 {
+                    src.Doc?.Write($"/// <summary>");
+                    src.Doc?.Write($"/// Dispatches to <c>{member.Name}</c> for the current union type.");
+                    src.Doc?.Write($"/// </summary>");
                     src.Line.Write($"public static unsafe {member.ReturnTypeFQN} {member.Name}(this ref {input.BaseTypeFQN} self{methodParameters})");
                     if (member.ReturnTypeFQN is "void")
                     {
@@ -1230,6 +1144,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     continue;
 
                 string setterGenericInvokeName = $"{member.Name}_Set_GenericInvoke";
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Dispatches assignment to <c>{member.Name}</c> for the actual union type.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write($"public static unsafe void {member.Name}(this ref {input.BaseTypeFQN} self, {member.ReturnTypeFQN} value)");
                 using (src.Braces)
                 {
@@ -1265,6 +1182,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             // AsDerivedStruct methods
             if (emitWrapper)
             {
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Reinterprets the union header as its generated wrapper type.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write($"public static unsafe ref {input.BaseTypeFQN}.Wrapper Wrap(this ref {input.BaseTypeFQN} self)");
                 using (src.Indent)
                     src.Line.Write($"=> ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {input.BaseTypeFQN}.Wrapper>(ref self);");
@@ -1276,6 +1196,10 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     if (!derived.HasDirectHeader)
                         continue;
 
+                    src.Doc?.Write($"/// <summary>");
+                    src.Doc?.Write($"/// Returns the union struct as the full-size generated wrapper.");
+                    src.Doc?.Write($"/// The wrapper struct has size that is max of all possible union types, making it safe for storage.");
+                    src.Doc?.Write($"/// </summary>");
                     src.Line.Write($"public static unsafe ref {input.BaseTypeFQN}.Wrapper Wrap(this ref {derived.FQN} self)");
                     using (src.Indent)
                         src.Line.Write($"=> ref {m}UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}.Wrapper>(ref self);");
@@ -1286,6 +1210,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
             if (input.HasParentHeader)
             {
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Reinterprets <see cref=\"{input.BaseTypeFQN}\"/> as <see cref=\"{input.ParentTypeFQN}\"/>.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write($"public static unsafe ref {input.ParentTypeFQN} As{input.ParentTypeName}(this ref {input.BaseTypeFQN} self)");
                 using (src.Indent)
                     src.Line.Write($"=> ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {input.ParentTypeFQN}>(ref self);");
@@ -1294,6 +1221,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
                 if (emitWrapper && !input.ParentIsGenericType)
                 {
+                    src.Doc?.Write($"/// <summary>");
+                    src.Doc?.Write($"/// Reinterprets <see cref=\"{input.BaseTypeFQN}.Wrapper\"/> as <see cref=\"{input.ParentTypeFQN}.Wrapper\"/>.");
+                    src.Doc?.Write($"/// </summary>");
                     src.Line.Write($"public static unsafe ref {input.ParentTypeFQN}.Wrapper As{input.ParentTypeName}(this ref {input.BaseTypeFQN}.Wrapper self)");
                     using (src.Indent)
                         src.Line.Write($"=> ref {m}UnsafeUtility.As<{input.BaseTypeFQN}.Wrapper, {input.ParentTypeFQN}.Wrapper>(ref self);");
@@ -1305,6 +1235,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             // AsDerivedStruct methods
             foreach (var derived in derivedStructs)
             {
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Reinterprets the union header as <see cref=\"{derived.FQN}\"/>.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write($"public static unsafe ref {derived.FQN} As{derived.Name}(this ref {input.BaseTypeFQN} self)");
                 using (src.Braces)
                 {
@@ -1322,6 +1255,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 if (!emitWrapper)
                     continue;
 
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Reinterprets the wrapper as <see cref=\"{derived.FQN}\"/>.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write($"public static unsafe ref {derived.FQN} As{derived.Name}(this ref {input.BaseTypeFQN}.Wrapper self)");
                 using (src.Braces)
                 {
@@ -1376,9 +1312,15 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             string helperMethodName = $"ThrowIncompatibleCastTo{input.BaseTypeName}Exception";
 
             src.Linebreak();
+            src.Doc?.Write($"/// <summary>");
+            src.Doc?.Write($"/// Generated helpers for casting <see cref=\"{input.ParentTypeFQN}\"/> values to <see cref=\"{input.BaseTypeFQN}\"/>.");
+            src.Doc?.Write($"/// </summary>");
             src.Line.Write($"{parentPublic}static partial class {input.ParentTypeName}Extensions");
             using (src.Braces)
             {
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Returns <c>true</c> when the parent header currently stores a <see cref=\"{input.BaseTypeFQN}\"/> compatible type.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write($"public static bool Is{input.BaseTypeName}(this in {input.ParentTypeFQN} self)");
                 using (src.Indent)
                 {
@@ -1395,6 +1337,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Write(';').Linebreak();
                 src.Linebreak();
 
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Reinterprets a compatible <see cref=\"{input.ParentTypeFQN}\"/> value as <see cref=\"{input.BaseTypeFQN}\"/>.");
+                src.Doc?.Write($"/// </summary>");
                 src.Line.Write($"public static unsafe ref {input.BaseTypeFQN} As{input.BaseTypeName}(this ref {input.ParentTypeFQN} self)");
                 using (src.Braces)
                 {

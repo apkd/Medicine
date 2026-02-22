@@ -188,37 +188,6 @@ namespace Medicine.Internal
                 return index;
             }
 
-            /// <inheritdoc cref="Register{T}"/>
-            public static int RegisterWithInstanceID(T instance)
-            {
-                int index = Register(instance);
-                if (index >= 0)
-                    InstanceIDs<T>.List.Add(UnsafeUtility.As<T, Object>(ref instance)!.GetInstanceID());
-
-                return index;
-            }
-
-            /// <inheritdoc cref="Unregister{T}"/>
-            public static int UnregisterWithInstanceID(T instance)
-            {
-                int index = Unregister(instance);
-
-#if DEBUG
-                if (!InstanceIDs<T>.List.IsCreated)
-                    return index; // possible right before domain reload
-#endif
-
-#if ENABLE_UNITY_COLLECTIONS_CHECKS
-                var safety = NativeListUnsafeUtility.GetAtomicSafetyHandle(ref InstanceIDs<T>.List);
-                AtomicSafetyHandle.EnforceAllBufferJobsHaveCompleted(safety);
-#endif
-
-                if (index >= 0)
-                    InstanceIDs<T>.List.RemoveAtSwapBack(index);
-
-                return index;
-            }
-
 #if UNITY_EDITOR
             public static class EditMode
             {

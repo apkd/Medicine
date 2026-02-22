@@ -121,7 +121,7 @@ A powerful and easy way to maintain a list of active/enabled instances. Works fo
 - The generator adds internal registration in `OnEnable`/`OnDisable`.[^0]
 - Access the active instances using `T.Instances` or `Find.Instances<T>()`.
 - Fast and efficient under the hood.
-- In edit mode, falls back to slow `FindObjectsOfType` (for editor tooling compatibility).
+- In edit mode, falls back to `FindObjectsByType` (for editor tooling compatibility).
 - Works with interfaces (tag both the interface and the implementing classes with `[Track]` and find the instances via `Find.Instances<YourInterfaceType>()`).
 
 <details>
@@ -203,7 +203,7 @@ static JobHandle ScheduleEnemyDeathJob()
 {
     var enemyData = Enemy.Unmanaged.DataArray; // convenient static accessor for the NativeArray<EnemyData>
                                                // (name generated based on struct name)
-    var job = new EnemyDeathJob { DataArray = enemyData };
+    var job = new EnemyDeathJob { Data = enemyData };
     return job.Schedule(Enemy.Unmanaged.DataArray.Length, 16);
 }
 ```

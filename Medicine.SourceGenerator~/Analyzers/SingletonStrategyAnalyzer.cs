@@ -60,7 +60,7 @@ public sealed class SingletonStrategyAnalyzer : DiagnosticAnalyzer
         if (!conflictReplaceKeepExisting && !conflictLogging && !conflictThrowDestroy)
             return;
 
-        var conflicts = new List<string>(capacity: 6);
+        var conflicts = new List<string>();
 
         void AddOnce(string value)
         {
@@ -133,10 +133,10 @@ public sealed class SingletonStrategyAnalyzer : DiagnosticAnalyzer
     {
         string name = nameSyntax switch
         {
-            IdentifierNameSyntax id        => id.Identifier.ValueText,
-            GenericNameSyntax gen          => gen.Identifier.ValueText,
-            QualifiedNameSyntax qualified  => qualified.Right.Identifier.ValueText,
-            AliasQualifiedNameSyntax alias => alias.Name.Identifier.ValueText,
+            IdentifierNameSyntax id        => id.Text,
+            GenericNameSyntax gen          => gen.Text,
+            QualifiedNameSyntax qualified  => qualified.Right.Text,
+            AliasQualifiedNameSyntax alias => alias.Name.Text,
             _                              => nameSyntax.ToString(),
         };
 
@@ -192,8 +192,8 @@ public sealed class SingletonStrategyAnalyzer : DiagnosticAnalyzer
         static string? GetArgumentName(AttributeArgumentSyntax argument)
             => argument switch
             {
-                { NameColon: { } nameColon }   => nameColon.Name.Identifier.ValueText,
-                { NameEquals: { } nameEquals } => nameEquals.Name.Identifier.ValueText,
+                { NameColon: { } nameColon }   => nameColon.Name.Text,
+                { NameEquals: { } nameEquals } => nameEquals.Name.Text,
                 _                              => null,
             };
     }

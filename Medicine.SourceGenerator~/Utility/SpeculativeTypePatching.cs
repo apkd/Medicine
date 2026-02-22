@@ -109,9 +109,9 @@ static class SpeculativeTypePatching
     {
         Dictionary<string, ITypeSymbol>? identifierTypesByName = null;
 
-        foreach (var identifier in expression.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
+        foreach (var nameSyntax in expression.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
         {
-            string identifierName = identifier.Identifier.ValueText;
+            string identifierName = nameSyntax.Text;
 
             if (identifierTypesByName?.ContainsKey(identifierName) is true)
                 continue;
@@ -166,7 +166,7 @@ static class SpeculativeTypePatching
     sealed class CastRewriter(IReadOnlyDictionary<string, TypeSyntax> castTypesByIdentifier) : CSharpSyntaxRewriter
     {
         public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
-            => castTypesByIdentifier.TryGetValue(node.Identifier.ValueText, out var castType)
+            => castTypesByIdentifier.TryGetValue(node.Text, out var castType)
                 ? SyntaxFactory
                     .ParenthesizedExpression(
                         SyntaxFactory.CastExpression(

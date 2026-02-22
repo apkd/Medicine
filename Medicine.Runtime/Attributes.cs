@@ -50,11 +50,13 @@ namespace Medicine
             /// and disable it in release builds. This is the default and recommended setting.
             /// </summary>
             Automatic = 0,
+
             /// <summary>
             /// Always enable debug-mode code generation.
             /// Useful for debugging issues with release builds.
             /// </summary>
             ForceEnabled = 1,
+
             /// <summary>
             /// Always disable debug-mode code generation.
             /// Useful for previewing the optimized code
@@ -233,7 +235,6 @@ namespace Medicine
         /// and <c>UnregisterTracked()</c> manually.
         /// </param>
         public TrackAttribute(
-            bool instanceIdArray = false,
             bool transformAccessArray = false,
             int transformInitialCapacity = 64,
             int transformDesiredJobCount = -1,
@@ -316,23 +317,29 @@ namespace Medicine
     }
 
     /// <summary>
-    /// Marks the assembly for generation of a <see cref="Medicine.Constants"/> class,
-    /// containing various project constants extracted from the TagManager.asset file,
-    /// such as layers and tags.
+    /// Marks the assembly for generation of a constants class containing Unity layers and tags
+    /// extracted from <c>ProjectSettings/TagManager.asset</c>.
     /// </summary>
+    /// <param name="namespace">
+    /// Namespace of the generated constants class.
+    /// </param>
+    /// <param name="class">
+    /// Name of the generated constants class.
+    /// </param>
     /// <example>
     /// To enable this feature, put the attribute at the top of a file in your assembly:
     /// <code>[assembly: Medicine.GenerateUnityConstants]</code>
     /// Then you can reference the generated class, e.g.
     /// <code>
-    /// using Medicine;
-    /// ...
-    /// gameObject.layer = Constants.Layers.Ground;
-    /// bool hasTag = Constants.Tags.
+    /// gameObject.layer = (int)Constants.Layer.Default;
+    /// bool hasTag = gameObject.CompareTag(Constants.Tag.Player);
     /// </code>
     /// </example>
     [AttributeUsage(Assembly)]
-    public sealed class GenerateUnityConstantsAttribute : Attribute { }
+    public sealed class GenerateUnityConstantsAttribute : Attribute
+    {
+        public GenerateUnityConstantsAttribute(string @namespace = "Medicine", string @class = "Constants") { }
+    }
 
 #if MODULE_ZLINQ
     [AttributeUsage(Method | Property)]

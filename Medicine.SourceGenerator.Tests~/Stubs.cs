@@ -19,10 +19,15 @@ static class Stubs
 
                   public static T? FindAnyObjectByType<T>() where T : Object
                       => default;
+
+                  public static void Destroy(Object @object) { }
+                  public static void DestroyImmediate(Object @object) { }
               }
 
               public class Component : Object
               {
+                  public GameObject gameObject { get; } = new();
+
                   public T? GetComponent<T>() where T : Component
                       => default;
 
@@ -51,11 +56,18 @@ static class Stubs
 
               public class GameObject : Object
               {
+                  public void SetActive(bool value) { }
+
                   public bool CompareTag(TagHandle tag)
                       => false;
               }
 
-              public class MonoBehaviour : Component { }
+              public class Behaviour : Component
+              {
+                  public bool enabled { get; set; }
+              }
+
+              public class MonoBehaviour : Behaviour { }
 
               public class ScriptableObject : Object
               {
@@ -102,7 +114,6 @@ static class Stubs
               {
                   public TrackAttribute(
                       SingletonAttribute.Strategy strategy = SingletonAttribute.Strategy.Replace,
-                      bool instanceIdArray = false,
                       bool transformAccessArray = false,
                       int transformInitialCapacity = 64,
                       int transformDesiredJobCount = -1,
@@ -128,7 +139,10 @@ static class Stubs
               public sealed class WrapValueEnumerableAttribute : Attribute { }
 
               [AttributeUsage(AttributeTargets.Assembly)]
-              public sealed class GenerateUnityConstantsAttribute : Attribute { }
+              public sealed class GenerateUnityConstantsAttribute : Attribute
+              {
+                  public GenerateUnityConstantsAttribute(string @namespace = "Medicine", string @class = "Constants") { }
+              }
 
               public interface IInstanceIndex
               {
@@ -139,7 +153,17 @@ static class Stubs
               public interface IFindByID<T> { }
               public interface IFindByAssetID<T> { }
 
-              public readonly struct TrackedInstances<T> { }
+              public readonly struct TrackedInstances<T>
+              {
+                  public ImmediateEnumerable WithCopy
+                      => default;
+
+                  public StrideEnumerable WithStride(int stride)
+                      => default;
+              }
+
+              public readonly struct ImmediateEnumerable { }
+              public readonly struct StrideEnumerable { }
               public readonly struct LazyRef<T> where T : class { }
               public readonly struct LazyVal<T> where T : struct { }
 
@@ -167,6 +191,9 @@ static class Stubs
               public static class MedicineExtensions
               {
                   public static T Optional<T>(this T value)
+                      => value;
+
+                  public static T Cleanup<T>(this T value, Action<T> action)
                       => value;
               }
           }

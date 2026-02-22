@@ -100,8 +100,7 @@ public static partial class ExtensionMethods
             if (self is null)
                 return false;
 
-            var attributes = self.GetAttributes();
-            foreach (var x in attributes)
+            foreach (var x in self.GetAttributes())
                 if (x.AttributeClass.Is(attributeFullyQualifiedName))
                     return true;
 
@@ -113,8 +112,7 @@ public static partial class ExtensionMethods
             if (self is null || attributeSymbol is null)
                 return false;
 
-            var attributes = self.GetAttributes();
-            foreach (var x in attributes)
+            foreach (var x in self.GetAttributes())
                 if (x.AttributeClass.Is(attributeSymbol))
                     return true;
 
@@ -126,8 +124,7 @@ public static partial class ExtensionMethods
             if (self is null)
                 return false;
 
-            var attributes = self.GetAttributes();
-            foreach (var attribute in attributes)
+            foreach (var attribute in self.GetAttributes())
                 if (attribute.AttributeClass is { } attributeClass)
                     if (attributePredicate(attributeClass))
                         return true;
@@ -140,8 +137,7 @@ public static partial class ExtensionMethods
             if (self is null)
                 return null;
 
-            var attributes = self.GetAttributes();
-            foreach (var x in attributes)
+            foreach (var x in self.GetAttributes())
                 if (x.AttributeClass.Is(attributeFullyQualifiedName))
                     return x;
 
@@ -153,8 +149,7 @@ public static partial class ExtensionMethods
             if (self is null || attributeSymbol is null)
                 return null;
 
-            var attributes = self.GetAttributes();
-            foreach (var x in attributes)
+            foreach (var x in self.GetAttributes())
                 if (x.AttributeClass.Is(attributeSymbol))
                     return x;
 
@@ -281,7 +276,7 @@ public static partial class ExtensionMethods
                     // fully qualify other names
                     SimpleNameSyntax nameSyntax
                         => SyntaxFactory.IdentifierName(
-                            semanticModel.GetSymbolInfo(original, ct).Symbol?.FQN ?? nameSyntax.Identifier.ValueText
+                            semanticModel.GetSymbolInfo(original, ct).Symbol?.FQN ?? nameSyntax.Text
                         ),
 
                     _ => rewritten,
@@ -432,14 +427,20 @@ public static partial class ExtensionMethods
                 if (segment.Length <= skipEndLength)
                     return false;
 
-                var segmentTail = segment[(segment.Length - skipEndLength)..];
+                var segmentTail = segment[^skipEndLength..];
                 if (!segmentTail.SequenceEqual(skipEnd.AsSpan()))
                     return false;
 
-                var segmentWithoutTail = segment[..(segment.Length - skipEndLength)];
+                var segmentWithoutTail = segment[..^skipEndLength];
                 return identifier.SequenceEqual(segmentWithoutTail);
             }
         }
+    }
+
+    extension(SimpleNameSyntax nameSyntax)
+    {
+        public string Text
+            => nameSyntax.Identifier.ValueText;
     }
 
     extension(SyntaxReference? self)
@@ -466,6 +467,67 @@ public static partial class ExtensionMethods
     {
         public T[] AsArray()
             => Unsafe.As<ImmutableArray<T>, ValueTuple<T[]>>(ref self).Item1 ?? [];
+    }
+
+    extension(PropertyDeclarationSyntax property)
+    {
+        public bool IsAutoProperty
+        {
+            get
+            {
+                if (property is not { ExpressionBody: null, AccessorList.Accessors: { Count: > 0 } accessors })
+                    return false;
+
+                foreach (var accessor in accessors)
+                    if (accessor is not { Body: null, ExpressionBody: null })
+                        return false;
+
+                return true;
+            }
+        }
+    }
+
+    public static bool None(this SyntaxTokenList modifiers, params ReadOnlySpan<SyntaxKind> kinds)
+    {
+        foreach (var kind in kinds)
+            if (modifiers.Any(kind))
+                return false;
+        return true;
+    }
+
+    extension(SyntaxTokenList modifiers)
+    {
+        public bool IsStatic => modifiers.Any(SyntaxKind.StaticKeyword);
+        public bool IsSealed => modifiers.Any(SyntaxKind.SealedKeyword);
+    }
+
+#pragma warning disable CS0649
+    // ReSharper disable once ClassNeverInstantiated.Local
+    sealed class ListData<T>
+    {
+        public required T[] Items;
+        public required int Size;
+        public required int Version;
+    }
+#pragma warning restore CS0649
+
+    public static Span<T> AsSpan<T>(this List<T> list)
+        => Unsafe.As<List<T>, ListData<T>>(ref list).Items.AsSpan(0, list.Count);
+
+    public static bool Has<TEnum>(this TEnum symbol, TEnum flag)
+        where TEnum : unmanaged, Enum
+    {
+        ulong a = 0;
+        ulong b = 0;
+        Unsafe.As<ulong, TEnum>(ref a) = symbol;
+        Unsafe.As<ulong, TEnum>(ref b) = flag;
+        return (a & b) != 0;
+    }
+
+    public static void EnsureCapacity<T>(this List<T> list, int capacity)
+    {
+        if (list.Capacity < capacity)
+            list.Capacity = capacity;
     }
 
     public static void Deconstruct<TKey, TValue>(this KeyValuePair<TKey, TValue> pair, out TKey key, out TValue value)

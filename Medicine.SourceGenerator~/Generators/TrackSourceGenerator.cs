@@ -1,14 +1,15 @@
+using System.Collections.Immutable;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
-using static ActivePreprocessorSymbolNames;
 using static Constants;
 using static TrackSourceGenerator.TypeFlags;
 
 [Flags]
 public enum SingletonStrategy : uint
 {
+    // ReSharper disable UnusedMember.Global
     Replace = 0,
     KeepExisting = 1 << 0,
     ThrowException = 1 << 1,
@@ -16,12 +17,7 @@ public enum SingletonStrategy : uint
     LogError = 1 << 3,
     Destroy = 1 << 4,
     AutoInstantiate = 1 << 5,
-}
-
-static class TypeFlagsExtensions
-{
-    public static bool Has(this TrackSourceGenerator.TypeFlags self, TrackSourceGenerator.TypeFlags flag)
-        => (self & flag) != 0;
+    // ReSharper restore UnusedMember.Global
 }
 
 [Generator]
@@ -56,45 +52,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         isEnabledByDefault: true
     );
 
-    void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
-    {
-        var generatorEnvironment = context.GetGeneratorEnvironment();
-
-        context.RegisterPostInitializationOutput((x => x.AddSource("Medicine.Internal.StaticInit.g.cs", staticInitClass)));
-
-        foreach (var attributeName in new[] { SingletonAttributeMetadataName, TrackAttributeMetadataName })
-        {
-            context.RegisterSourceOutputEx(
-                context.SyntaxProvider
-                    .ForAttributeWithMetadataNameEx(
-                        fullyQualifiedMetadataName: attributeName,
-                        predicate: static (node, _) => node is ClassDeclarationSyntax,
-                        transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
-                    )
-                    .Combine(generatorEnvironment)
-                    .SelectEx((x, ct) =>
-                        {
-                            var input = TransformSyntaxContext(x.Left.Context.Value, x.Right.KnownSymbols, ct, attributeName);
-                            if (input.Attribute is not { Length: > 0 })
-                                return input;
-
-                            var settings = x.Right.MedicineSettings;
-                            return input with
-                                {
-                                    EffectiveSingletonStrategy = input.AttributeSettings.SingletonStrategy ?? settings.SingletonStrategy,
-                                    Symbols = settings.PreprocessorSymbolNames,
-                                };
-                        }
-                    )
-                    .Where(x => x.Attribute is { Length: > 0 }),
-                GenerateSource
-            );
-        }
-    }
-
-    readonly record struct TrackAttributeSettings(
+    record struct TrackAttributeSettings(
         SingletonStrategy? SingletonStrategy,
-        bool TrackInstanceIDs,
         bool TrackTransforms,
         int InitialCapacity,
         int DesiredJobCount,
@@ -107,29 +66,98 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         string IDTypeFQN
     );
 
-    record struct GeneratorInput : IGeneratorTransformOutput
+    readonly record struct TrackInterfaceRegistration(
+        string TypeFQN,
+        bool UseTransformFallback,
+        EquatableArray<string> UnmanagedDataFQNs
+    );
+
+    record struct GeneratorAttributeSyntaxContextPassData(GeneratorAttributeSyntaxContext Context) : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
         public LocationInfo? SourceGeneratorErrorLocation { get; set; }
 
+        public readonly GeneratorAttributeSyntaxContext Context = Context;
+
+        bool IEquatable<GeneratorAttributeSyntaxContextPassData>.Equals(GeneratorAttributeSyntaxContextPassData other) => false;
+        public readonly override int GetHashCode() => 0;
+    }
+
+    record struct PrecomputedAttributeSettingsData : ISourceGeneratorPassData
+    {
+        public string? SourceGeneratorOutputFilename { get; init; }
+        public string? SourceGeneratorError { get; init; }
+        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+
+        public GeneratorEnvironment Environment;
+        public EquatableIgnore<Dictionary<INamedTypeSymbol, TrackAttributeSettings>> AttributeSettingsByType;
+
+        bool IEquatable<PrecomputedAttributeSettingsData>.Equals(PrecomputedAttributeSettingsData other) => false;
+        public readonly override int GetHashCode() => 0;
+    }
+
+    record struct GeneratorInput : ISourceGeneratorPassData
+    {
+        public string? SourceGeneratorOutputFilename { get; init; }
+        public string? SourceGeneratorError { get; init; }
+        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+
+        public GeneratorEnvironment Environment;
         public bool HasIInstanceIndex;
         public bool EmitIInstanceIndex;
         public bool HasBaseDeclarationsWithAttribute;
         public bool ManualInheritanceMismatch;
         public string? Attribute;
-        public SingletonStrategy EffectiveSingletonStrategy;
         public TrackAttributeSettings AttributeSettings;
         public EquatableArray<string> ContainingTypeDeclaration;
         public string? ContainingTypeFQN;
         public EquatableArray<string> InterfacesWithAttribute;
+        public EquatableIgnore<Func<TrackInterfaceRegistration[]>?> TrackedInterfacesBuilderFunc;
         public EquatableArray<string> UnmanagedDataFQNs;
         public EquatableArray<TrackingIdRegistration> TrackingIdRegistrations;
         public string? TypeFQN;
         public string? TypeDisplayName;
-        public ActivePreprocessorSymbolNames Symbols;
         public TypeFlags Flags;
     }
+
+    record struct InterfaceGeneratorInput : ISourceGeneratorPassData
+    {
+        public string? SourceGeneratorOutputFilename { get; init; }
+        public string? SourceGeneratorError { get; init; }
+        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+
+        public GeneratorEnvironment Environment;
+        public TrackAttributeSettings AttributeSettings;
+        public EquatableArray<string> ContainingTypeDeclaration;
+        public EquatableArray<string> UnmanagedDataFQNs;
+        public EquatableArray<string> TrackingIdTypeFQNs;
+        public string? TypeFQN;
+        public string? ContainingTypeFQN;
+        public EquatableIgnore<Func<string>?> TypeDisplayNameBuilderFunc;
+        public bool IsGenericType;
+        public TypeFlags Flags;
+    }
+
+    readonly record struct TrackApiSurfaceInput(
+        string TypeFQN,
+        string TypeDisplayName,
+        TrackAttributeSettings AttributeSettings,
+        string NewModifier,
+        EquatableArray<string> UnmanagedDataFQNs,
+        EquatableArray<string> FindByIdTypeFQNs,
+        bool EmitDocs
+    );
+
+    readonly record struct StaticInitInput(
+        string TypeFQN,
+        string? ContainingTypeFQN,
+        TypeFlags Flags,
+        bool IsAutoInstantiate,
+        bool EmitTransformAccessInit,
+        int TransformInitialCapacity,
+        int TransformDesiredJobCount
+    );
 
     internal enum TypeFlags : uint
     {
@@ -146,9 +174,127 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         IsAbstract = 1 << 11,
     }
 
+    void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
+    {
+        context.RegisterPostInitializationOutput(x => x.AddSource("Medicine.Internal.StaticInit.g.cs", staticInitClass));
+
+        var generatorEnvironment = context.GetGeneratorEnvironment();
+
+        var singletonAttributeCache = context.SyntaxProvider
+            .ForAttributeWithMetadataNameEx(
+                fullyQualifiedMetadataName: SingletonAttributeMetadataName,
+                predicate: static (node, _) => true,
+                transform: static (attributeContext, _) => new GeneratorAttributeSyntaxContextPassData(attributeContext)
+            )
+            .Collect()
+            .Combine(generatorEnvironment)
+            .SelectEx(TransformSyntaxContextPrecompute);
+
+        var trackAttributeCache = context.SyntaxProvider
+            .ForAttributeWithMetadataNameEx(
+                fullyQualifiedMetadataName: TrackAttributeMetadataName,
+                predicate: static (node, _) => true,
+                transform: static (attributeContext, _) => new GeneratorAttributeSyntaxContextPassData(attributeContext)
+            )
+            .Collect()
+            .Combine(generatorEnvironment)
+            .SelectEx(TransformSyntaxContextPrecompute);
+
+        context.RegisterSourceOutputEx(
+            context.SyntaxProvider
+                .ForAttributeWithMetadataName(
+                    fullyQualifiedMetadataName: SingletonAttributeMetadataName,
+                    predicate: static (node, _) => node is ClassDeclarationSyntax,
+                    transform: static (attributeContext, _) => attributeContext
+                )
+                .Combine(singletonAttributeCache)
+                .SelectEx((x, ct) => TransformSyntaxContext(
+                        context: x.Left,
+                        attributeSettingsByType: x.Right.AttributeSettingsByType,
+                        environment: x.Right.Environment,
+                        ct: ct,
+                        attributeName: SingletonAttributeMetadataName
+                    )
+                ),
+            GenerateSource
+        );
+
+        context.RegisterSourceOutputEx(
+            context.SyntaxProvider
+                .ForAttributeWithMetadataName(
+                    fullyQualifiedMetadataName: TrackAttributeMetadataName,
+                    predicate: static (node, _) => node is ClassDeclarationSyntax,
+                    transform: static (attributeContext, _) => attributeContext
+                )
+                .Combine(trackAttributeCache)
+                .SelectEx((x, ct) => TransformSyntaxContext(
+                        context: x.Left,
+                        attributeSettingsByType: x.Right.AttributeSettingsByType,
+                        environment: x.Right.Environment,
+                        ct: ct,
+                        attributeName: TrackAttributeMetadataName
+                    )
+                ),
+            GenerateSource
+        );
+
+        context.RegisterSourceOutputEx(
+            context.SyntaxProvider
+                .ForAttributeWithMetadataNameEx(
+                    fullyQualifiedMetadataName: TrackAttributeMetadataName,
+                    predicate: static (node, _) => node is InterfaceDeclarationSyntax,
+                    transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
+                )
+                .Combine(trackAttributeCache)
+                .SelectEx((x, ct) =>
+                    {
+                        var input = TransformInterfaceSyntaxContext(x.Left.Context, x.Right, ct);
+                        if (input.TypeFQN is not { Length: > 0 })
+                            return input;
+
+                        return input with
+                        {
+                            Environment = x.Right.Environment,
+                        };
+                    }
+                )
+                .Where(x => x is { TypeFQN.Length: > 0, IsGenericType: false }),
+            GenerateTrackedInterfaceHelper
+        );
+    }
+
+    PrecomputedAttributeSettingsData TransformSyntaxContextPrecompute(
+        (ImmutableArray<GeneratorAttributeSyntaxContextPassData>, GeneratorEnvironment) input,
+        CancellationToken ct
+    )
+    {
+        var (passDataArray, environment) = input;
+        var attributeSettingsByType = new Dictionary<INamedTypeSymbol, TrackAttributeSettings>(passDataArray.Length, SymbolEqualityComparer.Default);
+
+        foreach (var passData in passDataArray)
+        {
+            var context = passData.Context;
+
+            if (context.TargetSymbol is not INamedTypeSymbol { TypeKind: TypeKind.Class or TypeKind.Interface } symbol)
+                continue;
+
+            if (context.Attributes.FirstOrDefault() is not { AttributeConstructor: not null } attributeData)
+                continue;
+
+            attributeSettingsByType[symbol] = GetTrackAttributeSettings(attributeData, ct);
+        }
+
+        return new()
+        {
+            Environment = environment,
+            AttributeSettingsByType = attributeSettingsByType,
+        };
+    }
+
     static GeneratorInput TransformSyntaxContext(
         GeneratorAttributeSyntaxContext context,
-        KnownSymbols knownSymbols,
+        Dictionary<INamedTypeSymbol, TrackAttributeSettings>? attributeSettingsByType,
+        GeneratorEnvironment environment,
         CancellationToken ct,
         string attributeName
     )
@@ -159,55 +305,36 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         if (context.TargetSymbol is not INamedTypeSymbol { TypeKind: TypeKind.Class } classSymbol)
             return default;
 
-        if (classSymbol.HasAttribute(knownSymbols.SingletonAttribute))
-            if (classSymbol.HasAttribute(knownSymbols.TrackAttribute))
-                return default; // disallow both attributes
-
         if (context.Attributes.FirstOrDefault() is not { AttributeConstructor: not null } attributeData)
             return default;
 
-        INamedTypeSymbol? attributeSymbol = attributeName switch
-        {
-            SingletonAttributeMetadataName => knownSymbols.SingletonAttribute,
-            TrackAttributeMetadataName => knownSymbols.TrackAttribute,
-            _ => null,
-        };
-        if (attributeSymbol is null)
+        var attributeSettingsLookup = attributeSettingsByType;
+        if (attributeSettingsLookup is null)
             return default;
 
-        var attributeArguments = attributeData
-            .GetAttributeConstructorArguments(ct)
-            .Select(x => new TrackAttributeSettings(
-                    SingletonStrategy: x.Get<SingletonStrategy>("strategy", null),
-                    TrackInstanceIDs: x.Get("instanceIdArray", false),
-                    TrackTransforms: x.Get("transformAccessArray", false) && classSymbol.InheritsFrom(knownSymbols.UnityMonoBehaviour),
-                    InitialCapacity: x.Get("transformInitialCapacity", 64),
-                    DesiredJobCount: x.Get("transformDesiredJobCount", -1),
-                    CacheEnabledState: x.Get("cacheEnabledState", false),
-                    Manual: x.Get("manual", false)
-                )
-            );
+        if (!attributeSettingsLookup.TryGetValue(classSymbol, out var attributeArguments))
+            return default;
+
+        var knownSymbols = environment.KnownSymbols;
 
         bool hasBaseDeclarationsWithAttribute = false;
         bool hasBaseCachedEnabledState = false;
         bool manualInheritanceMismatch = false;
-        foreach (var baseType in classSymbol.GetBaseTypes())
+        for (var baseType = classSymbol.BaseType; baseType is not null; baseType = baseType.BaseType)
         {
-            var baseAttribute = baseType.GetAttribute(attributeSymbol);
-            if (baseAttribute is null)
+            var symbolForLookup = baseType is { IsGenericType: true, IsUnboundGenericType: false }
+                ? baseType.OriginalDefinition
+                : baseType;
+
+            if (!attributeSettingsLookup.TryGetValue(symbolForLookup, out var baseAttributeSettings))
                 continue;
 
-            var baseAttributeArguments = baseAttribute.GetAttributeConstructorArguments(ct);
+            hasBaseDeclarationsWithAttribute = true;
 
             if (attributeName is TrackAttributeMetadataName)
-                hasBaseCachedEnabledState |= baseAttributeArguments.Get("cacheEnabledState", false);
+                hasBaseCachedEnabledState |= baseAttributeSettings.CacheEnabledState;
 
-            if (baseAttribute.ConstructorArguments.Length is 0)
-                if (attributeData.ConstructorArguments.Length is 0)
-                    continue;
-
-            hasBaseDeclarationsWithAttribute = true;
-            manualInheritanceMismatch = baseAttributeArguments.Get("manual", false) != attributeArguments.Manual;
+            manualInheritanceMismatch = baseAttributeSettings.Manual != attributeArguments.Manual;
 
             if (manualInheritanceMismatch)
                 break;
@@ -226,10 +353,85 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                                   !classSymbol.HasInterface(knownSymbols.IInstanceIndexInterface, checkAllInterfaces: false);
 
         string classTypeFQN = classSymbol.FQN;
+        bool isMonoBehaviour = classSymbol.InheritsFrom(knownSymbols.UnityMonoBehaviour);
 
-        var trackingIdRegistrations = new List<TrackingIdRegistration>();
+        using var r1 = Scratch.RentA<List<(INamedTypeSymbol Interface, TrackAttributeSettings AttributeSettings)>>(out var interfacesWithAttributeData);
+        using var r2 = Scratch.RentB<List<string>>(out var interfacesWithAttribute);
 
-        // gather IFindByID interface usages
+        using (Scratch.RentA<HashSet<INamedTypeSymbol>>(out var inheritedInterfaces))
+        {
+            interfacesWithAttribute.Capacity = interfacesWithAttributeData.Count;
+            interfacesWithAttributeData.EnsureCapacity(classSymbol.Interfaces.Length);
+
+            for (var baseType = classSymbol.BaseType; baseType is not null; baseType = baseType.BaseType)
+                foreach (var inheritedInterface in baseType.Interfaces)
+                    inheritedInterfaces.Add(inheritedInterface);
+
+            foreach (var interfaceSymbol in classSymbol.Interfaces)
+            {
+                if (inheritedInterfaces.Contains(interfaceSymbol))
+                    continue;
+
+                var symbolForLookup = interfaceSymbol is { IsGenericType: true, IsUnboundGenericType: false }
+                    ? interfaceSymbol.OriginalDefinition
+                    : interfaceSymbol;
+
+                if (!attributeSettingsLookup.TryGetValue(symbolForLookup, out var interfaceAttributeSettings))
+                    continue;
+
+                interfacesWithAttributeData.Add((interfaceSymbol, interfaceAttributeSettings));
+            }
+
+            foreach (var (interfaceSymbol, _) in interfacesWithAttributeData)
+                if (interfaceSymbol.FQN is { } interfaceFqn)
+                    interfacesWithAttribute.Add(interfaceFqn);
+        }
+
+        TrackInterfaceRegistration[] trackedInterfaces = [];
+        if (attributeName is TrackAttributeMetadataName)
+        {
+            using var r3 = Scratch.RentA<List<TrackInterfaceRegistration>>(out var trackedInterfaceList);
+            trackedInterfaceList.EnsureCapacity(interfacesWithAttributeData.Count);
+
+            foreach (var (interfaceSymbol, interfaceAttributeSettings) in interfacesWithAttributeData)
+            {
+                bool useTransformFallback = isMonoBehaviour && interfaceSymbol.IsGenericType && interfaceAttributeSettings.TrackTransforms;
+
+                string[] unmanagedDataFQNs;
+                {
+                    using (Scratch.RentA<List<string>>(out var values))
+                    using (Scratch.RentA<HashSet<string>>(out var seen))
+                    {
+                        TryAdd(interfaceSymbol);
+                        foreach (var inheritedInterface in interfaceSymbol.AllInterfaces)
+                            TryAdd(inheritedInterface);
+
+                        unmanagedDataFQNs = values.ToArray();
+
+                        void TryAdd(INamedTypeSymbol symbol)
+                        {
+                            if (symbol.OriginalDefinition.Is(knownSymbols.UnmanagedDataInterface))
+                                if (symbol.TypeArguments is [{ FQN: { Length: > 0 } fqn }])
+                                    if (seen.Add(fqn))
+                                        values.Add(fqn);
+                        }
+                    }
+                }
+
+                trackedInterfaceList.Add(
+                    new(
+                        TypeFQN: interfaceSymbol.FQN,
+                        UseTransformFallback: useTransformFallback,
+                        UnmanagedDataFQNs: unmanagedDataFQNs
+                    )
+                );
+            }
+
+            trackedInterfaces = trackedInterfaceList.ToArray();
+        }
+
+        TrackingIdRegistration[] trackingIdRegistrations;
+        using (Scratch.RentA<List<TrackingIdRegistration>>(out var trackingIdList))
         {
             foreach (var interfaceType in classSymbol.AllInterfaces)
             {
@@ -239,20 +441,22 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     AddTrackingIdFromSymbol(inheritedInterface, interfaceType, interfaceType.FQN);
             }
 
+            trackingIdRegistrations = trackingIdList.ToArray();
+
             void AddTrackingIdFromSymbol(INamedTypeSymbol type, INamedTypeSymbol lookupType, string lookupTypeFQN)
             {
                 if (!TryGetTrackingIdType(type, lookupType, out var idTypeFQN, out bool registerLookupType))
                     return;
 
-                if (!trackingIdRegistrations.Contains(new(classTypeFQN, idTypeFQN)))
-                    trackingIdRegistrations.Add(new(classTypeFQN, idTypeFQN));
+                if (!trackingIdList.Contains(new(classTypeFQN, idTypeFQN)))
+                    trackingIdList.Add(new(classTypeFQN, idTypeFQN));
 
                 // omit direct IFindByID<T> implementations
                 if (!registerLookupType)
                     return;
 
-                if (!trackingIdRegistrations.Contains(new(lookupTypeFQN, idTypeFQN)))
-                    trackingIdRegistrations.Add(new(lookupTypeFQN, idTypeFQN));
+                if (!trackingIdList.Contains(new(lookupTypeFQN, idTypeFQN)))
+                    trackingIdList.Add(new(lookupTypeFQN, idTypeFQN));
             }
 
             bool TryGetTrackingIdType(INamedTypeSymbol type, INamedTypeSymbol lookupType, out string idTypeFQN, out bool registerLookupType)
@@ -276,37 +480,40 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             }
         }
 
+        string[] classUnmanagedDataFQNs;
+        using (Scratch.RentA<List<string>>(out var unmanagedDataFQNsList))
+        {
+            foreach (var interfaceType in classSymbol.Interfaces)
+                if (interfaceType.OriginalDefinition.Is(knownSymbols.UnmanagedDataInterface))
+                    unmanagedDataFQNsList.Add(interfaceType.TypeArguments[0].FQN);
+
+            classUnmanagedDataFQNs = unmanagedDataFQNsList.ToArray();
+        }
+
         return new()
         {
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
                 filePath: typeDeclaration.SyntaxTree.FilePath,
-                targetFQN: typeDeclaration.Identifier.ValueText,
+                targetFQN: classSymbol.FQN,
                 label: attributeName,
                 includeFilename: false
             ),
+            Environment = environment,
             HasIInstanceIndex = hasIIndexInstance,
             EmitIInstanceIndex = emitIIndexInstance,
-            SourceGeneratorErrorLocation = new LocationInfo(sourceLocation),
+            SourceGeneratorErrorLocation = sourceLocation,
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration, context.SemanticModel, ct),
             ContainingTypeFQN = classSymbol.ContainingType?.FQN,
             Attribute = attributeName,
             AttributeSettings = attributeArguments,
-            UnmanagedDataFQNs = classSymbol.Interfaces
-                .Where(x => x.OriginalDefinition.Is(knownSymbols.UnmanagedDataInterface))
-                .Select(x => x.TypeArguments.FirstOrDefault()?.FQN ?? "")
-                .ToArray(),
-            TrackingIdRegistrations = trackingIdRegistrations.ToArray(),
+            UnmanagedDataFQNs = classUnmanagedDataFQNs,
+            TrackingIdRegistrations = trackingIdRegistrations,
             TypeFQN = classSymbol.FQN,
             TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode(),
             HasBaseDeclarationsWithAttribute = hasBaseDeclarationsWithAttribute,
             ManualInheritanceMismatch = manualInheritanceMismatch,
-                InterfacesWithAttribute
-                = classSymbol.Interfaces
-                    .Where(x => x.HasAttribute(attributeSymbol))
-                    .Where(x => !classSymbol.GetBaseTypes().Any(y => y.Interfaces.Contains(x))) // skip interfaces already registered via base class
-                    .Select(x => x.FQN)
-                    .Where(x => x != null)
-                    .ToArray(),
+            InterfacesWithAttribute = interfacesWithAttribute.ToArray(),
+            TrackedInterfacesBuilderFunc = new(() => trackedInterfaces),
             Flags = 0
                     | (context.SemanticModel.IsAccessible(position: 0, classSymbol) ? IsAccessible : 0)
                     | (classSymbol.ContainingSymbol is { } containing && context.SemanticModel.IsAccessible(position: 0, containing) ? ContainingTypeIsAccessible : 0)
@@ -321,8 +528,169 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         };
     }
 
+    static InterfaceGeneratorInput TransformInterfaceSyntaxContext(
+        GeneratorAttributeSyntaxContext context,
+        PrecomputedAttributeSettingsData cache,
+        CancellationToken ct
+    )
+    {
+        var knownSymbols = cache.Environment.KnownSymbols;
+
+        if (context.TargetNode is not TypeDeclarationSyntax typeDeclaration)
+            return default;
+
+        if (context.TargetSymbol is not INamedTypeSymbol { TypeKind: TypeKind.Interface } interfaceSymbol)
+            return default;
+
+        if (context.Attributes.FirstOrDefault() is not { AttributeConstructor: not null } attributeData)
+            return default;
+
+        var allDeclarations = Utility
+            .DeconstructTypeDeclaration(typeDeclaration, context.SemanticModel, ct)
+            .AsArray();
+
+        string[] unmanagedDataFQNs;
+        string[] trackingIdTypeFQNs;
+        using (Scratch.RentA<List<string>>(out var unmanagedDataFQNsList))
+        using (Scratch.RentB<List<string>>(out var trackingIdTypeFQNsList))
+        using (Scratch.RentA<HashSet<string>>(out var seenUnmanagedDataFQNs))
+        using (Scratch.RentB<HashSet<string>>(out var seenTrackingIdTypeFQNs))
+        {
+            Add(interfaceSymbol);
+            foreach (var inheritedInterface in interfaceSymbol.AllInterfaces)
+                Add(inheritedInterface);
+
+            unmanagedDataFQNs = unmanagedDataFQNsList.ToArray();
+            trackingIdTypeFQNs = trackingIdTypeFQNsList.ToArray();
+
+            void Add(INamedTypeSymbol symbol)
+            {
+                bool hasUnmanagedData = symbol.OriginalDefinition.Is(knownSymbols.UnmanagedDataInterface);
+                bool hasTrackingId = symbol.OriginalDefinition.Is(knownSymbols.TrackingIdInterface);
+
+                if (!hasUnmanagedData)
+                    if (!hasTrackingId)
+                        return;
+
+                if (symbol.TypeArguments is not [{ FQN: { Length: > 0 } fqn }])
+                    return;
+
+                if (hasUnmanagedData)
+                    if (seenUnmanagedDataFQNs.Add(fqn))
+                        unmanagedDataFQNsList.Add(fqn);
+
+                if (hasTrackingId)
+                    if (seenTrackingIdTypeFQNs.Add(fqn))
+                        trackingIdTypeFQNsList.Add(fqn);
+            }
+        }
+
+        return new()
+        {
+            SourceGeneratorOutputFilename = Utility.GetOutputFilename(
+                filePath: typeDeclaration.SyntaxTree.FilePath,
+                targetFQN: interfaceSymbol.FQN,
+                label: "Track.InterfaceHelper",
+                includeFilename: false
+            ),
+            SourceGeneratorErrorLocation = attributeData.ApplicationSyntaxReference.GetLocation() ?? typeDeclaration.Identifier.GetLocation(),
+            AttributeSettings = cache.AttributeSettingsByType.Value[interfaceSymbol],
+            ContainingTypeDeclaration = allDeclarations,
+            ContainingTypeFQN = interfaceSymbol.ContainingType?.FQN,
+            UnmanagedDataFQNs = unmanagedDataFQNs,
+            TrackingIdTypeFQNs = trackingIdTypeFQNs,
+            TypeFQN = interfaceSymbol.FQN,
+            TypeDisplayNameBuilderFunc = new(() => interfaceSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode()),
+            IsGenericType = interfaceSymbol.IsGenericType,
+            Flags = 0
+                    | (context.SemanticModel.IsAccessible(position: 0, interfaceSymbol) ? IsAccessible : 0)
+                    | (interfaceSymbol.ContainingSymbol is { } containing && context.SemanticModel.IsAccessible(position: 0, containing) ? ContainingTypeIsAccessible : 0)
+                    | (interfaceSymbol.IsGenericType ? IsGenericType : 0)
+                    | IsInterface,
+        };
+    }
+
+    static void GenerateTrackedInterfaceHelper(SourceProductionContext context, SourceWriter src, InterfaceGeneratorInput input)
+    {
+        if (input is not { TypeFQN.Length: > 0, IsGenericType: false })
+            return;
+
+        string typeDisplayName = input.TypeDisplayNameBuilderFunc.Value?.Invoke()
+                                 ?? input.TypeFQN;
+
+        src.Line.Write(Alias.UsingStorage);
+        src.Line.Write(Alias.UsingInline);
+        src.Line.Write(Alias.UsingUtility);
+        src.Linebreak();
+
+        var declarations = input.ContainingTypeDeclaration.AsArray();
+
+        foreach (var declaration in declarations)
+            src.Line.Write(declaration).OpenBrace();
+
+        src.Line.Write("public static class Track");
+
+        using (src.Braces)
+        {
+            EmitTrackApiSurface(
+                src: src,
+                input: new(
+                    TypeFQN: input.TypeFQN ?? "",
+                    TypeDisplayName: typeDisplayName,
+                    AttributeSettings: input.AttributeSettings,
+                    NewModifier: "",
+                    UnmanagedDataFQNs: input.UnmanagedDataFQNs,
+                    FindByIdTypeFQNs: input.TrackingIdTypeFQNs,
+                    EmitDocs: true
+                )
+            );
+        }
+
+        foreach (var _ in declarations)
+            src.CloseBrace();
+
+        src.Linebreak();
+
+        if (input.TypeFQN is { Length: > 0 })
+        {
+            EmitStaticInit(
+                src: src,
+                input: new(
+                    TypeFQN: input.TypeFQN,
+                    ContainingTypeFQN: input.ContainingTypeFQN,
+                    Flags: input.Flags,
+                    IsAutoInstantiate: false,
+                    EmitTransformAccessInit: input.AttributeSettings.TrackTransforms,
+                    TransformInitialCapacity: input.AttributeSettings.InitialCapacity,
+                    TransformDesiredJobCount: input.AttributeSettings.DesiredJobCount
+                ),
+                containingDeclarations: declarations.AsSpan()[..^1]
+            );
+        }
+
+        src.TrimEndWhitespace();
+    }
+
+    static TrackAttributeSettings GetTrackAttributeSettings(AttributeData attributeData, CancellationToken ct)
+        => attributeData
+            .GetAttributeConstructorArguments(ct)
+            .Select(x => new TrackAttributeSettings(
+                    SingletonStrategy: x.Get<SingletonStrategy>("strategy", null),
+                    TrackTransforms: x.Get("transformAccessArray", false),
+                    InitialCapacity: x.Get("transformInitialCapacity", 64),
+                    DesiredJobCount: x.Get("transformDesiredJobCount", -1),
+                    CacheEnabledState: x.Get("cacheEnabledState", false),
+                    Manual: x.Get("manual", false)
+                )
+            );
+
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
+        if (input.Attribute is null)
+            return;
+
+        src.ShouldEmitDocs = input.Environment.ShouldEmitDocs;
+
         src.Line.Write("#pragma warning disable CS8321 // Local function is declared but never used");
         src.Line.Write("#pragma warning disable CS0618 // Type or member is obsolete");
         src.Line.Write(Alias.UsingStorage);
@@ -352,11 +720,15 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         string @protected = input.Flags.Has(IsSealed) ? "" : "protected ";
         string @new = input.HasBaseDeclarationsWithAttribute ? "new " : "";
-        bool hasBaseRegistrationMethod = input.HasBaseDeclarationsWithAttribute && !input.ManualInheritanceMismatch;
+        bool hasBaseRegistrationMethod = input is { HasBaseDeclarationsWithAttribute: true, ManualInheritanceMismatch: false };
         string registrationNew = hasBaseRegistrationMethod ? "new " : "";
-
         var unmanagedDataInfo = input.UnmanagedDataFQNs.AsArray()
             .Select(x => (dataType: x, dataTypeShort: x.Split('.', ':').Last().HtmlEncode()))
+            .ToArray();
+
+        var findByIdTypeFQNs = input.TrackingIdRegistrations.AsArray()
+            .Select(x => x.IDTypeFQN)
+            .Distinct()
             .ToArray();
 
         bool hasFindByAssetId = input.TrackingIdRegistrations.AsArray()
@@ -374,7 +746,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         int lastDeclaration = declarations.Length - 1;
         for (int i = 0; i < declarations.Length; i++)
         {
-            if (i == lastDeclaration && input.Symbols.Has(UNITY_EDITOR))
+            if (i == lastDeclaration && src.ShouldEmitDocs)
             {
                 if (input.Attribute is TrackAttributeMetadataName)
                 {
@@ -433,21 +805,15 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             else
             {
                 bool register = methodName is "OnEnableINTERNAL";
-                methodName = register
-                    ? $"RegisterInstance"
-                    : $"UnregisterInstance";
-
-                if (input.Symbols.Has(UNITY_EDITOR))
-                {
-                    src.Line.Write($"/// <summary>");
-                    src.Line.Write($"/// Manually {(register ? "registers" : "unregisters")} this instance {(register ? "in" : "from")} the <c>{input.Attribute}</c> storage.");
-                    src.Line.Write($"/// </summary>");
-                    src.Line.Write($"/// <remarks>");
-                    src.Line.Write($"/// You <b>must ensure</b> that the instance always registers and unregisters itself symmetrically.");
-                    src.Line.Write($"/// This is usually achieved by hooking into reliable object lifecycle methods, such as <c>OnEnable</c>+<c>OnDisable</c>,");
-                    src.Line.Write($"/// or <c>Awake</c>+<c>OnDestroy</c>. Make sure the registration methods are never stopped by an earlier exception.");
-                    src.Line.Write($"/// </remarks>");
-                }
+                methodName = register ? "RegisterInstance" : "UnregisterInstance";
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Manually {(register ? "registers" : "unregisters")} this instance {(register ? "in" : "from")} the <c>{input.Attribute}</c> storage.");
+                src.Doc?.Write($"/// </summary>");
+                src.Doc?.Write($"/// <remarks>");
+                src.Doc?.Write($"/// You <b>must ensure</b> that the instance always registers and unregisters itself symmetrically.");
+                src.Doc?.Write($"/// This is usually achieved by hooking into reliable object lifecycle methods, such as <c>OnEnable</c>+<c>OnDisable</c>,");
+                src.Doc?.Write($"/// or <c>Awake</c>+<c>OnDestroy</c>. Make sure the registration methods are never stopped by an earlier exception.");
+                src.Doc?.Write($"/// </remarks>");
             }
 
             src.Line.Write($"{@protected}{registrationNew}void {methodName}()");
@@ -475,7 +841,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             if (!hasFindByAssetId)
                 return;
 
-            if (!input.Symbols.Has(UNITY_EDITOR))
+            if (!input.Environment.IsEditor)
                 return;
 
             src.Line.Write($"if ({m}Utility.TryGetAssetID(this, out var {m}AssetId))");
@@ -485,35 +851,59 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         void WriteGeneratedArraysComment()
         {
-            src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Instances\"/> tracked instance list </item>");
-
-            if (input.AttributeSettings.TrackInstanceIDs)
-                src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIDs\"/> instance ID array </item>");
+            src.Doc?.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Instances\"/> tracked instance list </item>");
 
             if (input.AttributeSettings.TrackTransforms)
-                src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.TransformAccessArray\"/> transform array </item>");
+                src.Doc?.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.TransformAccessArray\"/> transform array </item>");
 
             foreach (var (_, dataTypeShort) in unmanagedDataInfo)
-                src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/> data array </item>");
+                src.Doc?.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/> data array </item>");
+        }
+
+        void EmitTrackLocalUnmanagedAccessors()
+        {
+            if (input.Attribute is not TrackAttributeMetadataName)
+                return;
+
+            foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
+            {
+                src.Linebreak();
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Gets a reference to the <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instance.");
+                src.Doc?.Write($"/// You can use this reference in jobs or Burst-compiled functions.");
+                src.Doc?.Write($"/// </summary>");
+                src.Doc?.Write($"/// <remarks>");
+                src.Doc?.Write($"/// The reference corresponds to the tracked instance with the appropriate instance index.");
+                src.Doc?.Write($"/// You can also access data statically via <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/>");
+                src.Doc?.Write($"/// and initialize/dispose it by overriding methods in <see cref=\"Medicine.IUnmanagedData{{T}}\"/>.");
+
+                src.Line.Write($"public ref {dataType} Local{dataTypeShort}");
+                using (src.Braces)
+                {
+                    src.Line.Write($"{Alias.Inline} get");
+                    using (src.Indent)
+                        src.Line.Write($"=> ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.ElementAtRefRW({m}MedicineInternalInstanceIndex);");
+                }
+            }
+
+            if (unmanagedDataInfo.Length > 0)
+                src.Linebreak();
         }
 
         if (input.Attribute is TrackAttributeMetadataName)
         {
-            if (input.Symbols.Has(UNITY_EDITOR))
-            {
-                src.Line.Write($"/// <summary>");
-                src.Line.Write($"/// Represents the index of this instance in the following static storage arrays:");
-                src.Line.Write($"/// <list type=\"bullet\">");
-                WriteGeneratedArraysComment();
-                src.Line.Write($"/// </list>");
-                src.Line.Write($"/// </summary>");
-                src.Line.Write($"/// <remarks>");
-                src.Line.Write($"/// This property is automatically updated.");
-                src.Line.Write($"/// Note that the instance index will change during the lifetime of the instance - never store it.");
-                src.Line.Write($"/// <br/><br/>");
-                src.Line.Write($"/// A value of -1 indicates that the instance is not currently active/registered.");
-                src.Line.Write($"/// </remarks>");
-            }
+            src.Doc?.Write($"/// <summary>");
+            src.Doc?.Write($"/// Represents the index of this instance in the following static storage arrays:");
+            src.Doc?.Write($"/// <list type=\"bullet\">");
+            WriteGeneratedArraysComment();
+            src.Doc?.Write($"/// </list>");
+            src.Doc?.Write($"/// </summary>");
+            src.Doc?.Write($"/// <remarks>");
+            src.Doc?.Write($"/// This property is automatically updated.");
+            src.Doc?.Write($"/// Note that the instance index will change during the lifetime of the instance - never store it.");
+            src.Doc?.Write($"/// <br/><br/>");
+            src.Doc?.Write($"/// A value of -1 indicates that the instance is not currently active/registered.");
+            src.Doc?.Write($"/// </remarks>");
 
             src.Line.Write($"public int InstanceIndex => {m}MedicineInternalInstanceIndex;");
             src.Linebreak();
@@ -541,6 +931,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             var trackedInterfaceStorageTypes = trackedStorageTypes
                 .Where(x => x != input.TypeFQN)
                 .ToArray();
+
             for (int i = 0; i < trackedInterfaceStorageTypes.Length; i++)
             {
                 string interfaceStorageType = trackedInterfaceStorageTypes[i];
@@ -582,195 +973,25 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Linebreak();
         }
 
-        if (input.AttributeSettings.TrackTransforms)
-        {
-            if (input.Symbols.Has(UNITY_EDITOR))
-            {
-                src.Line.Write($"/// <summary>");
-                src.Line.Write($"/// Allows job access to the transforms of the tracked {input.TypeDisplayName} instances.");
-                src.Line.Write($"/// </summary>");
-            }
+        var effectiveSingletonStrategy = input.AttributeSettings.SingletonStrategy ?? input.Environment.MedicineSettings.SingletonStrategy;
 
-            src.Line.Write($"{@new}public static global::UnityEngine.Jobs.TransformAccessArray TransformAccessArray");
-            using (src.Braces)
-            {
-                src.Line.Write(Alias.Inline).Write(" get");
-                using (src.Braces)
-                {
-                    src.Line.Write($"return {m}Storage.TransformAccess<{input.TypeFQN}>.Transforms;");
-                    src.Linebreak();
-
-                    if (!input.Flags.Has(IsGenericType))
-                    {
-                        if (input.Symbols.Has(UNITY_EDITOR))
-                            src.Line.Write(Alias.EditorInit);
-
-                        src.Line.Write(Alias.RuntimeInit);
-                        src.Line.Write($"static void {m}Init()");
-
-                        using (src.Indent)
-                            src.Line.Write($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize")
-                                .Write($"({input.AttributeSettings.InitialCapacity}, {input.AttributeSettings.DesiredJobCount});");
-                    }
-                }
-            }
-
-            src.Linebreak();
-        }
-
-        if (input.Flags.Has(IsGenericType) && input.AttributeSettings is { TrackTransforms: true })
-        {
-            src.Line.Write($"public static void InitializeTransformAccessArray()");
-
-            using (src.Indent)
-            {
-                src.Line
-                    .Write($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize")
-                    .Write($"({input.AttributeSettings.InitialCapacity}, {input.AttributeSettings.DesiredJobCount});");
-            }
-
-            src.Linebreak();
-        }
-
-        if (input.AttributeSettings.TrackInstanceIDs)
-        {
-            if (input.Symbols.Has(UNITY_EDITOR))
-            {
-                src.Line.Write($"/// <summary>");
-                src.Line.Write($"/// Gets an array of instance IDs for the tracked type's enabled instances.");
-                src.Line.Write($"/// </summary>");
-                src.Line.Write($"/// <seealso href=\"https://docs.unity3d.com/ScriptReference/Resources.InstanceIDToObjectList.html\">Resources.InstanceIDToObjectList</seealso>");
-                src.Line.Write($"/// <remarks>");
-                src.Line.Write($"/// The instance IDs can be used to refer to tracked objects in unmanaged contexts, e.g.,");
-                src.Line.Write($"/// jobs and Burst-compiled functions.");
-                src.Line.Write($"/// <list type=\"bullet\">");
-                src.Line.Write($"/// <item>Requires the <c>[Track(instanceIDs: true)]</c> attribute parameter to be set.</item>");
-                src.Line.Write($"/// <item>The order of instance IDs will correspond to the order of tracked transforms.</item>");
-                src.Line.Write($"/// </list>");
-                src.Line.Write($"/// </remarks>");
-            }
-
-            src.Line.Write($"{@new}public static global::Unity.Collections.NativeArray<int> InstanceIDs");
-            using (src.Braces)
-                src.Line.Write(Alias.Inline).Write($" get => {m}Storage.InstanceIDs<{input.TypeFQN}>.List.AsArray();");
-
-            src.Linebreak();
-        }
-
-        if (input.UnmanagedDataFQNs.Length > 0)
-        {
-            if (input.Symbols.Has(UNITY_EDITOR))
-            {
-                src.Line.Write($"/// <summary>");
-                src.Line.Write($"/// Allows job access to the unmanaged data arrays of the tracked {input.TypeDisplayName} instances");
-                src.Line.Write($"/// of this component type.");
-                src.Line.Write($"/// </summary>");
-                src.Line.Write($"/// <remarks>");
-                src.Line.Write($"/// The unmanaged data is stored in a <see cref=\"global::Unity.Collections.NativeArray{{T}}\"/>, where each element");
-                src.Line.Write($"/// corresponds to the tracked instance with the appropriate <see cref=\"Medicine.IInstanceIndex\">instance index</see>.");
-                src.Line.Write($"/// </remarks>");
-                string s = input.UnmanagedDataFQNs.Length > 1 ? "s" : "";
-                string origin = unmanagedDataInfo.Select(x => $"<c>IUnmanagedData&lt;{x.dataTypeShort}&gt;</c>").Join(", ");
-                src.Line.Write($"/// <codegen>Generated because of the implemented interface{s}: {origin}</codegen>");
-            }
-
-            src.Line.Write($"public static {@new}partial class Unmanaged");
-            using (src.Braces)
-            {
-                foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
-                {
-                    src.Linebreak();
-                    if (input.Symbols.Has(UNITY_EDITOR))
-                    {
-                        src.Line.Write($"/// <summary>");
-                        src.Line.Write($"/// Gets an array of <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instances.");
-                        src.Line.Write($"/// You can use this array in jobs or Burst-compiled functions.");
-                        src.Line.Write($"/// </summary>");
-                        src.Line.Write($"/// <remarks>");
-                        src.Line.Write($"/// Each element in the native array corresponds to the tracked instance with the appropriate instance index.");
-                        src.Line.Write($"/// You can access per-instance data via the generated <see cref=\"{input.TypeDisplayName}.Local{dataTypeShort}\"/> property,");
-                        src.Line.Write($"/// or you can access data statically via this array and");
-                        src.Line.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
-                        src.Line.Write($"/// </remarks>");
-                        src.Line.Write($"/// <codegen>Generated because of the following implemented interface: <c>IUnmanagedData&lt;{dataTypeShort}&gt;</c></codegen>");
-                    }
-
-                    src.Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataTypeShort}Array");
-
-                    using (src.Braces)
-                        src.Line.Write($"{Alias.Inline} get => ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.Array;");
-                }
-            }
-
-            if (input.Attribute is TrackAttributeMetadataName)
-            {
-                src.Linebreak();
-                foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
-                {
-                    src.Linebreak();
-                    if (input.Symbols.Has(UNITY_EDITOR))
-                    {
-                        src.Line.Write($"/// <summary>");
-                        src.Line.Write($"/// Gets a reference to the <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instance.");
-                        src.Line.Write($"/// You can use this reference in jobs or Burst-compiled functions.");
-                        src.Line.Write($"/// </summary>");
-                        src.Line.Write($"/// <remarks>");
-                        src.Line.Write($"/// The reference corresponds to the tracked instance with the appropriate instance index.");
-                        src.Line.Write($"/// You can also access data statically via <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/>");
-                        src.Line.Write($"/// and initialize/dispose it by overriding methods in <see cref=\"Medicine.IUnmanagedData{{T}}\"/>.");
-                    }
-
-                    src.Line.Write($"public ref {dataType} Local{dataTypeShort}");
-
-                    using (src.Braces)
-                    {
-                        src.Line.Write($"{Alias.Inline} get");
-                        using (src.Indent)
-                            src.Line.Write($"=> ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.ElementAtRefRW({m}MedicineInternalInstanceIndex);");
-                    }
-                }
-            }
-
-            src.Linebreak();
-        }
-
-        foreach (var idType in input.TrackingIdRegistrations.AsArray().Select(x => x.IDTypeFQN).Distinct())
-        {
-            src.Line.Write(Alias.Inline);
-            src.Line.Write($"public static {input.TypeFQN}? FindByID({idType} id)");
-
-            using (src.Indent)
-                src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Find(id);");
-
-            src.Linebreak();
-
-            src.Line.Write(Alias.Inline);
-            src.Line.Write($"public static bool TryFindByID({idType} id, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {input.TypeFQN}? result)");
-
-            using (src.Indent)
-                src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.TryFind(id, out result);");
-
-            src.Linebreak();
-        }
-
+        // todo: extract singleton emit pipeline to a separate source generator?
+        // the [Singleton] path is increasingly distinct from the [Track] path; how much code would we need to duplicate?
         if (input.Attribute is SingletonAttributeMetadataName)
         {
-            if (input.Symbols.Has(UNITY_EDITOR))
-            {
-                src.Line.Write($"/// <summary>");
-                src.Line.Write($"/// Retrieves the active <see cref=\"{input.TypeDisplayName}\"/> singleton instance.");
-                src.Line.Write($"/// </summary>");
-                src.Line.Write($"/// <remarks>");
-                src.Line.Write($"/// <list type=\"bullet\">");
-                src.Line.Write($"/// <item> This property <b>might return null</b> if the singleton instance has not been registered yet");
-                src.Line.Write($"/// (or has been disabled/destroyed). </item>");
-                src.Line.Write($"/// <item> MonoBehaviours and ScriptableObjects marked with the <see cref=\"SingletonAttribute\"/> will");
-                src.Line.Write($"/// automatically register/unregister themselves as the active singleton instance in OnEnable/OnDisable. </item>");
-                src.Line.Write($"/// <item> In edit mode, to provide better compatibility with editor tooling, <c>FindObjectsOfType</c>");
-                src.Line.Write($"/// is used internally to attempt to locate the object (cached for one editor update). </item>");
-                src.Line.Write($"/// </list>");
-                src.Line.Write($"/// </remarks>");
-            }
+            src.Doc?.Write($"/// <summary>");
+            src.Doc?.Write($"/// Retrieves the active <see cref=\"{input.TypeDisplayName}\"/> singleton instance.");
+            src.Doc?.Write($"/// </summary>");
+            src.Doc?.Write($"/// <remarks>");
+            src.Doc?.Write($"/// <list type=\"bullet\">");
+            src.Doc?.Write($"/// <item> This property <b>might return null</b> if the singleton instance has not been registered yet");
+            src.Doc?.Write($"/// (or has been disabled/destroyed). </item>");
+            src.Doc?.Write($"/// <item> MonoBehaviours and ScriptableObjects marked with the <see cref=\"SingletonAttribute\"/> will");
+            src.Doc?.Write($"/// automatically register/unregister themselves as the active singleton instance in OnEnable/OnDisable. </item>");
+            src.Doc?.Write($"/// <item> In edit mode, to provide better compatibility with editor tooling, <c>FindObjectsByType</c>");
+            src.Doc?.Write($"/// is used internally to attempt to locate the object (cached for one editor update). </item>");
+            src.Doc?.Write($"/// </list>");
+            src.Doc?.Write($"/// </remarks>");
 
             src.Line.Write($"public static {@new}{input.TypeFQN}? Instance");
 
@@ -785,7 +1006,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Linebreak();
             EmitRegistrationMethod(
                 methodName: "OnEnableINTERNAL",
-                prependCall: $"const {stratFQN} {m}singletonStrategy = ({stratFQN}){(ulong)input.EffectiveSingletonStrategy};",
+                prependCall: $"const {stratFQN} {m}singletonStrategy = ({stratFQN}){(ulong)effectiveSingletonStrategy};",
                 methodCalls:
                 [
                     $"{m}Storage.Singleton<{input.TypeFQN}>.Register(this, {m}singletonStrategy)",
@@ -795,7 +1016,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             EmitRegistrationMethod(
                 methodName: "OnDisableINTERNAL",
-                prependCall: $"const {stratFQN} {m}singletonStrategy = ({stratFQN}){(ulong)input.EffectiveSingletonStrategy};",
+                prependCall: $"const {stratFQN} {m}singletonStrategy = ({stratFQN}){(ulong)effectiveSingletonStrategy};",
                 methodCalls:
                 [
                     $"{m}Storage.Singleton<{input.TypeFQN}>.Unregister(this, {m}singletonStrategy)",
@@ -803,7 +1024,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 ]
             );
 
-            if (input.Symbols.Has(UNITY_EDITOR))
+            if (input.Environment.IsEditor)
             {
                 src.Linebreak();
                 src.Line.Write(Alias.Hidden);
@@ -813,33 +1034,61 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         }
         else if (input.Attribute is TrackAttributeMetadataName)
         {
-            if (input.Symbols.Has(UNITY_EDITOR))
+            EmitTrackApiSurface(
+                src, new(
+                    TypeFQN: input.TypeFQN ?? "",
+                    TypeDisplayName: input.TypeDisplayName ?? input.TypeFQN ?? "",
+                    AttributeSettings: input.AttributeSettings,
+                    NewModifier: @new,
+                    UnmanagedDataFQNs: input.UnmanagedDataFQNs,
+                    FindByIdTypeFQNs: findByIdTypeFQNs,
+                    EmitDocs: input.Environment.IsEditor
+                )
+            );
+
+            EmitTrackLocalUnmanagedAccessors();
+
+            var trackedInterfaces = input.TrackedInterfacesBuilderFunc.Value?.Invoke() ?? [];
+
+            IEnumerable<string> EnumerateTrackedInterfaceEnableCalls()
             {
-                src.Line.Write($"/// <summary>");
-                src.Line.Write($"/// Allows enumeration of all enabled instances of <see cref=\"{input.TypeDisplayName?.HtmlEncode()}\"/>.");
-                src.Line.Write($"/// </summary>");
-                src.Line.Write($"/// <remarks>");
-                src.Line.Write($"/// <list type=\"bullet\">");
-                src.Line.Write($"/// <item> MonoBehaviours and ScriptableObjects marked with the <see cref=\"TrackAttribute\"/> will automatically register/unregister themselves");
-                src.Line.Write($"/// in the active instance list in OnEnable/OnDisable. </item>");
-                src.Line.Write($"/// <item> This property can return null if the singleton instance doesn't exist or hasn't executed OnEnabled yet. </item>");
-                src.Line.Write($"/// <item> In edit mode, to provide better compatibility with editor tooling, <see cref=\"Object.FindObjectsByType(System.Type,UnityEngine.FindObjectsSortMode)\"/>");
-                src.Line.Write($"/// is used internally to find object instances (cached for one editor update). </item>");
-                src.Line.Write($"/// <item> You can use <c>foreach</c> to iterate over the instances. </item>");
-                src.Line.Write($"/// <item> If you’re enabling/disabling instances while enumerating, you need to use <c>{input.TypeDisplayName}.Instances.Copied()</c>. </item>");
-                src.Line.Write($"/// <item> The returned struct is compatible with <a href=\"https://github.com/Cysharp/ZLinq\">ZLINQ</a>. </item>");
-                src.Line.Write($"/// </list>");
-                src.Line.Write($"/// </remarks>");
+                foreach (var trackedInterface in trackedInterfaces)
+                {
+                    yield return $"{m}Storage.Instances<{trackedInterface.TypeFQN}>.Register(this)";
+
+                    if (input.Flags.Has(IsMonoBehaviour))
+                    {
+                        if (trackedInterface.UseTransformFallback)
+                            yield return $"{m}Storage.TransformAccess<{trackedInterface.TypeFQN}>.Register(transform)";
+                        else
+                            yield return $"if ({m}Storage.TransformAccess<{trackedInterface.TypeFQN}>.Transforms.isCreated) {m}Storage.TransformAccess<{trackedInterface.TypeFQN}>.Register(transform)";
+                    }
+
+                    foreach (var unmanagedDataType in trackedInterface.UnmanagedDataFQNs.AsArray())
+                        yield return $"{m}Storage.UnmanagedData<{trackedInterface.TypeFQN}, {unmanagedDataType}>.Register(this)";
+                }
             }
 
-            src.Line.Write($"public {@new}static global::Medicine.TrackedInstances<{input.TypeFQN}> Instances");
-            using (src.Braces)
+            IEnumerable<string> EnumerateTrackedInterfaceDisableCalls()
             {
-                src.Line.Write($"{Alias.Inline} get => default;");
-            }
+                int i = 0;
+                foreach (var trackedInterface in trackedInterfaces.AsEnumerable().Reverse())
+                {
+                    string indexName = $"{m}MedicineInternalInterfaceIndex{i++}";
+                    yield return $"int {indexName} = {m}Storage.Instances<{trackedInterface.TypeFQN}>.Unregister(this)";
 
-            src.Linebreak();
-            string withId = input.AttributeSettings.TrackInstanceIDs ? "WithInstanceID" : "";
+                    foreach (var unmanagedDataType in trackedInterface.UnmanagedDataFQNs.AsArray())
+                        yield return $"{m}Storage.UnmanagedData<{trackedInterface.TypeFQN}, {unmanagedDataType}>.Unregister(this, {indexName})";
+
+                    if (input.Flags.Has(IsMonoBehaviour))
+                    {
+                        if (trackedInterface.UseTransformFallback)
+                            yield return $"{m}Storage.TransformAccess<{trackedInterface.TypeFQN}>.Unregister({indexName})";
+                        else
+                            yield return $"if ({m}Storage.TransformAccess<{trackedInterface.TypeFQN}>.Transforms.isCreated) {m}Storage.TransformAccess<{trackedInterface.TypeFQN}>.Unregister({indexName})";
+                    }
+                }
+            }
 
             EmitRegistrationMethod(
                 methodName: "OnEnableINTERNAL",
@@ -848,10 +1097,10 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 [
                     // keep first
                     input.AttributeSettings.CacheEnabledState ? $"{m}MedicineInternalCachedEnabledState = true" : null,
-                    $"{m}Storage.Instances<{input.TypeFQN}>.Register{withId}(this)",
+                    $"{m}Storage.Instances<{input.TypeFQN}>.Register(this)",
 
                     input.AttributeSettings.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Register(transform)" : null,
-                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Register(this)"),
+                    ..EnumerateTrackedInterfaceEnableCalls(),
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Register(this)"),
                     ..input.TrackingIdRegistrations.AsArray().Select(x => $"{m}Storage.LookupByID<{x.LookupTypeFQN}, {x.IDTypeFQN}>.Register(this)"),
                 ]
@@ -863,16 +1112,17 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 [
                     // keep first
                     input.AttributeSettings.CacheEnabledState ? $"{m}MedicineInternalCachedEnabledState = false" : null,
-                    $"int index = {m}Storage.Instances<{input.TypeFQN}>.Unregister{withId}(this)",
-                    // rest in reverse
+                    $"int index = {m}Storage.Instances<{input.TypeFQN}>.Unregister(this)",
+                    // we try to execute the unregistration calls in reverse order;
+                    // shouldn't really make a difference, but it seems like a good practice
                     ..input.TrackingIdRegistrations.AsArray().Select(x => $"{m}Storage.LookupByID<{x.LookupTypeFQN}, {x.IDTypeFQN}>.Unregister(this)").Reverse(),
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Unregister(this, index)").Reverse(),
-                    ..input.InterfacesWithAttribute.AsArray().Select(x => $"{m}Storage.Instances<{x}>.Unregister(this)").Reverse(),
+                    ..EnumerateTrackedInterfaceDisableCalls(),
                     input.AttributeSettings.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Unregister(index)" : null,
                 ]
             );
 
-            if (input.Symbols.Has(UNITY_EDITOR))
+            if (input.Environment.IsEditor)
             {
                 src.Linebreak();
                 src.Line.Write(Alias.Hidden);
@@ -887,22 +1137,22 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"[{m}NS] bool {m}MedicineInternalCachedEnabledState;");
 
                 src.Linebreak();
-                src.Line.Write($"/// <summary>");
-                src.Line.Write($"/// Enabled components are updated, disabled components are not.");
-                src.Line.Write($"/// </summary>");
-                src.Line.Write($"/// <remarks>");
-                src.Line.Write($"/// This property returns the cached value of <see cref=\"UnityEngine.Behaviour.enabled\"/>.");
-                src.Line.Write($"/// Setting this property normally updates the component's enabled state.");
-                src.Line.Write($"/// The cached value is automatically updated when the component is enabled/disabled.<br/><br/>");
-                src.Line.Write($"/// This generated property effectively hides the built-in <c>enabled</c>");
-                src.Line.Write($"/// property, and tries to exactly replicate its behaviour.");
-                src.Line.Write($"/// </remarks>");
-                src.Line.Write($"/// <codegen>Generated because of the <c>TrackAttribute</c> parameter: <c>cacheEnabledState</c></codegen>");
-                src.Line.Write($"public new bool enabled");
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Enabled components are updated, disabled components are not.");
+                src.Doc?.Write($"/// </summary>");
+                src.Doc?.Write($"/// <remarks>");
+                src.Doc?.Write($"/// This property returns the cached value of <see cref=\"UnityEngine.Behaviour.enabled\"/>.");
+                src.Doc?.Write($"/// Setting this property normally updates the component's enabled state.");
+                src.Doc?.Write($"/// The cached value is automatically updated when the component is enabled/disabled.<br/><br/>");
+                src.Doc?.Write($"/// This generated property effectively hides the built-in <c>enabled</c>");
+                src.Doc?.Write($"/// property, and tries to exactly replicate its behaviour.");
+                src.Doc?.Write($"/// </remarks>");
+                src.Doc?.Write($"/// <codegen>Generated because of the <c>TrackAttribute</c> parameter: <c>cacheEnabledState</c></codegen>");
+                src.Line.Write("public new bool enabled");
                 using (src.Braces)
                 {
-                    src.Line.Write($"{Alias.Inline}");
-                    src.Line.Write($"get");
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write("get");
                     using (src.Braces)
                     {
                         src.Line.Write($"if ({m}Utility.EditMode)");
@@ -923,17 +1173,36 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         src.Linebreak();
 
-        bool isAutoInstantiate = input.Attribute is SingletonAttributeMetadataName
-                                 && (input.EffectiveSingletonStrategy & SingletonStrategy.AutoInstantiate) != 0;
+        EmitStaticInit(
+            src: src,
+            input: new(
+                TypeFQN: input.TypeFQN ?? "",
+                ContainingTypeFQN: input.ContainingTypeFQN,
+                Flags: input.Flags,
+                IsAutoInstantiate: input is { Attribute: SingletonAttributeMetadataName } && effectiveSingletonStrategy.Has(SingletonStrategy.AutoInstantiate),
+                EmitTransformAccessInit: input is { Attribute: TrackAttributeMetadataName, AttributeSettings.TrackTransforms: true },
+                TransformInitialCapacity: input.AttributeSettings.InitialCapacity,
+                TransformDesiredJobCount: input.AttributeSettings.DesiredJobCount
+            ),
+            containingDeclarations: declarations[..^1]
+        );
+    }
 
+    static void EmitStaticInit(SourceWriter src, StaticInitInput input, Span<string> containingDeclarations)
+    {
         if (input.Flags.Has(IsGenericType))
             return;
+
+        string typeNameSanitized = input.TypeFQN.Sanitize();
+        string typeFlagsInitName = $"InitBakedTypeInfo_{typeNameSanitized}";
+        string transformInitName = $"InitTransformAccess_{typeNameSanitized}";
 
         void AssignTypeFlags()
         {
             using (src.Indent)
             {
                 src.Line.Write($" = 0");
+
                 if (input.Flags.Has(IsValueType))
                     src.Line.Write($" | {m}Utility.TypeFlags.IsValueType");
                 else
@@ -957,7 +1226,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 if (input.Flags.Has(IsScriptableObject))
                     src.Line.Write($" | {m}Utility.TypeFlags.IsScriptableObject");
 
-                if (isAutoInstantiate)
+                if (input.IsAutoInstantiate)
                     src.Line.Write($" | {m}Utility.TypeFlags.IsAutoInstantiate");
 
                 src.Write(";");
@@ -966,63 +1235,216 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         if (input.Flags.Has(IsAccessible))
         {
+            // this is the straightforward static init path
             src.Line.Write($"namespace Medicine.Internal");
             using (src.Braces)
             {
                 src.Line.Write($"static partial class {m}StaticInit");
                 using (src.Braces)
                 {
-                    src.Line.Write($"static {m}Utility.TypeFlags InitBakedTypeInfo_{input.TypeFQN!.Sanitize()}");
+                    src.Line.Write($"static {m}Utility.TypeFlags {typeFlagsInitName}");
                     using (src.Indent)
                     {
                         src.Line.Write($"= Medicine.Internal.Utility.BakedTypeInfo<{input.TypeFQN}>.Flags");
                         AssignTypeFlags();
+                    }
+
+                    if (input.EmitTransformAccessInit)
+                    {
+                        src.Line.Write($"static int {transformInitName}");
+                        src.Line.Write($"= {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize({input.TransformInitialCapacity}, {input.TransformDesiredJobCount});");
                     }
                 }
             }
 
             src.Linebreak();
         }
-        else if (input.Flags.Has(ContainingTypeIsAccessible))
+        else if (input.Flags.Has(ContainingTypeIsAccessible) && containingDeclarations.Length is not 0)
         {
-            string initMethodName = $"InitBakedTypeInfo_{input.TypeFQN!.Sanitize()}";
-
             // fallback for private classes that are nested:
             // we can't reference the tracked type's name from the assembly scope, so we need to emit this
             // intermediate method in the containing type where the tracked type is accessible
+
+            foreach (var declaration in containingDeclarations)
+                src.Line.Write(declaration).OpenBrace();
+
+            src.Line.Write(Alias.Hidden);
+            src.Line.Write($"internal static {m}Utility.TypeFlags {typeFlagsInitName}()");
+            using (src.Indent)
             {
-                foreach (var x in declarations[..^1])
-                    src.Line.Write(x).OpenBrace();
-
-                src.Line.Write(Alias.Hidden);
-                src.Line.Write($"internal static {m}Utility.TypeFlags {initMethodName}()");
-                using (src.Indent)
-                {
-                    src.Line.Write($"=> Medicine.Internal.Utility.BakedTypeInfo<{input.TypeFQN}>.Flags");
-                    AssignTypeFlags();
-                }
-
-                foreach (var _ in declarations[..^1])
-                    src.CloseBrace();
+                src.Line.Write($"=> Medicine.Internal.Utility.BakedTypeInfo<{input.TypeFQN}>.Flags");
+                AssignTypeFlags();
             }
 
-            // assign the flags by calling the forward method
+            if (input.EmitTransformAccessInit)
             {
-                src.Linebreak();
+                src.Line.Write(Alias.Hidden);
+                src.Line.Write($"internal static int {transformInitName}()");
+                using (src.Indent)
+                    src.Line.Write($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize({input.TransformInitialCapacity}, {input.TransformDesiredJobCount});");
+            }
 
-                string containingTypeFqn = input.ContainingTypeFQN ?? input.TypeFQN!;
-                src.Line.Write($"namespace Medicine.Internal");
+            foreach (var _ in containingDeclarations)
+                src.CloseBrace();
+
+            src.Linebreak();
+
+            string containingTypeFqn = input.ContainingTypeFQN ?? input.TypeFQN;
+            src.Line.Write($"namespace Medicine.Internal");
+            using (src.Braces)
+            {
+                src.Line.Write($"static partial class {m}StaticInit");
                 using (src.Braces)
                 {
-                    src.Line.Write($"static partial class {m}StaticInit");
-                    using (src.Braces)
+                    src.Line.Write($"static {m}Utility.TypeFlags {typeFlagsInitName}");
+                    using (src.Indent)
+                        src.Line.Write($"= {containingTypeFqn}.{typeFlagsInitName}();");
+
+                    if (input.EmitTransformAccessInit)
                     {
-                        src.Line.Write($"static {m}Utility.TypeFlags {initMethodName}");
+                        src.Line.Write($"static int {transformInitName}");
                         using (src.Indent)
-                            src.Line.Write($"= {containingTypeFqn}.{initMethodName}();");
+                            src.Line.Write($"= {containingTypeFqn}.{transformInitName}();");
                     }
                 }
             }
+
+            src.Linebreak();
+        }
+    }
+
+    static void EmitTrackApiSurface(SourceWriter src, TrackApiSurfaceInput input)
+    {
+        EmitTrackInstancesProperty(src, input);
+        EmitTrackTransformAccessArray(src, input);
+        EmitTrackUnmanagedStaticArrays(src, input);
+        EmitTrackFindByIDMethods(src, input);
+    }
+
+    static void EmitTrackInstancesProperty(SourceWriter src, in TrackApiSurfaceInput input)
+    {
+        src.Doc?.Write($"/// <summary>");
+        src.Doc?.Write($"/// Allows enumeration of all enabled instances of <see cref=\"{input.TypeDisplayName}\"/>.");
+        src.Doc?.Write($"/// </summary>");
+        src.Doc?.Write($"/// <remarks>");
+        src.Doc?.Write($"/// <list type=\"bullet\">");
+        src.Doc?.Write($"/// <item> MonoBehaviours and ScriptableObjects marked with the <see cref=\"TrackAttribute\"/> will automatically register/unregister themselves");
+        src.Doc?.Write($"/// in the active instance list in OnEnable/OnDisable. </item>");
+        src.Doc?.Write($"/// <item> When there are no active instances, the returned enumerable is empty. </item>");
+        src.Doc?.Write($"/// <item> In edit mode, to provide better compatibility with editor tooling, <see cref=\"Object.FindObjectsByType(System.Type,UnityEngine.FindObjectsSortMode)\"/>");
+        src.Doc?.Write($"/// is used internally to find object instances (cached for one editor update). </item>");
+        src.Doc?.Write($"/// <item> You can use <c>foreach</c> to iterate over the instances. </item>");
+        src.Doc?.Write($"/// <item> If you're enabling/disabling instances while enumerating, you need to use <c>{input.TypeDisplayName}.Instances.WithCopy</c>. </item>");
+        src.Doc?.Write($"/// <item> The returned struct is compatible with <a href=\"https://github.com/Cysharp/ZLinq\">ZLINQ</a>. </item>");
+        src.Doc?.Write($"/// </list>");
+        src.Doc?.Write($"/// </remarks>");
+
+        src.Line.Write($"public {input.NewModifier}static global::Medicine.TrackedInstances<{input.TypeFQN}> Instances");
+        using (src.Braces)
+            src.Line.Write($"{Alias.Inline} get => default;");
+
+        src.Linebreak();
+    }
+
+    static void EmitTrackTransformAccessArray(SourceWriter src, in TrackApiSurfaceInput input)
+    {
+        if (!input.AttributeSettings.TrackTransforms)
+            return;
+
+        if (input.EmitDocs)
+        {
+            src.Doc?.Write($"/// <summary>");
+            src.Doc?.Write($"/// Allows job access to the transforms of the tracked {input.TypeDisplayName} instances.");
+            src.Doc?.Write($"/// </summary>");
+        }
+
+        src.Line.Write($"{input.NewModifier}public static global::UnityEngine.Jobs.TransformAccessArray TransformAccessArray");
+        using (src.Braces)
+        {
+            src.Line.Write(Alias.Inline).Write(" get");
+            using (src.Braces)
+                src.Line.Write($"return {m}Storage.TransformAccess<{input.TypeFQN}>.Transforms;");
+        }
+
+        src.Linebreak();
+    }
+
+    static void EmitTrackUnmanagedStaticArrays(SourceWriter src, in TrackApiSurfaceInput input)
+    {
+        if (input.UnmanagedDataFQNs.Length is 0)
+            return;
+
+        var unmanagedDataInfo = input.UnmanagedDataFQNs.AsArray()
+            .Select(x => (dataType: x, dataTypeShort: x.Split('.', ':').Last().HtmlEncode()))
+            .ToArray();
+
+        src.Doc?.Write($"/// <summary>");
+        src.Doc?.Write($"/// Allows job access to the unmanaged data arrays of the tracked {input.TypeDisplayName} instances");
+        src.Doc?.Write($"/// of this component type.");
+        src.Doc?.Write($"/// </summary>");
+        src.Doc?.Write($"/// <remarks>");
+        src.Doc?.Write($"/// The unmanaged data is stored in a <see cref=\"global::Unity.Collections.NativeArray{{T}}\"/>, where each element");
+        src.Doc?.Write($"/// corresponds to the tracked instance with the appropriate <see cref=\"Medicine.IInstanceIndex\">instance index</see>.");
+        src.Doc?.Write($"/// </remarks>");
+        string s = input.UnmanagedDataFQNs.Length > 1 ? "s" : "";
+        string origin = unmanagedDataInfo.Select(x => $"<c>IUnmanagedData&lt;{x.dataTypeShort}&gt;</c>").Join(", ");
+        src.Doc?.Write($"/// <codegen>Generated because of the implemented interface{s}: {origin}</codegen>");
+
+        src.Line.Write($"public static {input.NewModifier}partial class Unmanaged");
+        using (src.Braces)
+        {
+            foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
+            {
+                src.Linebreak();
+                src.Doc?.Write($"/// <summary>");
+                src.Doc?.Write($"/// Gets an array of <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instances.");
+                src.Doc?.Write($"/// You can use this array in jobs or Burst-compiled functions.");
+                src.Doc?.Write($"/// </summary>");
+                src.Doc?.Write($"/// <remarks>");
+                src.Doc?.Write($"/// Each element in the native array corresponds to the tracked instance with the appropriate instance index.");
+                src.Doc?.Write($"/// You can access per-instance data via the generated <see cref=\"{input.TypeDisplayName}.Local{dataTypeShort}\"/> property,");
+                src.Doc?.Write($"/// or you can access data statically via this array and");
+                src.Doc?.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
+                src.Doc?.Write($"/// </remarks>");
+                src.Doc?.Write($"/// <codegen>Generated because of the following implemented interface: <c>IUnmanagedData&lt;{dataTypeShort}&gt;</c></codegen>");
+
+                src.Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataTypeShort}Array");
+                using (src.Braces)
+                    src.Line.Write($"{Alias.Inline} get => ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.Array;");
+            }
+        }
+
+        src.Linebreak();
+    }
+
+    static void EmitTrackFindByIDMethods(SourceWriter src, in TrackApiSurfaceInput input)
+    {
+        foreach (var idType in input.FindByIdTypeFQNs.AsArray().Distinct())
+        {
+            src.Doc?.Write($"/// <summary>");
+            src.Doc?.Write($"/// Returns the tracked instance associated with the provided ID.");
+            src.Doc?.Write($"/// </summary>");
+            src.Doc?.Write($"/// <param name=\"id\">The ID value to resolve.</param>");
+            src.Doc?.Write($"/// <returns>The matching <see cref=\"{input.TypeDisplayName}\"/> instance, or <c>null</c> when no matching instance exists.</returns>");
+
+            src.Line.Write(Alias.Inline);
+            src.Line.Write($"public static {input.TypeFQN}? FindByID({idType} id)");
+            using (src.Indent)
+                src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.Find(id);");
+
+            src.Linebreak();
+
+            src.Doc?.Write($"/// <summary>");
+            src.Doc?.Write($"/// Attempts to resolve a tracked instance by ID.");
+            src.Doc?.Write($"/// </summary>");
+            src.Doc?.Write($"/// <param name=\"id\">The ID value to resolve.</param>");
+            src.Doc?.Write($"/// <param name=\"result\">When this method returns <c>true</c>, contains the resolved <see cref=\"{input.TypeDisplayName}\"/> instance; otherwise <c>null</c>.</param>");
+            src.Doc?.Write($"/// <returns><c>true</c> when a matching instance was found; otherwise <c>false</c>.</returns>");
+
+            src.Line.Write(Alias.Inline);
+            src.Line.Write($"public static bool TryFindByID({idType} id, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {input.TypeFQN}? result)");
+            using (src.Indent)
+                src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.TryFind(id, out result);");
 
             src.Linebreak();
         }

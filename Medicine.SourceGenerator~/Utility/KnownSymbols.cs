@@ -1,11 +1,28 @@
 using Microsoft.CodeAnalysis;
 
-readonly record struct GeneratorEnvironment(
-    KnownSymbols KnownSymbols,
-    MedicineSettings MedicineSettings
-);
+/// <summary>
+/// Represents configuration settings extracted from the [MedicineSettings] attribute
+/// defined in the given assembly in the current compilation, as well as other compilation parameters.
+/// </summary>
+public readonly record struct MedicineSettings
+{
+    public SingletonStrategy SingletonStrategy { get; init; }
+    public bool? MakePublic { get; init; }
+}
 
-readonly record struct KnownSymbols
+public readonly record struct GeneratorEnvironment(KnownSymbols KnownSymbols, ActivePreprocessorSymbolNames PreprocessorSymbols, MedicineSettings MedicineSettings)
+{
+    public readonly KnownSymbols KnownSymbols = KnownSymbols;
+    public readonly ActivePreprocessorSymbolNames PreprocessorSymbols = PreprocessorSymbols;
+    public readonly MedicineSettings MedicineSettings = MedicineSettings;
+
+    public bool ShouldEmitDocs => PreprocessorSymbols.Has(ActivePreprocessorSymbolNames.DEBUG);
+    public bool IsEditor => PreprocessorSymbols.Has(ActivePreprocessorSymbolNames.UNITY_EDITOR);
+
+    bool IEquatable<GeneratorEnvironment>.Equals(GeneratorEnvironment other) => false;
+}
+
+public readonly record struct KnownSymbols
 {
     readonly EquatableIgnore<INamedTypeSymbol> unityObject;
     readonly EquatableIgnore<INamedTypeSymbol> unityComponent;
@@ -13,6 +30,7 @@ readonly record struct KnownSymbols
     readonly EquatableIgnore<INamedTypeSymbol> unityScriptableObject;
 
     readonly EquatableIgnore<INamedTypeSymbol> medicineFind;
+    readonly EquatableIgnore<INamedTypeSymbol> injectAttribute;
     readonly EquatableIgnore<INamedTypeSymbol> singletonAttribute;
     readonly EquatableIgnore<INamedTypeSymbol> trackAttribute;
     readonly EquatableIgnore<INamedTypeSymbol> unmanagedAccessAttribute;
@@ -32,6 +50,7 @@ readonly record struct KnownSymbols
     public INamedTypeSymbol UnityScriptableObject => unityScriptableObject.Value;
 
     public INamedTypeSymbol MedicineFind => medicineFind.Value;
+    public INamedTypeSymbol InjectAttribute => injectAttribute.Value;
     public INamedTypeSymbol SingletonAttribute => singletonAttribute.Value;
     public INamedTypeSymbol TrackAttribute => trackAttribute.Value;
     public INamedTypeSymbol UnmanagedAccessAttribute => unmanagedAccessAttribute.Value;
@@ -62,6 +81,7 @@ readonly record struct KnownSymbols
         unityScriptableObject = Get("UnityEngine.ScriptableObject");
 
         medicineFind = Get("Medicine.Find");
+        injectAttribute = Get(Constants.InjectAttributeMetadataName);
         singletonAttribute = Get(Constants.SingletonAttributeMetadataName);
         trackAttribute = Get(Constants.TrackAttributeMetadataName);
         unmanagedAccessAttribute = Get(Constants.UnmanagedAccessAttributeMetadataName);
@@ -75,6 +95,9 @@ readonly record struct KnownSymbols
         systemIDisposable = Get("System.IDisposable");
         systemFunc1 = Get("System.Func`1");
     }
+
+    bool IEquatable<KnownSymbols>.Equals(KnownSymbols other)
+        => false; // force no caching
 }
 
 static class KnownSymbolsExtensions

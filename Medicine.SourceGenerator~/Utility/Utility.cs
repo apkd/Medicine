@@ -47,7 +47,7 @@ public static class Utility
         string typename;
         {
             var source = targetFQN.AsSpan();
-            Span<char> sanitized = source.Length <= 1024
+            var sanitized = source.Length <= 1024
                 ? stackalloc char[source.Length]
                 : new char[source.Length];
 

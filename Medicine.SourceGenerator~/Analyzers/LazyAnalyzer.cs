@@ -38,7 +38,7 @@ public sealed class LazyAnalyzer : DiagnosticAnalyzer
             ArgumentList.Arguments: [not null],
             Expression: MemberAccessExpressionSyntax
             {
-                Name.Identifier.ValueText: "From",
+                Name.Text: "From",
                 Expression: SimpleNameSyntax { Identifier.ValueText: "Lazy" },
             },
         };

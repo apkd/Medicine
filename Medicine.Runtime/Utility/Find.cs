@@ -70,11 +70,11 @@ namespace Medicine
         /// <list type="bullet">
         /// <item> MonoBehaviours and ScriptableObjects marked with the <see cref="TrackAttribute"/> will automatically register/unregister themselves
         /// in the active instance list in OnEnable/OnDisable. </item>
-        /// <item> This property can return null if the singleton instance doesn't exist or hasn't executed OnEnabled yet. </item>
+        /// <item> When there are no active instances, the returned enumerable is empty. </item>
         /// <item> In edit mode, to provide better compatibility with editor tooling, <see cref="Object.FindObjectsByType(System.Type,UnityEngine.FindObjectsSortMode)"/>
         /// is used internally to find object instances (cached for one editor update). </item>
         /// <item> You can use <c>foreach</c> to iterate over the instances. </item>
-        /// <item> If you’re enabling/disabling instances while enumerating, you need to use <c>Find.Instances&lt;T&gt;().Copied()</c>. </item>
+        /// <item> If you're enabling/disabling instances while enumerating, use <c>Find.Instances&lt;T&gt;().WithCopy</c>. </item>
         /// <item> The returned struct is compatible with <a href="https://github.com/Cysharp/ZLinq">ZLINQ</a>. </item>
         /// </list>
         /// </remarks>
@@ -231,7 +231,7 @@ namespace Medicine
         /// prefabs, materials, meshes, textures, etc. It will also list internal objects, therefore,
         /// be careful with the way you handle the returned objects.
         /// </p>
-        /// <p> Contrary to Object.FindObjectsOfType this function will also always list disabled objects.</p>
+        /// <p> Contrary to <see cref="Object.FindObjectsByType{T}(FindObjectsInactive,FindObjectsSortMode)"/>, this function will always list disabled objects.</p>
         /// </summary>
         /// <typeparam name="T"> Type of object to find. </typeparam>
         /// <returns>

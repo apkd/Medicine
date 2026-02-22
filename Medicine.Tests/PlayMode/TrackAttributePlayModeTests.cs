@@ -5,19 +5,12 @@ using System.Linq;
 #endif
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using JetBrains.Annotations;
 using Medicine;
 using Medicine.Internal;
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using static System.Reflection.BindingFlags;
-using Object = UnityEngine.Object;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 
 public partial class TrackAttributePlayModeTests
 {
@@ -64,10 +57,10 @@ public partial class TrackAttributePlayModeTests
     //////////////////////////////////////////////////////////////////////////////
 
     [Track]
-    interface ITrackByInterface1 { }
+    partial interface ITrackByInterface1 { }
 
     [Track]
-    interface ITrackByInterface2 { }
+    partial interface ITrackByInterface2 { }
 
     [Track]
     sealed partial class MBTrackByInterface1 : MonoBehaviour, ITrackByInterface1, ITrackByInterface2 { }
@@ -143,9 +136,88 @@ public partial class TrackAttributePlayModeTests
         }
     }
 
+    struct InterfaceFeatureData
+    {
+        public int Value;
+    }
+
+    [Track(transformAccessArray: true, transformInitialCapacity: 16)]
+    partial interface ITrackByInterfaceFeatures : IFindByID<int>, IUnmanagedData<InterfaceFeatureData> { }
+
+    [Track]
+    sealed partial class MBTrackByInterfaceFeatures : MonoBehaviour, ITrackByInterfaceFeatures
+    {
+        int IFindByID<int>.ID
+            => GetInstanceID();
+
+        void IUnmanagedData<InterfaceFeatureData>.Initialize(out InterfaceFeatureData data)
+            => data = new() { Value = GetInstanceID() };
+    }
+
+    [Test]
+    public void Track_ByInterface_HelperFeatures()
+    {
+        var a = new GameObject("if-a", typeof(MBTrackByInterfaceFeatures)).GetComponent<MBTrackByInterfaceFeatures>();
+        var b = new GameObject("if-b", typeof(MBTrackByInterfaceFeatures)).GetComponent<MBTrackByInterfaceFeatures>();
+        var c = new GameObject("if-c", typeof(MBTrackByInterfaceFeatures)).GetComponent<MBTrackByInterfaceFeatures>();
+
+        Assert.That(ITrackByInterfaceFeatures.Track.Instances, Has.Count.EqualTo(3));
+        Assert.That(ITrackByInterfaceFeatures.Track.TransformAccessArray.length, Is.EqualTo(3));
+        Assert.That(ITrackByInterfaceFeatures.Track.Unmanaged.InterfaceFeatureDataArray, Has.Length.EqualTo(3));
+
+        using (ITrackByInterfaceFeatures.Track.Instances.ToPooledList(out var list))
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                var component = (MBTrackByInterfaceFeatures)list[i];
+                var byInterface = (ITrackByInterfaceFeatures)component;
+
+                Assert.That(((IInstanceIndex<ITrackByInterfaceFeatures>)byInterface).InstanceIndex, Is.EqualTo(i));
+                Assert.That(ITrackByInterfaceFeatures.Track.TransformAccessArray[i], Is.EqualTo(component.transform));
+                Assert.That(ITrackByInterfaceFeatures.Track.Unmanaged.InterfaceFeatureDataArray[i].Value, Is.EqualTo(component.GetInstanceID()));
+                Assert.That(ITrackByInterfaceFeatures.Track.FindByID(component.GetInstanceID()), Is.EqualTo(byInterface));
+                Assert.That(ITrackByInterfaceFeatures.Track.TryFindByID(component.GetInstanceID(), out var found), Is.True);
+                Assert.That(found, Is.EqualTo(byInterface));
+            }
+        }
+
+        b.enabled = false;
+
+        Assert.That(((IInstanceIndex<ITrackByInterfaceFeatures>)b).InstanceIndex, Is.EqualTo(-1));
+        Assert.That(ITrackByInterfaceFeatures.Track.Instances, Has.Count.EqualTo(2));
+        Assert.That(ITrackByInterfaceFeatures.Track.TransformAccessArray.length, Is.EqualTo(2));
+        Assert.That(ITrackByInterfaceFeatures.Track.Unmanaged.InterfaceFeatureDataArray, Has.Length.EqualTo(2));
+
+        a.enabled = false;
+        c.enabled = false;
+    }
+
+    [Track(transformAccessArray: true, transformInitialCapacity: 11)]
+    interface ITrackGenericTransformFallback<T> { }
+
+    [Track]
+    sealed partial class MBTrackGenericTransformFallback : MonoBehaviour, ITrackGenericTransformFallback<int> { }
+
+    [Test]
+    public void Track_ByGenericInterface_TransformFallbackInit()
+    {
+        Assert.That(Storage.TransformAccess<ITrackGenericTransformFallback<int>>.Transforms.isCreated, Is.False);
+
+        var a = new GameObject("if-generic-a", typeof(MBTrackGenericTransformFallback)).GetComponent<MBTrackGenericTransformFallback>();
+        var b = new GameObject("if-generic-b", typeof(MBTrackGenericTransformFallback)).GetComponent<MBTrackGenericTransformFallback>();
+
+        Assert.That(Storage.TransformAccess<ITrackGenericTransformFallback<int>>.Transforms.isCreated, Is.True);
+        Assert.That(Storage.TransformAccess<ITrackGenericTransformFallback<int>>.Transforms.length, Is.EqualTo(2));
+
+        a.enabled = false;
+        Assert.That(Storage.TransformAccess<ITrackGenericTransformFallback<int>>.Transforms.length, Is.EqualTo(1));
+
+        b.enabled = false;
+    }
+
     //////////////////////////////////////////////////////////////////////////////
 
-    [Track(instanceIdArray: true, transformAccessArray: true)]
+    [Track(transformAccessArray: true)]
     sealed partial class MBTrackStressTest
         : MonoBehaviour,
             IFindByID<int>,
@@ -188,7 +260,6 @@ public partial class TrackAttributePlayModeTests
 
             int expectedCount = all.AsValueEnumerable().Count(x => x.enabled);
             Assert.That(MBTrackStressTest.Instances, Has.Count.EqualTo(expectedCount));
-            Assert.That(MBTrackStressTest.InstanceIDs, Has.Length.EqualTo(expectedCount));
             Assert.That(MBTrackStressTest.TransformAccessArray.length, Is.EqualTo(expectedCount));
             Assert.That(MBTrackStressTest.Unmanaged.floatArray, Has.Length.EqualTo(expectedCount));
             Assert.That(MBTrackStressTest.Unmanaged.intArray, Has.Length.EqualTo(expectedCount));
@@ -201,8 +272,6 @@ public partial class TrackAttributePlayModeTests
 
                 Assert.That(MBTrackStressTest.FindByID(instance.GetHashCode()), Is.EqualTo(instance));
                 Assert.That(MBTrackStressTest.TransformAccessArray[instance.InstanceIndex], Is.EqualTo(instance.transform));
-                ;
-                Assert.That(MBTrackStressTest.InstanceIDs[instance.InstanceIndex], Is.EqualTo(instance.GetInstanceID()));
                 Assert.That(MBTrackStressTest.Unmanaged.intArray[instance.InstanceIndex], Is.EqualTo(instance.GetHashCode()));
             }
         }
@@ -210,7 +279,7 @@ public partial class TrackAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Track(instanceIdArray: true, transformAccessArray: true)]
+    [Track(transformAccessArray: true)]
     abstract partial class MBTrackStressTestGeneric<TID, TData>
         : MonoBehaviour,
             IFindByID<TID>,
@@ -222,7 +291,7 @@ public partial class TrackAttributePlayModeTests
             => default;
     }
 
-    [Track]
+    [Track(transformAccessArray: true)]
     sealed partial class MBTrackStressTestDerived : MBTrackStressTestGeneric<int, float>, IFindByID<int>
     {
         int IFindByID<int>.ID
@@ -234,8 +303,6 @@ public partial class TrackAttributePlayModeTests
     {
         const int instanceCount = 512;
         int passCount = Application.isBatchMode ? 1024 : 256;
-
-        MBTrackStressTestDerived.InitializeTransformAccessArray();
 
         var all = new MBTrackStressTestDerived[instanceCount];
 
@@ -253,7 +320,6 @@ public partial class TrackAttributePlayModeTests
 
             int expectedCount = all.AsValueEnumerable().Count(x => x.enabled);
             Assert.That(MBTrackStressTestDerived.Instances, Has.Count.EqualTo(expectedCount));
-            Assert.That(MBTrackStressTestDerived.InstanceIDs, Has.Length.EqualTo(expectedCount));
             Assert.That(MBTrackStressTestDerived.TransformAccessArray.length, Is.EqualTo(expectedCount));
             Assert.That(MBTrackStressTestDerived.Unmanaged.TDataArray, Has.Length.EqualTo(expectedCount));
 
@@ -265,7 +331,6 @@ public partial class TrackAttributePlayModeTests
 
                 Assert.That(MBTrackStressTestDerived.FindByID(instance.GetHashCode()), Is.EqualTo(instance));
                 Assert.That(MBTrackStressTestDerived.TransformAccessArray[instance.InstanceIndex], Is.EqualTo(instance.transform));
-                Assert.That(MBTrackStressTestDerived.InstanceIDs[instance.InstanceIndex], Is.EqualTo(instance.GetInstanceID()));
             }
         }
     }
@@ -326,31 +391,6 @@ public partial class TrackAttributePlayModeTests
             Assert.That(entry, Is.Not.Null);
 
         CollectionAssert.AreEquivalent(created, destination);
-    }
-
-    //////////////////////////////////////////////////////////////////////////////
-
-    [Track(instanceIdArray: true)]
-    sealed partial class MBTrackInstanceIdArray : MonoBehaviour { }
-
-    [Test]
-    public void Track_InstanceIdArray()
-    {
-        Assert.That(MBTrackInstanceIdArray.Instances, Has.Count.EqualTo(0));
-        Assert.That(MBTrackInstanceIdArray.InstanceIDs, Has.Length.EqualTo(0));
-
-        for (int i = 1; i < 5; ++i)
-        {
-            var go = new GameObject(null, typeof(MBTrackInstanceIdArray));
-            Assert.That(MBTrackInstanceIdArray.Instances, Has.Count.EqualTo(i));
-            Assert.That(MBTrackInstanceIdArray.InstanceIDs, Has.Length.EqualTo(i));
-        }
-
-        var instanceIDs = MBTrackInstanceIdArray.InstanceIDs;
-
-        using (MBTrackInstanceIdArray.Instances.ToPooledList(out var list))
-            for (int i = 0, n = list.Count; i < n; ++i)
-                Assert.That(list[i].GetInstanceID(), Is.EqualTo(instanceIDs[i]));
     }
 
     //////////////////////////////////////////////////////////////////////////////
@@ -434,7 +474,7 @@ public partial class TrackAttributePlayModeTests
     //////////////////////////////////////////////////////////////////////////////
 
     [Track]
-    interface IFindByIDWithInterface : IFindByID<int> { }
+    partial interface IFindByIDWithInterface : IFindByID<int> { }
 
     [Track]
     sealed partial class MBTrackFindByIDWithInterface : MonoBehaviour, IFindByIDWithInterface

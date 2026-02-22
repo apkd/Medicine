@@ -25,7 +25,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
                 .Combine(generatorEnvironment)
                 .SelectEx((x, ct) => Transform(x.Left, x.Right.KnownSymbols, ct) with
                     {
-                        Symbols = x.Right.MedicineSettings.PreprocessorSymbolNames,
+                        Symbols = x.Right.PreprocessorSymbols,
                     }
                 );
 
@@ -33,7 +33,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
     }
 
     [SuppressMessage("ReSharper", "NotAccessedPositionalProperty.Local")]
-    record struct CacheInput : IGeneratorTransformOutput
+    record struct CacheInput : ISourceGeneratorPassData
     {
         public EquatableIgnore<GeneratorAttributeSyntaxContext> Context { get; init; }
 
@@ -55,7 +55,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
             Context = context,
         };
 
-    record struct GeneratorInput : IGeneratorTransformOutput
+    record struct GeneratorInput : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
@@ -239,6 +239,8 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
+        src.ShouldEmitDocs = input.Symbols.Has(UNITY_EDITOR);
+
         if (input.GetEnumeratorNamespace is not null)
         {
             src.Line.Write($"using {input.GetEnumeratorNamespace};");
@@ -252,18 +254,17 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
             src.IncreaseIndent();
         }
 
-        if (input.Symbols.Has(UNITY_EDITOR))
         {
-            src.Line.Write("/// <summary>");
-            src.Line.Write("/// This is a generated wrapper struct to simplify the name of the combined generic");
-            src.Line.Write("/// <see cref=\"ZLinq.ValueEnumerable{TE, T}\"/> constructed from a ZLINQ query.");
-            src.Line.Write("/// This makes it easier to define a method that returns the enumerable.");
-            src.Line.Write("/// </summary>");
-            src.Line.Write("/// <example>");
-            src.Line.Write("/// <code>");
-            src.Line.Write(wrapEnumerableExample);
-            src.Line.Write("/// </code>");
-            src.Line.Write("/// </example>");
+            src.Doc?.Write("/// <summary>");
+            src.Doc?.Write("/// This is a generated wrapper struct to simplify the name of the combined generic");
+            src.Doc?.Write("/// <see cref=\"ZLinq.ValueEnumerable{TE, T}\"/> constructed from a ZLINQ query.");
+            src.Doc?.Write("/// This makes it easier to define a method that returns the enumerable.");
+            src.Doc?.Write("/// </summary>");
+            src.Doc?.Write("/// <example>");
+            src.Doc?.Write("/// <code>");
+            src.Doc?.Write(wrapEnumerableExample);
+            src.Doc?.Write("/// </code>");
+            src.Doc?.Write("/// </example>");
         }
 
         src.Line.Write("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
@@ -283,9 +284,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
         {
             src.Line.Write("public");
             using (src.Indent)
-            {
                 src.Line.Write($"{input.EnumerableFQN:SplitGenericTypeName} Enumerable {{ get; init; }}");
-            }
 
             src.Linebreak();
             src.Line.Write("public");
@@ -303,17 +302,13 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 
             src.Line.Write("public");
             using (src.Indent)
-            {
                 src.Line.Write($"{input.EnumeratorFQN:SplitGenericTypeName} GetEnumerator() => Enumerable.GetEnumerator();");
-            }
 
             src.Linebreak();
 
             src.Line.Write("public");
             using (src.Indent)
-            {
                 src.Line.Write($"{input.EnumerableFQN:SplitGenericTypeName} AsValueEnumerable() => Enumerable;");
-            }
         }
 
         foreach (var x in input.Declaration.AsSpan())
@@ -338,11 +333,14 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
         if (unresolvedIdentifiers.Length == 0)
             return null;
 
-        var unresolvedIdentifierNames = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var identifier in unresolvedIdentifiers)
-            unresolvedIdentifierNames.Add(identifier.Identifier.ValueText);
+        Dictionary<string, ITypeSymbol>? assignmentTypesByIdentifier;
+        using (Scratch.RentA<HashSet<string>>(out var unresolvedIdentifierNames))
+        {
+            foreach (var identifier in unresolvedIdentifiers)
+                unresolvedIdentifierNames.Add(identifier.Text);
 
-        var assignmentTypesByIdentifier = BuildInjectAssignmentTypeMap(model, retExpr, unresolvedIdentifierNames, ct);
+            assignmentTypesByIdentifier = BuildInjectAssignmentTypeMap(model, retExpr, unresolvedIdentifierNames, ct);
+        }
 
         Dictionary<(int Start, int Length), ITypeSymbol>? memberAccessCastTypes = null;
         Dictionary<string, ITypeSymbol>? identifierCastTypes = null;
@@ -362,8 +360,8 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
             else
             {
                 identifierCastTypes ??= new(StringComparer.Ordinal);
-                if (!identifierCastTypes.ContainsKey(identifier.Identifier.ValueText))
-                    identifierCastTypes[identifier.Identifier.ValueText] = inferredType;
+                if (!identifierCastTypes.ContainsKey(identifier.Text))
+                    identifierCastTypes[identifier.Text] = inferredType;
             }
         }
 
@@ -388,7 +386,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
             inferredType = null;
             memberAccessExpressionSyntax = null;
 
-            switch (identifier.Identifier.ValueText)
+            switch (identifier.Text)
             {
                 // try to fix "SomeTrackedType.Instances"
                 case "Instances":
@@ -427,7 +425,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
                 }
             }
 
-            return cachedAssignmentTypes?.TryGetValue(identifier.Identifier.ValueText, out inferredType) == true;
+            return cachedAssignmentTypes?.TryGetValue(identifier.Text, out inferredType) == true;
         }
     }
 
@@ -453,7 +451,7 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
                 if (assignment.Left is not IdentifierNameSyntax leftIdentifier)
                     continue;
 
-                var identifierName = leftIdentifier.Identifier.ValueText;
+                var identifierName = leftIdentifier.Text;
                 if (!unresolvedIdentifierNames.Contains(identifierName))
                     continue;
 

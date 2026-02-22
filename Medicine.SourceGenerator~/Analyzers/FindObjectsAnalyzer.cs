@@ -64,7 +64,7 @@ sealed class FindObjectsAnalyzer : DiagnosticAnalyzer
         if (context.SemanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol methodSymbol)
             return;
 
-        var methodName = nameSyntax.Identifier.ValueText;
+        var methodName = nameSyntax.Text;
 
         if (methodName is "FindObjectOfType" or "FindFirstObjectByType" or "FindAnyObjectByType")
         {

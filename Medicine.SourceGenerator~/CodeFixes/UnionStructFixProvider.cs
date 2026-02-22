@@ -277,8 +277,9 @@ public sealed class UnionStructFixProvider : CodeFixProvider
         if (instanceFields[0].Type is not INamedTypeSymbol headerType || !headerType.HasAttribute(UnionHeaderStructAttributeFQN))
             return false;
 
-        var segments = new List<string> { instanceFields[0].Name };
-        var visited = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+        using var r1 = Scratch.RentA<List<string>>(out var segments);
+        using var r2 = Scratch.RentA<HashSet<INamedTypeSymbol>>(out var visited);
+        segments.Add(instanceFields[0].Name);
         var currentHeaderType = headerType;
 
         while (visited.Add(currentHeaderType))

@@ -14,10 +14,14 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
         isEnabledByDefault: true
     );
 
-    record struct GeneratorInput : IGeneratorTransformOutput
+    record struct GeneratorInput : ISourceGeneratorPassData
     {
         public AdditionalText? TagManager { get; init; }
         public EquatableIgnore<DiagnosticDescriptor?> DiagnosticDescriptor { get; init; }
+        public GeneratorEnvironment GeneratorEnvironment { get; init; }
+        public string Namespace { get; init; }
+        public string ClassName { get; init; }
+        public string ExtensionsClassName { get; init; }
 
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
@@ -26,6 +30,8 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext init)
     {
+        var generatorEnvironment = init.GetGeneratorEnvironment();
+
         var tagManagerProvider = init.AdditionalTextsProvider
             .Where(x => x.Path.EndsWith("TagManager.asset", Ordinal))
             .Collect();
@@ -34,28 +40,35 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: GenerateConstantsAttributeMetadataName,
                 predicate: (x, ct) => true,
-                transform: (x, ct) => new GeneratorInput
-                {
-                    SourceGeneratorOutputFilename = "Medicine.Constants.g.cs",
-                    SourceGeneratorErrorLocation = x.Attributes.First().ApplicationSyntaxReference is { } syntaxRef
-                                                   && syntaxRef.GetLocation() is { } location
-                        ? new LocationInfo(location)
-                        : null,
-                }
+                transform: (x, ct) =>
+                    {
+                        var attribute = x.Attributes.First();
+                        var constructorArgs = attribute.GetAttributeConstructorArguments(ct);
+                        var namespaceName = constructorArgs.Get("namespace", "Medicine") ?? "Medicine";
+                        var className = constructorArgs.Get("class", "Constants") ?? "Constants";
+
+                        return new GeneratorInput
+                        {
+                            SourceGeneratorOutputFilename = "Medicine.Constants.g.cs",
+                            SourceGeneratorErrorLocation = attribute.ApplicationSyntaxReference?.GetLocation(),
+                            Namespace = namespaceName,
+                            ClassName = className,
+                            ExtensionsClassName = $"{className}Extensions",
+                        };
+                    }
             );
 
         var combinedProvider = assemblyWithAttributeProvider
-            .Combine(tagManagerProvider)
+            .Combine(tagManagerProvider, generatorEnvironment)
             .SelectEx((x, ct) =>
                 {
-                    var input = x.Left;
-                    var texts = x.Right;
+                    var (input, texts, environment) = x;
                     var tagManager = texts.FirstOrDefault();
 
                     if (tagManager is null)
                         return input with { DiagnosticDescriptor = MED018 };
 
-                    return input with { TagManager = tagManager };
+                    return input with { TagManager = tagManager, GeneratorEnvironment = environment };
                 }
             );
 
@@ -73,8 +86,10 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
         if (input.TagManager?.GetText(context.CancellationToken)?.ToString() is not { Length: > 0 } content)
             return;
 
-        var tags = new List<string>(capacity: 16);
-        var layers = new List<string>(capacity: 32);
+        src.ShouldEmitDocs = input.GeneratorEnvironment.ShouldEmitDocs;
+
+        using var r1 = Scratch.RentA<List<string>>(out var tags);
+        using var r2 = Scratch.RentB<List<string>>(out var layers);
 
         // parse TagManager.asset
         {
@@ -119,25 +134,45 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
         src.Line.Write(Alias.UsingInline);
         src.Linebreak();
 
-        src.Line.Write("namespace Medicine");
-        using (src.Braces)
+        void EmitBody()
         {
-            src.Line.Write("public static partial class Constants");
+            src.Doc?.Write("/// <summary>");
+            src.Doc?.Write("/// Contains generated tag and layer constants based on <c>ProjectSettings/TagManager.asset</c>.");
+            src.Doc?.Write("/// </summary>");
+
+            src.Line.Write($"public static partial class {input.ClassName}");
             using (src.Braces)
             {
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Enumerates Unity tag names as constants.");
+                src.Doc?.Write("/// This enum is generated based on the contents of <c>ProjectSettings/TagManager.asset</c>.");
+                src.Doc?.Write("/// </summary>");
+
                 src.Line.Write("public enum Tag : uint");
                 using (src.Braces)
                     foreach (var (tag, i) in tags.Where(x => x is { Length: > 0 }).Select((x, i) => (x, i)))
                         src.Line.Write($"{tag.Sanitize('@')} = {20000 + i}u,");
 
                 src.Linebreak();
+
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Enumerates Unity layer indices as constants.");
+                src.Doc?.Write("/// This enum is generated based on the contents of <c>ProjectSettings/TagManager.asset</c>.");
+                src.Doc?.Write("/// </summary>");
+
                 src.Line.Write("public enum Layer : uint");
                 using (src.Braces)
                     foreach (var (layer, i) in layers.Where(x => x is { Length: > 0 }).Select((x, i) => (x, i)))
                         src.Line.Write($"{HideMaybe(layer)}{layer.Sanitize('@')} = {i:00},");
 
                 src.Linebreak();
+
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Enumerates Unity layer bitmasks as constants.");
+                src.Doc?.Write("/// This enum is generated based on the contents of <c>ProjectSettings/TagManager.asset</c>.");
+                src.Doc?.Write("/// </summary>");
                 src.Line.Write("[System.Flags]");
+
                 src.Line.Write("public enum LayerMask : uint");
                 using (src.Braces)
                 {
@@ -150,30 +185,48 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
 
             src.Linebreak();
 
+            src.Doc?.Write("/// <summary>");
+            src.Doc?.Write("/// Provides extension helpers for generated constants.");
+            src.Doc?.Write("/// </summary>");
             src.Line.Write(Alias.Hidden);
-            src.Line.Write("public static partial class ConstantsExtensions");
+
+            src.Line.Write($"public static partial class {input.ExtensionsClassName}");
             using (src.Braces)
             {
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write($"/// Converts a generated <see cref=\"{input.ClassName}.Tag\"/> value to a Unity <see cref=\"UnityEngine.TagHandle\"/>.");
+                src.Doc?.Write("/// </summary>");
                 src.Line.Write(Alias.Inline);
-                src.Line.Write($"public static global::UnityEngine.TagHandle GetHandle(this Constants.Tag tag)");
+                src.Line.Write($"public static global::UnityEngine.TagHandle GetHandle(this {input.ClassName}.Tag tag)");
                 using (src.Indent)
-                    src.Line.Write($"=> global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility.As<Constants.Tag, global::UnityEngine.TagHandle>(ref tag);");
+                    src.Line.Write($"=> global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility.As<{input.ClassName}.Tag, global::UnityEngine.TagHandle>(ref tag);");
 
                 src.Linebreak();
 
+                src.Doc?.Write("/// <inheritdoc cref=\"UnityEngine.GameObject.CompareTag(UnityEngine.TagHandle)\"/>");
                 src.Line.Write(Alias.Inline);
-                src.Line.Write($"public static bool CompareTag(this global::UnityEngine.GameObject gameObject, Constants.Tag tag)");
+                src.Line.Write($"public static bool CompareTag(this global::UnityEngine.GameObject gameObject, {input.ClassName}.Tag tag)");
                 using (src.Indent)
                     src.Line.Write($"=> gameObject.CompareTag(tag.GetHandle());");
 
                 src.Linebreak();
 
+                src.Doc?.Write("/// <inheritdoc cref=\"UnityEngine.Component.CompareTag(UnityEngine.TagHandle)\"/>");
                 src.Line.Write(Alias.Inline);
-                src.Line.Write($"public static bool CompareTag(this global::UnityEngine.Component component, Constants.Tag tag)");
+                src.Line.Write($"public static bool CompareTag(this global::UnityEngine.Component component, {input.ClassName}.Tag tag)");
                 using (src.Indent)
                     src.Line.Write($"=> component.CompareTag(tag.GetHandle());");
             }
         }
+
+        if (input.Namespace is { Length: > 0 })
+        {
+            src.Line.Write($"namespace {input.Namespace}");
+            using (src.Braces)
+                EmitBody();
+        }
+        else
+            EmitBody();
     }
 
     static string HideMaybe(string name)

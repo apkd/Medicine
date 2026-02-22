@@ -30,14 +30,18 @@ public static partial class ExtensionMethods
         return result;
     }
 
-    public static bool Has(this ActivePreprocessorSymbolNames symbol, ActivePreprocessorSymbolNames flag)
-        => (symbol & flag) > 0;
-
-    public static void SetForceDebug(this ref ActivePreprocessorSymbolNames symbol, int value)
-        => symbol = value switch
+    public static ActivePreprocessorSymbolNames GetActivePreprocessorSymbols(this ParseOptions parseOptions, int forceDebugValue)
+    {
+        var symbol = parseOptions.GetActivePreprocessorSymbols();
+        symbol = forceDebugValue switch
         {
             1 => symbol | DEBUG,
             2 => symbol & ~DEBUG,
             _ => symbol,
         };
+        return symbol;
+    }
+
+    public static bool Has(this ActivePreprocessorSymbolNames symbol, ActivePreprocessorSymbolNames flag)
+        => (symbol & flag) > 0;
 }

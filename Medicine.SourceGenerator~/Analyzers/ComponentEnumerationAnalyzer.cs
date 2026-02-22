@@ -79,9 +79,9 @@ public sealed class ComponentEnumerationAnalyzer : DiagnosticAnalyzer
         static string GetInvokedName(InvocationExpressionSyntax inv) =>
             inv.Expression switch
             {
-                MemberAccessExpressionSyntax ma => ma.Name.Identifier.ValueText,
-                GenericNameSyntax gn            => gn.Identifier.ValueText,
-                IdentifierNameSyntax idn        => idn.Identifier.ValueText,
+                MemberAccessExpressionSyntax ma => ma.Name.Text,
+                GenericNameSyntax gn            => gn.Text,
+                IdentifierNameSyntax idn        => idn.Text,
 
                 _ => string.Empty,
             };
@@ -116,7 +116,7 @@ public sealed class ComponentEnumerationAnalyzer : DiagnosticAnalyzer
                 case MemberAccessExpressionSyntax
                 {
                     Parent: InvocationExpressionSyntax,
-                    Name.Identifier.ValueText: var methodName
+                    Name.Text: var methodName
                 } when LinqMethodNames.Contains(methodName):
                     return true;
 
@@ -132,7 +132,7 @@ public sealed class ComponentEnumerationAnalyzer : DiagnosticAnalyzer
         
                     var usages = block.DescendantNodes()
                         .OfType<IdentifierNameSyntax>()
-                        .Where(x => x.Identifier.ValueText == localSymbol.Name && model.GetSymbolInfo(x, ct).Symbol.Is(localSymbol))
+                        .Where(x => x.Text == localSymbol.Name && model.GetSymbolInfo(x, ct).Symbol.Is(localSymbol))
                         .ToArray();
 
                     if (usages.Length != 1)

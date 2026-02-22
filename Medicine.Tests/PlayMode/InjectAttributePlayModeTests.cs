@@ -301,6 +301,7 @@ public partial class InjectAttributePlayModeTests
     sealed partial class MBReferToVar : MonoBehaviour
     {
         [Inject]
+        [SuppressMessage("ReSharper", "ConvertToConstant.Local")]
         void Awake()
         {
             bool variable = true;
@@ -322,6 +323,8 @@ public partial class InjectAttributePlayModeTests
     sealed partial class MBReferToVarMultiDeclarator : MonoBehaviour
     {
         [Inject]
+        [SuppressMessage("ReSharper", "ConvertToConstant.Local")]
+        [SuppressMessage("ReSharper", "ConditionIsAlwaysTrueOrFalse")]
         void Awake()
         {
             int min = 0, max = 1;

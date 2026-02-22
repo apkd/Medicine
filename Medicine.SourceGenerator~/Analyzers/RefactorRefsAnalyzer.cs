@@ -66,7 +66,7 @@ public sealed class RefactorRefsAnalyzer : DiagnosticAnalyzer
             return;
 
         // ignore static methods
-        if (containingMethod?.Modifiers.Any(SyntaxKind.StaticKeyword) is true)
+        if (containingMethod?.Modifiers.IsStatic is true)
             return;
 
         // syntax-only guard to avoid expensive symbol resolution in [Inject] scopes
