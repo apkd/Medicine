@@ -5,6 +5,7 @@ using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using static System.ComponentModel.EditorBrowsableState;
 using static System.Runtime.CompilerServices.MethodImplOptions;
+using static UnityEngine.Debug;
 
 // ReSharper disable UnusedType.Global
 // ReSharper disable UnusedMember.Global
@@ -55,7 +56,6 @@ namespace Medicine.Internal
             public static void Register(T instance)
             {
                 TData state;
-#if DEBUG
                 try
                 {
                     instance.Initialize(out state);
@@ -63,17 +63,8 @@ namespace Medicine.Internal
                 catch (System.Exception ex)
                 {
                     state = default;
-                    Debug.LogError(
-                        $"Failed to invoke {typeof(T).Name}.Initialize(out {typeof(TData).Name} state). " +
-                        $"Please make sure this method never throws. " +
-                        $"This will cause tracking logic errors in release builds."
-                    );
-
-                    Debug.LogException(ex);
+                    LogException(ex);
                 }
-#else
-                instance.Initialize(out state);
-#endif
                 List.Add(state);
                 Array = List.AsArray();
             }
@@ -91,7 +82,7 @@ namespace Medicine.Internal
                 var enforceJobResult = AtomicSafetyHandle.EnforceAllBufferJobsHaveCompleted(safety);
                 if (enforceJobResult is EnforceJobResult.DidSyncRunningJobs)
                 {
-                    Debug.LogWarning(
+                    LogWarning(
                         $"Job completion was enforced while unregistering an instance of {typeof(T).Name}. " +
                         $"This is an editor-only check. Disabling/enabling tracked instances while jobs are running " +
                         $"may cause race condition bugs in release builds."
@@ -99,30 +90,21 @@ namespace Medicine.Internal
                 }
 #endif
 
-#if DEBUG
                 try
                 {
+#if UNITY_EDITOR
                     if (!List.IsCreated)
                         return; // possible right before domain reload
+#endif
 
                     instance.Cleanup(ref List.ElementAt(elementIndex));
                 }
                 catch (System.Exception ex)
                 {
-                    Debug.LogError(
-                        $"Failed to invoke {typeof(T).Name}.Cleanup(ref {typeof(TData).Name} state). " +
-                        $"Please make sure this method never throws. " +
-                        $"This will cause tracking logic errors in release builds."
-                    );
-
-                    Debug.LogException(ex);
+                    LogException(ex);
                     return;
                 }
-#else
-                instance.Cleanup(ref List.ElementAt(elementIndex));
-#endif
                 List.RemoveAtSwapBack(elementIndex);
-
                 Array = List.AsArray();
             }
         }
