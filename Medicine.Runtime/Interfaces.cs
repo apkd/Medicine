@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using Unity.Mathematics;
 
 namespace Medicine
@@ -45,6 +46,53 @@ namespace Medicine
     /// Provides a <see cref="TrackAttribute"/>-marked ScriptableObject with a generated asset GUID ID.
     /// </summary>
     public interface IFindByAssetID : IFindByID<uint4> { }
+
+    /// <summary>
+    /// Provides a <see cref="TrackAttribute"/>-marked class with a storage container that can be
+    /// used to track the active instances of the type.
+    /// </summary>
+    /// <typeparam name="TStorage">Type of custom storage.</typeparam>
+    public interface ICustomStorage<TStorage>
+    {
+        void InitializeStorage(ref TStorage storage)
+            => storage = Activator.CreateInstance<TStorage>();
+
+        void DisposeStorage(ref TStorage storage)
+        {
+            if (storage is IDisposable disposable)
+                disposable.Dispose();
+
+            storage = default;
+        }
+
+        void RegisterInstance(ref TStorage storage);
+        void UnregisterInstance(ref TStorage storage, int instanceIndex);
+    }
+
+    /// <summary>
+    /// Provides a <see cref="TrackAttribute"/>-marked class with a list of tracked instance IDs.
+    /// </summary>
+    [SuppressMessage("ReSharper", "SuspiciousTypeConversion.Global")]
+    public interface ITrackInstanceIDs : ICustomStorage<ITrackInstanceIDs.InstanceIDStorage>
+    {
+        void ICustomStorage<InstanceIDStorage>.InitializeStorage(ref InstanceIDStorage storage)
+            => storage = new();
+
+        void ICustomStorage<InstanceIDStorage>.DisposeStorage(ref InstanceIDStorage storage)
+            => storage.InstanceIDs.Dispose();
+
+        void ICustomStorage<InstanceIDStorage>.RegisterInstance(ref InstanceIDStorage storage)
+            => storage.InstanceIDs.Add(((UnityEngine.Object)this).GetInstanceID());
+
+        void ICustomStorage<InstanceIDStorage>.UnregisterInstance(ref InstanceIDStorage storage, int instanceIndex)
+            => storage.InstanceIDs.RemoveAtSwapBack(instanceIndex);
+
+        public sealed class InstanceIDStorage
+        {
+            public Unity.Collections.NativeList<int> InstanceIDs
+                = new(initialCapacity: 8, Unity.Collections.Allocator.Persistent);
+        }
+    }
 
     /// <summary>
     /// Provides a <see cref="TrackAttribute"/>-marked class with an array of unmanaged structs,

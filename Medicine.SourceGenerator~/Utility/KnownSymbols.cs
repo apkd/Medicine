@@ -36,6 +36,8 @@ public readonly record struct KnownSymbols
     readonly EquatableIgnore<INamedTypeSymbol> unmanagedAccessAttribute;
     readonly EquatableIgnore<INamedTypeSymbol> iInstanceIndexInterface;
     readonly EquatableIgnore<INamedTypeSymbol> unmanagedDataInterface;
+    readonly EquatableIgnore<INamedTypeSymbol> customStorageInterface;
+    readonly EquatableIgnore<INamedTypeSymbol> trackInstanceIDsInterface;
     readonly EquatableIgnore<INamedTypeSymbol> trackingIdInterface;
     readonly EquatableIgnore<INamedTypeSymbol> trackedInstances;
     readonly EquatableIgnore<INamedTypeSymbol> lazyRef;
@@ -56,6 +58,8 @@ public readonly record struct KnownSymbols
     public INamedTypeSymbol UnmanagedAccessAttribute => unmanagedAccessAttribute.Value;
     public INamedTypeSymbol IInstanceIndexInterface => iInstanceIndexInterface.Value;
     public INamedTypeSymbol UnmanagedDataInterface => unmanagedDataInterface.Value;
+    public INamedTypeSymbol CustomStorageInterface => customStorageInterface.Value;
+    public INamedTypeSymbol TrackInstanceIDsInterface => trackInstanceIDsInterface.Value;
     public INamedTypeSymbol TrackingIdInterface => trackingIdInterface.Value;
     public INamedTypeSymbol TrackedInstances => trackedInstances.Value;
     public INamedTypeSymbol LazyRef => lazyRef.Value;
@@ -87,6 +91,8 @@ public readonly record struct KnownSymbols
         unmanagedAccessAttribute = Get(Constants.UnmanagedAccessAttributeMetadataName);
         iInstanceIndexInterface = Get("Medicine.IInstanceIndex");
         unmanagedDataInterface = Get("Medicine.IUnmanagedData`1");
+        customStorageInterface = Get("Medicine.ICustomStorage`1");
+        trackInstanceIDsInterface = Get("Medicine.ITrackInstanceIDs");
         trackingIdInterface = Get($"{Constants.TrackingIdInterfaceMetadataName}`1");
         trackedInstances = Get("Medicine.TrackedInstances`1");
         lazyRef = Get("Medicine.LazyRef`1");

@@ -21,6 +21,12 @@ static class TrackSourceGeneratorTest
     public static readonly DiagnosticTest InterfaceHelperCase =
         new("Track generator emits helper API for tracked interfaces", RunInterfaceHelper);
 
+    public static readonly DiagnosticTest CustomStorageCase =
+        new("Track generator emits custom storage APIs and registration calls", RunCustomStorage);
+
+    public static readonly DiagnosticTest InterfaceHelperCustomStorageCase =
+        new("Track generator emits custom storage helper APIs for tracked interfaces", RunInterfaceHelperCustomStorage);
+
     static void Run()
         => SourceGeneratorTester.AssertGeneratesMoreSourcesThanBaseline(
             baselineSource: """
@@ -404,4 +410,180 @@ partial class TrackSourceGeneratorInterfaceHelper : MonoBehaviour, ITrackSourceG
             }
         }
     }
+
+    static void RunCustomStorage()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+using UnityEngine;
+
+sealed class CustomPayload { }
+
+[Track]
+partial class TrackSourceGeneratorCustomStorage : MonoBehaviour, ICustomStorage<CustomPayload>, ITrackInstanceIDs
+{
+    void ICustomStorage<CustomPayload>.RegisterInstance(ref CustomPayload storage) { }
+    void ICustomStorage<CustomPayload>.UnregisterInstance(ref CustomPayload storage, int instanceIndex) { }
+}
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new TrackSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "custom-storage generation should not throw"
+        );
+
+        int classStoragePropertyCount = 0;
+        int trackInstanceIdStoragePropertyCount = 0;
+        int classStorageRegisterCount = 0;
+        int classStorageUnregisterCount = 0;
+        int trackInstanceIdStorageRegisterCount = 0;
+        int trackInstanceIdStorageUnregisterCount = 0;
+        foreach (var result in run.Results)
+        foreach (var generatedSource in result.GeneratedSources)
+        {
+            var text = generatedSource.SourceText.ToString();
+            classStoragePropertyCount += CountOccurrences(text, "ref global::CustomPayload CustomPayloadStorage");
+            trackInstanceIdStoragePropertyCount += CountOccurrences(text, "ref global::Medicine.ITrackInstanceIDs.Storage Storage");
+            classStorageRegisterCount += CountOccurrences(text, "Storage.Custom<global::TrackSourceGeneratorCustomStorage, global::CustomPayload>.Register(this)");
+            classStorageUnregisterCount += CountOccurrences(text, "Storage.Custom<global::TrackSourceGeneratorCustomStorage, global::CustomPayload>.Unregister(this, index)");
+            trackInstanceIdStorageRegisterCount += CountOccurrences(text, "Storage.Custom<global::TrackSourceGeneratorCustomStorage, global::Medicine.ITrackInstanceIDs.Storage>.Register(this)");
+            trackInstanceIdStorageUnregisterCount += CountOccurrences(text, "Storage.Custom<global::TrackSourceGeneratorCustomStorage, global::Medicine.ITrackInstanceIDs.Storage>.Unregister(this, index)");
+        }
+
+        if (
+            classStoragePropertyCount is 1 &&
+            trackInstanceIdStoragePropertyCount is 1 &&
+            classStorageRegisterCount is 1 &&
+            classStorageUnregisterCount is 1 &&
+            trackInstanceIdStorageRegisterCount is 1 &&
+            trackInstanceIdStorageUnregisterCount is 1
+           )
+            return;
+
+        throw new InvalidOperationException(
+            "Expected tracked type custom storage generation to emit properties and lifecycle calls." + Environment.NewLine +
+            $"Actual class property: {classStoragePropertyCount}, ITrackInstanceIDs property: {trackInstanceIdStoragePropertyCount}, " +
+            $"class register: {classStorageRegisterCount}, class unregister: {classStorageUnregisterCount}, " +
+            $"ITrackInstanceIDs register: {trackInstanceIdStorageRegisterCount}, ITrackInstanceIDs unregister: {trackInstanceIdStorageUnregisterCount}."
+        );
+
+        static int CountOccurrences(string source, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while (true)
+            {
+                index = source.IndexOf(value, index, StringComparison.Ordinal);
+                if (index < 0)
+                    return count;
+
+                count++;
+                index += value.Length;
+            }
+        }
+    }
+
+    static void RunInterfaceHelperCustomStorage()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+using UnityEngine;
+
+sealed class InterfacePayload { }
+
+[Track]
+partial interface ITrackSourceGeneratorInterfaceCustomStorage : ICustomStorage<InterfacePayload>, ITrackInstanceIDs
+{
+    void ICustomStorage<InterfacePayload>.RegisterInstance(ref InterfacePayload storage) { }
+    void ICustomStorage<InterfacePayload>.UnregisterInstance(ref InterfacePayload storage, int instanceIndex) { }
+}
+
+[Track]
+partial class TrackSourceGeneratorInterfaceCustomStorage : MonoBehaviour, ITrackSourceGeneratorInterfaceCustomStorage { }
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new TrackSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "interface custom-storage helper generation should not throw"
+        );
+
+        int helperPayloadPropertyCount = 0;
+        int helperTrackInstanceIdsPropertyCount = 0;
+        int helperPayloadRegisterCount = 0;
+        int helperPayloadUnregisterCount = 0;
+        int helperTrackInstanceIdsRegisterCount = 0;
+        int helperTrackInstanceIdsUnregisterCount = 0;
+        foreach (var result in run.Results)
+        foreach (var generatedSource in result.GeneratedSources)
+        {
+            var text = generatedSource.SourceText.ToString();
+            helperPayloadPropertyCount += CountOccurrences(text, "ref global::InterfacePayload InterfacePayloadStorage");
+            helperTrackInstanceIdsPropertyCount += CountOccurrences(text, "ref global::Medicine.ITrackInstanceIDs.Storage Storage");
+            helperPayloadRegisterCount += CountOccurrences(text, "Storage.Custom<global::ITrackSourceGeneratorInterfaceCustomStorage, global::InterfacePayload>.Register(this)");
+            helperPayloadUnregisterCount += CountOccurrences(text, "Storage.Custom<global::ITrackSourceGeneratorInterfaceCustomStorage, global::InterfacePayload>.Unregister(this,");
+            helperTrackInstanceIdsRegisterCount += CountOccurrences(text, "Storage.Custom<global::ITrackSourceGeneratorInterfaceCustomStorage, global::Medicine.ITrackInstanceIDs.Storage>.Register(this)");
+            helperTrackInstanceIdsUnregisterCount += CountOccurrences(text, "Storage.Custom<global::ITrackSourceGeneratorInterfaceCustomStorage, global::Medicine.ITrackInstanceIDs.Storage>.Unregister(this,");
+        }
+
+        if (
+            helperPayloadPropertyCount >= 1 &&
+            helperTrackInstanceIdsPropertyCount >= 1 &&
+            helperPayloadRegisterCount is 1 &&
+            helperPayloadUnregisterCount is 1 &&
+            helperTrackInstanceIdsRegisterCount is 1 &&
+            helperTrackInstanceIdsUnregisterCount is 1
+           )
+            return;
+
+        throw new InvalidOperationException(
+            "Expected tracked-interface helper custom storage generation to emit properties and lifecycle calls." + Environment.NewLine +
+            $"Actual payload property: {helperPayloadPropertyCount}, ITrackInstanceIDs property: {helperTrackInstanceIdsPropertyCount}, " +
+            $"payload register: {helperPayloadRegisterCount}, payload unregister: {helperPayloadUnregisterCount}, " +
+            $"ITrackInstanceIDs register: {helperTrackInstanceIdsRegisterCount}, ITrackInstanceIDs unregister: {helperTrackInstanceIdsUnregisterCount}."
+        );
+
+        static int CountOccurrences(string source, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while (true)
+            {
+                index = source.IndexOf(value, index, StringComparison.Ordinal);
+                if (index < 0)
+                    return count;
+
+                count++;
+                index += value.Length;
+            }
+        }
+    }
+
 }

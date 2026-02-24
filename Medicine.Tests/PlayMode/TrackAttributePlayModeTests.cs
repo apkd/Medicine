@@ -18,6 +18,13 @@ public partial class TrackAttributePlayModeTests
     public void Cleanup()
         => TestUtility.DestroyAllGameObjects();
 
+    static void RemoveAtSwapBack(List<int> list, int index)
+    {
+        int last = list.Count - 1;
+        list[index] = list[last];
+        list.RemoveAt(last);
+    }
+
     //////////////////////////////////////////////////////////////////////////////
 
     [Track]
@@ -213,6 +220,213 @@ public partial class TrackAttributePlayModeTests
         Assert.That(Storage.TransformAccess<ITrackGenericTransformFallback<int>>.Transforms.length, Is.EqualTo(1));
 
         b.enabled = false;
+    }
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    sealed class CustomStoragePayload
+    {
+        public readonly List<int> InstanceIDs = new(capacity: 8);
+    }
+
+    static class CustomStorageProbe
+    {
+        public static int InitializeCalls;
+        public static int DisposeCalls;
+        public static int RegisterCalls;
+        public static int UnregisterCalls;
+
+        public static void Reset()
+        {
+            InitializeCalls = 0;
+            DisposeCalls = 0;
+            RegisterCalls = 0;
+            UnregisterCalls = 0;
+        }
+    }
+
+    [Track]
+    sealed partial class MBTrackCustomStorage : MonoBehaviour, ICustomStorage<CustomStoragePayload>, ITrackInstanceIDs
+    {
+        void ICustomStorage<CustomStoragePayload>.InitializeStorage(ref CustomStoragePayload storage)
+        {
+            CustomStorageProbe.InitializeCalls++;
+            storage = new();
+        }
+
+        void ICustomStorage<CustomStoragePayload>.DisposeStorage(ref CustomStoragePayload storage)
+        {
+            CustomStorageProbe.DisposeCalls++;
+            storage = null!;
+        }
+
+        void ICustomStorage<CustomStoragePayload>.RegisterInstance(ref CustomStoragePayload storage)
+        {
+            CustomStorageProbe.RegisterCalls++;
+            storage.InstanceIDs.Add(GetInstanceID());
+        }
+
+        void ICustomStorage<CustomStoragePayload>.UnregisterInstance(ref CustomStoragePayload storage, int instanceIndex)
+        {
+            CustomStorageProbe.UnregisterCalls++;
+            Assert.That(storage.InstanceIDs[instanceIndex], Is.EqualTo(GetInstanceID()));
+            RemoveAtSwapBack(storage.InstanceIDs, instanceIndex);
+        }
+    }
+
+    [Test]
+    public void Track_CustomStorage_Lifecycle()
+    {
+        CustomStorageProbe.Reset();
+
+        var a = new GameObject("custom-a", typeof(MBTrackCustomStorage)).GetComponent<MBTrackCustomStorage>();
+        var b = new GameObject("custom-b", typeof(MBTrackCustomStorage)).GetComponent<MBTrackCustomStorage>();
+        var c = new GameObject("custom-c", typeof(MBTrackCustomStorage)).GetComponent<MBTrackCustomStorage>();
+
+        Assert.That(CustomStorageProbe.InitializeCalls, Is.EqualTo(1));
+        Assert.That(CustomStorageProbe.RegisterCalls, Is.EqualTo(3));
+        Assert.That(CustomStorageProbe.UnregisterCalls, Is.EqualTo(0));
+        Assert.That(CustomStorageProbe.DisposeCalls, Is.EqualTo(0));
+        AssertCustomStorageAligned();
+
+        b.enabled = false;
+        Assert.That(CustomStorageProbe.UnregisterCalls, Is.EqualTo(1));
+        Assert.That(CustomStorageProbe.DisposeCalls, Is.EqualTo(0));
+        AssertCustomStorageAligned();
+
+        a.enabled = false;
+        c.enabled = false;
+        Assert.That(CustomStorageProbe.UnregisterCalls, Is.EqualTo(3));
+        Assert.That(CustomStorageProbe.DisposeCalls, Is.EqualTo(1));
+        Assert.That(MBTrackCustomStorage.InstanceIDStorage, Is.Null);
+
+        a.enabled = true;
+        Assert.That(CustomStorageProbe.InitializeCalls, Is.EqualTo(2));
+        Assert.That(CustomStorageProbe.RegisterCalls, Is.EqualTo(4));
+        Assert.That(CustomStorageProbe.DisposeCalls, Is.EqualTo(1));
+        AssertCustomStorageAligned();
+
+        a.enabled = false;
+        Assert.That(CustomStorageProbe.UnregisterCalls, Is.EqualTo(4));
+        Assert.That(CustomStorageProbe.DisposeCalls, Is.EqualTo(2));
+
+        void AssertCustomStorageAligned()
+        {
+            using (MBTrackCustomStorage.Instances.ToPooledList(out var list))
+            {
+                var payloadIds = MBTrackCustomStorage.CustomStoragePayloadStorage.InstanceIDs;
+                var trackedIds = MBTrackCustomStorage.InstanceIDStorage.InstanceIDs.AsArray();
+
+                Assert.That(payloadIds.Count, Is.EqualTo(list.Count));
+                Assert.That(trackedIds.Length, Is.EqualTo(list.Count));
+
+                for (int i = 0; i < list.Count; i++)
+                {
+                    int instanceId = list[i].GetInstanceID();
+                    Assert.That(payloadIds[i], Is.EqualTo(instanceId));
+                    Assert.That(trackedIds[i], Is.EqualTo(instanceId));
+                }
+            }
+        }
+    }
+
+    sealed class InterfaceCustomStoragePayload
+    {
+        public readonly List<int> InstanceIDs = new(capacity: 8);
+    }
+
+    static class InterfaceCustomStorageProbe
+    {
+        public static int InitializeCalls;
+        public static int DisposeCalls;
+        public static int RegisterCalls;
+        public static int UnregisterCalls;
+
+        public static void Reset()
+        {
+            InitializeCalls = 0;
+            DisposeCalls = 0;
+            RegisterCalls = 0;
+            UnregisterCalls = 0;
+        }
+    }
+
+    [Track]
+    partial interface ITrackByInterfaceCustomStorage : ICustomStorage<InterfaceCustomStoragePayload>, ITrackInstanceIDs
+    {
+        void ICustomStorage<InterfaceCustomStoragePayload>.InitializeStorage(ref InterfaceCustomStoragePayload storage)
+        {
+            InterfaceCustomStorageProbe.InitializeCalls++;
+            storage = new();
+        }
+
+        void ICustomStorage<InterfaceCustomStoragePayload>.DisposeStorage(ref InterfaceCustomStoragePayload storage)
+        {
+            InterfaceCustomStorageProbe.DisposeCalls++;
+            storage = null!;
+        }
+
+        void ICustomStorage<InterfaceCustomStoragePayload>.RegisterInstance(ref InterfaceCustomStoragePayload storage)
+        {
+            InterfaceCustomStorageProbe.RegisterCalls++;
+            storage.InstanceIDs.Add(((UnityEngine.Object)this).GetInstanceID());
+        }
+
+        void ICustomStorage<InterfaceCustomStoragePayload>.UnregisterInstance(ref InterfaceCustomStoragePayload storage, int instanceIndex)
+        {
+            InterfaceCustomStorageProbe.UnregisterCalls++;
+            Assert.That(storage.InstanceIDs[instanceIndex], Is.EqualTo(((UnityEngine.Object)this).GetInstanceID()));
+            RemoveAtSwapBack(storage.InstanceIDs, instanceIndex);
+        }
+    }
+
+    [Track]
+    sealed partial class MBTrackByInterfaceCustomStorage : MonoBehaviour, ITrackByInterfaceCustomStorage { }
+
+    [Test]
+    public void Track_ByInterface_CustomStorage()
+    {
+        InterfaceCustomStorageProbe.Reset();
+
+        var a = new GameObject("if-custom-a", typeof(MBTrackByInterfaceCustomStorage)).GetComponent<MBTrackByInterfaceCustomStorage>();
+        var b = new GameObject("if-custom-b", typeof(MBTrackByInterfaceCustomStorage)).GetComponent<MBTrackByInterfaceCustomStorage>();
+        var c = new GameObject("if-custom-c", typeof(MBTrackByInterfaceCustomStorage)).GetComponent<MBTrackByInterfaceCustomStorage>();
+
+        Assert.That(InterfaceCustomStorageProbe.InitializeCalls, Is.EqualTo(1));
+        Assert.That(InterfaceCustomStorageProbe.RegisterCalls, Is.EqualTo(3));
+        Assert.That(InterfaceCustomStorageProbe.UnregisterCalls, Is.EqualTo(0));
+        Assert.That(InterfaceCustomStorageProbe.DisposeCalls, Is.EqualTo(0));
+        AssertByInterfaceCustomStorageAligned();
+
+        b.enabled = false;
+        Assert.That(InterfaceCustomStorageProbe.UnregisterCalls, Is.EqualTo(1));
+        Assert.That(InterfaceCustomStorageProbe.DisposeCalls, Is.EqualTo(0));
+        AssertByInterfaceCustomStorageAligned();
+
+        a.enabled = false;
+        c.enabled = false;
+        Assert.That(InterfaceCustomStorageProbe.UnregisterCalls, Is.EqualTo(3));
+        Assert.That(InterfaceCustomStorageProbe.DisposeCalls, Is.EqualTo(1));
+        Assert.That(ITrackByInterfaceCustomStorage.Track.InstanceIDStorage, Is.Null);
+
+        void AssertByInterfaceCustomStorageAligned()
+        {
+            using (ITrackByInterfaceCustomStorage.Track.Instances.ToPooledList(out var list))
+            {
+                var payloadIds = ITrackByInterfaceCustomStorage.Track.InterfaceCustomStoragePayloadStorage.InstanceIDs;
+                var trackedIds = ITrackByInterfaceCustomStorage.Track.InstanceIDStorage.InstanceIDs.AsArray();
+
+                Assert.That(payloadIds.Count, Is.EqualTo(list.Count));
+                Assert.That(trackedIds.Length, Is.EqualTo(list.Count));
+
+                for (int i = 0; i < list.Count; i++)
+                {
+                    int instanceId = ((UnityEngine.Object)list[i]).GetInstanceID();
+                    Assert.That(payloadIds[i], Is.EqualTo(instanceId));
+                    Assert.That(trackedIds[i], Is.EqualTo(instanceId));
+                }
+            }
+        }
     }
 
     //////////////////////////////////////////////////////////////////////////////

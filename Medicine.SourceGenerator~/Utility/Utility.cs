@@ -122,7 +122,8 @@ public static class Utility
         if (string.IsNullOrWhiteSpace(name))
             return "???";
 
-        Span<char> span = stackalloc char[name.Length + (prepend is '\0' ? 0 : 1)];
+        var nameSpan = name.AsSpan();
+        Span<char> span = stackalloc char[nameSpan.Length + (prepend is '\0' ? 0 : 1)];
         int i = 0;
 
         if (prepend is not '\0')
@@ -130,7 +131,7 @@ public static class Utility
 
         // first char
         {
-            char c = name[0];
+            char c = nameSpan[0];
             if (char.IsLetter(c) || c is '_')
                 span[i++] = c;
             else
@@ -138,7 +139,7 @@ public static class Utility
         }
 
         // remaining chars
-        foreach (var c in name.AsSpan()[1..])
+        foreach (var c in nameSpan[1..])
         {
             if (char.IsLetterOrDigit(c) || c is '_')
                 span[i++] = c;
@@ -146,7 +147,9 @@ public static class Utility
                 span[i++] = '_';
         }
 
-        return span.ToString();
+        return span.Equals(nameSpan, StringComparison.Ordinal)
+            ? name
+            : span.ToString();
     }
 
     /// <summary>

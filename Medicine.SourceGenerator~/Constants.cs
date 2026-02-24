@@ -47,6 +47,12 @@ static class Constants
     public const string UnmanagedDataInterfaceName = "IUnmanagedData";
     public const string UnmanagedDataInterfaceFQN = $"{NamespaceWithGlobal}.{UnmanagedDataInterfaceName}";
 
+    public const string CustomStorageInterfaceName = "ICustomStorage";
+    public const string CustomStorageInterfaceFQN = $"{NamespaceWithGlobal}.{CustomStorageInterfaceName}";
+
+    public const string TrackInstanceIDsInterfaceName = "ITrackInstanceIDs";
+    public const string TrackInstanceIDsInterfaceFQN = $"{NamespaceWithGlobal}.{TrackInstanceIDsInterfaceName}";
+
     public const string TrackingIdInterfaceName = "IFindByID";
     public const string TrackingIdInterfaceMetadataName = $"{Namespace}.{TrackingIdInterfaceName}";
     public const string TrackingIdInterfaceFQN = $"{NamespaceWithGlobal}.{TrackingIdInterfaceName}";

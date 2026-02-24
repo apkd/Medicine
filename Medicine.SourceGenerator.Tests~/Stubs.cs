@@ -149,6 +149,24 @@ static class Stubs
                   int InstanceIndex { get; set; }
               }
 
+              public interface ICustomStorage<TStorage>
+              {
+                  void InitializeStorage(ref TStorage storage) { }
+                  void DisposeStorage(ref TStorage storage) { }
+                  void RegisterInstance(ref TStorage storage);
+                  void UnregisterInstance(ref TStorage storage, int instanceIndex);
+              }
+
+              public interface ITrackInstanceIDs : ICustomStorage<ITrackInstanceIDs.Storage>
+              {
+                  void ICustomStorage<Storage>.InitializeStorage(ref Storage storage) { }
+                  void ICustomStorage<Storage>.DisposeStorage(ref Storage storage) { }
+                  void ICustomStorage<Storage>.RegisterInstance(ref Storage storage) { }
+                  void ICustomStorage<Storage>.UnregisterInstance(ref Storage storage, int instanceIndex) { }
+
+                  public sealed class Storage { }
+              }
+
               public interface IUnmanagedData<T> { }
               public interface IFindByID<T> { }
               public interface IFindByAssetID<T> { }

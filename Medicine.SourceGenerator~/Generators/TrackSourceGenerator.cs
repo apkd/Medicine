@@ -52,6 +52,16 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         isEnabledByDefault: true
     );
 
+    static readonly DiagnosticDescriptor MED037 = new(
+        id: nameof(MED037),
+        title: "Conflicting custom storage property names",
+        messageFormat:
+        "Type '{0}' generates duplicate custom storage property name '{1}' from storage types '{2}' and '{3}'. Rename one of the storage types.",
+        category: "Medicine",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
     record struct TrackAttributeSettings(
         SingletonStrategy? SingletonStrategy,
         bool TrackTransforms,
@@ -69,7 +79,14 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
     readonly record struct TrackInterfaceRegistration(
         string TypeFQN,
         bool UseTransformFallback,
-        EquatableArray<string> UnmanagedDataFQNs
+        EquatableArray<string> UnmanagedDataFQNs,
+        EquatableArray<string> CustomStorageTypeFQNs
+    );
+
+    readonly record struct CustomStoragePropertyInfo(
+        string StorageTypeFQN,
+        string StorageTypeShort,
+        string PropertyName
     );
 
     record struct GeneratorAttributeSyntaxContextPassData(GeneratorAttributeSyntaxContext Context) : ISourceGeneratorPassData
@@ -115,6 +132,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         public EquatableArray<string> InterfacesWithAttribute;
         public EquatableIgnore<Func<TrackInterfaceRegistration[]>?> TrackedInterfacesBuilderFunc;
         public EquatableArray<string> UnmanagedDataFQNs;
+        public EquatableArray<string> CustomStorageTypeFQNs;
         public EquatableArray<TrackingIdRegistration> TrackingIdRegistrations;
         public string? TypeFQN;
         public string? TypeDisplayName;
@@ -131,6 +149,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         public TrackAttributeSettings AttributeSettings;
         public EquatableArray<string> ContainingTypeDeclaration;
         public EquatableArray<string> UnmanagedDataFQNs;
+        public EquatableArray<string> CustomStorageTypeFQNs;
         public EquatableArray<string> TrackingIdTypeFQNs;
         public string? TypeFQN;
         public string? ContainingTypeFQN;
@@ -145,6 +164,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         TrackAttributeSettings AttributeSettings,
         string NewModifier,
         EquatableArray<string> UnmanagedDataFQNs,
+        EquatableArray<CustomStoragePropertyInfo> CustomStorageProperties,
         EquatableArray<string> FindByIdTypeFQNs,
         bool EmitDocs
     );
@@ -398,15 +418,19 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 bool useTransformFallback = isMonoBehaviour && interfaceSymbol.IsGenericType && interfaceAttributeSettings.TrackTransforms;
 
                 string[] unmanagedDataFQNs;
+                string[] customStorageTypeFQNs;
                 {
                     using (Scratch.RentA<List<string>>(out var values))
+                    using (Scratch.RentC<List<string>>(out var customStorageValues))
                     using (Scratch.RentA<HashSet<string>>(out var seen))
+                    using (Scratch.RentC<HashSet<string>>(out var seenCustomStorage))
                     {
                         TryAdd(interfaceSymbol);
                         foreach (var inheritedInterface in interfaceSymbol.AllInterfaces)
                             TryAdd(inheritedInterface);
 
                         unmanagedDataFQNs = values.ToArray();
+                        customStorageTypeFQNs = customStorageValues.ToArray();
 
                         void TryAdd(INamedTypeSymbol symbol)
                         {
@@ -414,6 +438,11 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                                 if (symbol.TypeArguments is [{ FQN: { Length: > 0 } fqn }])
                                     if (seen.Add(fqn))
                                         values.Add(fqn);
+
+                            if (symbol.OriginalDefinition.Is(knownSymbols.CustomStorageInterface))
+                                if (symbol.TypeArguments is [{ FQN: { Length: > 0 } customStorageFqn }])
+                                    if (seenCustomStorage.Add(customStorageFqn))
+                                        customStorageValues.Add(customStorageFqn);
                         }
                     }
                 }
@@ -422,7 +451,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     new(
                         TypeFQN: interfaceSymbol.FQN,
                         UseTransformFallback: useTransformFallback,
-                        UnmanagedDataFQNs: unmanagedDataFQNs
+                        UnmanagedDataFQNs: unmanagedDataFQNs,
+                        CustomStorageTypeFQNs: customStorageTypeFQNs
                     )
                 );
             }
@@ -481,13 +511,40 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         }
 
         string[] classUnmanagedDataFQNs;
+        string[] classCustomStorageTypeFQNs;
         using (Scratch.RentA<List<string>>(out var unmanagedDataFQNsList))
+        using (Scratch.RentC<List<string>>(out var customStorageTypeFQNsList))
+        using (Scratch.RentA<HashSet<string>>(out var seenUnmanagedData))
+        using (Scratch.RentC<HashSet<string>>(out var seenCustomStorage))
         {
             foreach (var interfaceType in classSymbol.Interfaces)
+            {
                 if (interfaceType.OriginalDefinition.Is(knownSymbols.UnmanagedDataInterface))
-                    unmanagedDataFQNsList.Add(interfaceType.TypeArguments[0].FQN);
+                    if (interfaceType.TypeArguments is [{ FQN: { Length: > 0 } unmanagedDataFqn }])
+                        if (seenUnmanagedData.Add(unmanagedDataFqn))
+                            unmanagedDataFQNsList.Add(unmanagedDataFqn);
+
+                TryAddCustomStorage(interfaceType);
+
+                if (interfaceType.OriginalDefinition.Is(knownSymbols.TrackInstanceIDsInterface))
+                    foreach (var inheritedInterface in interfaceType.AllInterfaces)
+                        TryAddCustomStorage(inheritedInterface);
+            }
 
             classUnmanagedDataFQNs = unmanagedDataFQNsList.ToArray();
+            classCustomStorageTypeFQNs = customStorageTypeFQNsList.ToArray();
+
+            void TryAddCustomStorage(INamedTypeSymbol symbol)
+            {
+                if (!symbol.OriginalDefinition.Is(knownSymbols.CustomStorageInterface))
+                    return;
+
+                if (symbol.TypeArguments is not [{ FQN: { Length: > 0 } customStorageFqn }])
+                    return;
+
+                if (seenCustomStorage.Add(customStorageFqn))
+                    customStorageTypeFQNsList.Add(customStorageFqn);
+            }
         }
 
         return new()
@@ -507,6 +564,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             Attribute = attributeName,
             AttributeSettings = attributeArguments,
             UnmanagedDataFQNs = classUnmanagedDataFQNs,
+            CustomStorageTypeFQNs = classCustomStorageTypeFQNs,
             TrackingIdRegistrations = trackingIdRegistrations,
             TypeFQN = classSymbol.FQN,
             TypeDisplayName = classSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode(),
@@ -550,10 +608,13 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             .AsArray();
 
         string[] unmanagedDataFQNs;
+        string[] customStorageTypeFQNs;
         string[] trackingIdTypeFQNs;
         using (Scratch.RentA<List<string>>(out var unmanagedDataFQNsList))
+        using (Scratch.RentC<List<string>>(out var customStorageTypeFQNsList))
         using (Scratch.RentB<List<string>>(out var trackingIdTypeFQNsList))
         using (Scratch.RentA<HashSet<string>>(out var seenUnmanagedDataFQNs))
+        using (Scratch.RentC<HashSet<string>>(out var seenCustomStorageTypeFQNs))
         using (Scratch.RentB<HashSet<string>>(out var seenTrackingIdTypeFQNs))
         {
             Add(interfaceSymbol);
@@ -561,16 +622,19 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 Add(inheritedInterface);
 
             unmanagedDataFQNs = unmanagedDataFQNsList.ToArray();
+            customStorageTypeFQNs = customStorageTypeFQNsList.ToArray();
             trackingIdTypeFQNs = trackingIdTypeFQNsList.ToArray();
 
             void Add(INamedTypeSymbol symbol)
             {
                 bool hasUnmanagedData = symbol.OriginalDefinition.Is(knownSymbols.UnmanagedDataInterface);
+                bool hasCustomStorage = symbol.OriginalDefinition.Is(knownSymbols.CustomStorageInterface);
                 bool hasTrackingId = symbol.OriginalDefinition.Is(knownSymbols.TrackingIdInterface);
 
                 if (!hasUnmanagedData)
                     if (!hasTrackingId)
-                        return;
+                        if (!hasCustomStorage)
+                            return;
 
                 if (symbol.TypeArguments is not [{ FQN: { Length: > 0 } fqn }])
                     return;
@@ -582,6 +646,10 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 if (hasTrackingId)
                     if (seenTrackingIdTypeFQNs.Add(fqn))
                         trackingIdTypeFQNsList.Add(fqn);
+
+                if (hasCustomStorage)
+                    if (seenCustomStorageTypeFQNs.Add(fqn))
+                        customStorageTypeFQNsList.Add(fqn);
             }
         }
 
@@ -598,6 +666,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             ContainingTypeDeclaration = allDeclarations,
             ContainingTypeFQN = interfaceSymbol.ContainingType?.FQN,
             UnmanagedDataFQNs = unmanagedDataFQNs,
+            CustomStorageTypeFQNs = customStorageTypeFQNs,
             TrackingIdTypeFQNs = trackingIdTypeFQNs,
             TypeFQN = interfaceSymbol.FQN,
             TypeDisplayNameBuilderFunc = new(() => interfaceSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode()),
@@ -615,8 +684,16 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         if (input is not { TypeFQN.Length: > 0, IsGenericType: false })
             return;
 
-        string typeDisplayName = input.TypeDisplayNameBuilderFunc.Value?.Invoke()
-                                 ?? input.TypeFQN;
+        var customStorageProperties = GetCustomStorageProperties(
+            context: context,
+            storageTypeFQNs: input.CustomStorageTypeFQNs,
+            trackedTypeFQN: input.TypeFQN,
+            sourceGeneratorErrorLocation: input.SourceGeneratorErrorLocation
+        );
+
+        string typeDisplayName
+            = input.TypeDisplayNameBuilderFunc.Value?.Invoke()
+              ?? input.TypeFQN;
 
         src.Line.Write(Alias.UsingStorage);
         src.Line.Write(Alias.UsingInline);
@@ -640,6 +717,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     AttributeSettings: input.AttributeSettings,
                     NewModifier: "",
                     UnmanagedDataFQNs: input.UnmanagedDataFQNs,
+                    CustomStorageProperties: customStorageProperties,
                     FindByIdTypeFQNs: input.TrackingIdTypeFQNs,
                     EmitDocs: true
                 )
@@ -725,6 +803,13 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         var unmanagedDataInfo = input.UnmanagedDataFQNs.AsArray()
             .Select(x => (dataType: x, dataTypeShort: x.Split('.', ':').Last().HtmlEncode()))
             .ToArray();
+
+        var customStorageProperties = GetCustomStorageProperties(
+            context: context,
+            storageTypeFQNs: input.CustomStorageTypeFQNs,
+            trackedTypeFQN: input.TypeFQN,
+            sourceGeneratorErrorLocation: input.SourceGeneratorErrorLocation
+        );
 
         var findByIdTypeFQNs = input.TrackingIdRegistrations.AsArray()
             .Select(x => x.IDTypeFQN)
@@ -1041,6 +1126,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     AttributeSettings: input.AttributeSettings,
                     NewModifier: @new,
                     UnmanagedDataFQNs: input.UnmanagedDataFQNs,
+                    CustomStorageProperties: customStorageProperties,
                     FindByIdTypeFQNs: findByIdTypeFQNs,
                     EmitDocs: input.Environment.IsEditor
                 )
@@ -1066,6 +1152,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
                     foreach (var unmanagedDataType in trackedInterface.UnmanagedDataFQNs.AsArray())
                         yield return $"{m}Storage.UnmanagedData<{trackedInterface.TypeFQN}, {unmanagedDataType}>.Register(this)";
+
+                    foreach (var customStorageType in trackedInterface.CustomStorageTypeFQNs.AsArray())
+                        yield return $"{m}Storage.Custom<{trackedInterface.TypeFQN}, {customStorageType}>.Register(this)";
                 }
             }
 
@@ -1076,6 +1165,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 {
                     string indexName = $"{m}MedicineInternalInterfaceIndex{i++}";
                     yield return $"int {indexName} = {m}Storage.Instances<{trackedInterface.TypeFQN}>.Unregister(this)";
+
+                    foreach (var customStorageType in trackedInterface.CustomStorageTypeFQNs.AsArray())
+                        yield return $"{m}Storage.Custom<{trackedInterface.TypeFQN}, {customStorageType}>.Unregister(this, {indexName})";
 
                     foreach (var unmanagedDataType in trackedInterface.UnmanagedDataFQNs.AsArray())
                         yield return $"{m}Storage.UnmanagedData<{trackedInterface.TypeFQN}, {unmanagedDataType}>.Unregister(this, {indexName})";
@@ -1102,6 +1194,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     input.AttributeSettings.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Register(transform)" : null,
                     ..EnumerateTrackedInterfaceEnableCalls(),
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Register(this)"),
+                    ..input.CustomStorageTypeFQNs.AsArray().Select(x => $"{m}Storage.Custom<{input.TypeFQN}, {x}>.Register(this)"),
                     ..input.TrackingIdRegistrations.AsArray().Select(x => $"{m}Storage.LookupByID<{x.LookupTypeFQN}, {x.IDTypeFQN}>.Register(this)"),
                 ]
             );
@@ -1116,6 +1209,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     // we try to execute the unregistration calls in reverse order;
                     // shouldn't really make a difference, but it seems like a good practice
                     ..input.TrackingIdRegistrations.AsArray().Select(x => $"{m}Storage.LookupByID<{x.LookupTypeFQN}, {x.IDTypeFQN}>.Unregister(this)").Reverse(),
+                    ..input.CustomStorageTypeFQNs.AsArray().Select(x => $"{m}Storage.Custom<{input.TypeFQN}, {x}>.Unregister(this, index)").Reverse(),
                     ..input.UnmanagedDataFQNs.AsArray().Select(x => $"{m}Storage.UnmanagedData<{input.TypeFQN}, {x}>.Unregister(this, index)").Reverse(),
                     ..EnumerateTrackedInterfaceDisableCalls(),
                     input.AttributeSettings.TrackTransforms ? $"{m}Storage.TransformAccess<{input.TypeFQN}>.Unregister(index)" : null,
@@ -1318,6 +1412,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         EmitTrackInstancesProperty(src, input);
         EmitTrackTransformAccessArray(src, input);
         EmitTrackUnmanagedStaticArrays(src, input);
+        EmitTrackCustomStorageProperties(src, input);
         EmitTrackFindByIDMethods(src, input);
     }
 
@@ -1417,6 +1512,41 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         src.Linebreak();
     }
 
+    static void EmitTrackCustomStorageProperties(SourceWriter src, in TrackApiSurfaceInput input)
+    {
+        if (input.CustomStorageProperties.Length is 0)
+            return;
+
+        string s = input.CustomStorageProperties.Length > 1 ? "s" : "";
+        string origin = input.CustomStorageProperties.AsArray()
+            .Select(x => $"<c>ICustomStorage&lt;{x.StorageTypeShort}&gt;</c>")
+            .Join(", ");
+
+        src.Doc?.Write("/// <summary>");
+        src.Doc?.Write($"/// Provides access to custom tracking storage for <see cref=\"{input.TypeDisplayName}\"/>.");
+        src.Doc?.Write("/// </summary>");
+        src.Doc?.Write("/// <remarks>");
+        src.Doc?.Write("/// Custom storage instances are created when the first tracked instance is registered and disposed");
+        src.Doc?.Write("/// when the last tracked instance is unregistered.");
+        src.Doc?.Write("/// </remarks>");
+        src.Doc?.Write($"/// <codegen>Generated because of the implemented interface{s}: {origin}</codegen>");
+
+        foreach (var customStorage in input.CustomStorageProperties.AsArray())
+        {
+            src.Linebreak();
+            src.Doc?.Write("/// <summary>");
+            src.Doc?.Write($"/// Gets the shared <see cref=\"{customStorage.StorageTypeShort}\"/> custom storage instance.");
+            src.Doc?.Write("/// </summary>");
+            src.Doc?.Write($"/// <codegen>Generated because of the implemented interface: <c>ICustomStorage&lt;{customStorage.StorageTypeShort}&gt;</c></codegen>");
+
+            src.Line.Write($"public {input.NewModifier}static ref {customStorage.StorageTypeFQN} {customStorage.PropertyName}");
+            using (src.Braces)
+                src.Line.Write($"{Alias.Inline} get => ref {m}Storage.Custom<{input.TypeFQN}, {customStorage.StorageTypeFQN}>.Storage;");
+        }
+
+        src.Linebreak();
+    }
+
     static void EmitTrackFindByIDMethods(SourceWriter src, in TrackApiSurfaceInput input)
     {
         foreach (var idType in input.FindByIdTypeFQNs.AsArray().Distinct())
@@ -1447,6 +1577,80 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"=> {m}Storage.LookupByID<{input.TypeFQN}, {idType}>.TryFind(id, out result);");
 
             src.Linebreak();
+        }
+    }
+
+    static CustomStoragePropertyInfo[] GetCustomStorageProperties(
+        SourceProductionContext context,
+        EquatableArray<string> storageTypeFQNs,
+        string? trackedTypeFQN,
+        LocationInfo? sourceGeneratorErrorLocation
+    )
+    {
+        using var r1 = Scratch.RentA<List<CustomStoragePropertyInfo>>(out var result);
+        using var r2 = Scratch.RentA<HashSet<string>>(out var seenStorageTypes);
+        using var r3 = Scratch.RentA<List<string>>(out var sortedStorageTypes);
+
+        foreach (var storageTypeFQN in storageTypeFQNs.AsArray())
+            if (seenStorageTypes.Add(storageTypeFQN))
+                sortedStorageTypes.Add(storageTypeFQN);
+
+        sortedStorageTypes.Sort(StringComparer.Ordinal);
+
+        foreach (var storageTypeFQN in sortedStorageTypes)
+        {
+            string storageTypeShortRaw = GetTypeNameTail(storageTypeFQN);
+            string propertyName = GetCustomStoragePropertyName(storageTypeShortRaw);
+
+            foreach (var existing in result)
+            {
+                if (!existing.PropertyName.Equals(propertyName, StringComparison.Ordinal))
+                    continue;
+
+                context.ReportDiagnostic(
+                    Diagnostic.Create(
+                        descriptor: MED037,
+                        location: sourceGeneratorErrorLocation?.ToLocation() ?? Location.None,
+                        messageArgs:
+                        [
+                            trackedTypeFQN ?? "type",
+                            propertyName,
+                            existing.StorageTypeFQN,
+                            storageTypeFQN
+                        ]
+                    )
+                );
+
+                return [];
+            }
+
+            result.Add(
+                new(
+                    StorageTypeFQN: storageTypeFQN,
+                    StorageTypeShort: storageTypeShortRaw.HtmlEncode(),
+                    PropertyName: propertyName
+                )
+            );
+        }
+
+        return result.ToArray();
+
+        static string GetTypeNameTail(string typeFQN)
+        {
+            for (int i = typeFQN.Length - 1; i >= 0; i--)
+                if (typeFQN[i] is '.' or ':')
+                    return typeFQN[(i + 1)..];
+
+            return typeFQN;
+        }
+
+        static string GetCustomStoragePropertyName(string storageTypeShort)
+        {
+            string propertyName = storageTypeShort.EndsWith("Storage", StringComparison.Ordinal)
+                ? storageTypeShort
+                : $"{storageTypeShort}Storage";
+
+            return propertyName.Sanitize();
         }
     }
 }

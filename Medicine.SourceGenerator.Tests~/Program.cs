@@ -54,6 +54,8 @@ DiagnosticTest[] cases =
     TrackSourceGeneratorTest.InterfaceInstanceIndexCase,
     TrackSourceGeneratorTest.GenericInheritanceRegistrationCase,
     TrackSourceGeneratorTest.InterfaceHelperCase,
+    TrackSourceGeneratorTest.CustomStorageCase,
+    TrackSourceGeneratorTest.InterfaceHelperCustomStorageCase,
     SingletonSourceGeneratorTest.Case,
     UnionSourceGeneratorTest.Case,
     UnionSourceGeneratorTest.NoDerivedHeaderCase,
