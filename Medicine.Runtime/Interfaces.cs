@@ -35,6 +35,42 @@ namespace Medicine
         {
             int InstanceIndex { get; set; }
         }
+
+        /// <summary>
+        /// Marker interface implemented by all generated tracked class and interfaces.
+        /// </summary>
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public interface ITracked { }
+
+        /// <summary>
+        /// Marker interface implemented by all generated tracked class and interfaces.
+        /// </summary>
+        /// <typeparam name="TSelf">The tracked type itself.</typeparam>
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public interface ITracked<TSelf> : ITracked where TSelf : ITracked<TSelf> { }
+
+        /// <summary>
+        /// Marker interface implemented by tracked types that use TransformAccess tracking.
+        /// </summary>
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public interface ITrackedTransformAccessArray : ITracked { }
+
+        /// <summary>
+        /// Marker interface implemented by tracked types that use TransformAccess tracking.
+        /// </summary>
+        /// <typeparam name="TSelf">The tracked type itself.</typeparam>
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public interface ITrackedTransformAccessArray<TSelf> : ITracked<TSelf> where TSelf : ITrackedTransformAccessArray<TSelf> { }
+
+        /// <summary>
+        /// Marker interface implemented by tracked types that use unmanaged instance data tracking.
+        /// </summary>
+        /// <typeparam name="TSelf">The tracked type itself.</typeparam>
+        /// <typeparam name="TData">The unmanaged data type.</typeparam>
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public interface ITrackedUnmanagedData<TSelf, TData> : ITracked<TSelf>, IUnmanagedData<TData>
+            where TSelf : ITrackedUnmanagedData<TSelf, TData>
+            where TData : unmanaged { }
     }
 
     public interface IFindByID<out T> where T : unmanaged, IEquatable<T>

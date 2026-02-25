@@ -67,6 +67,15 @@ static class Constants
     public const string IInstanceIndexInternalInterfaceName = "IInstanceIndex";
     public const string IInstanceIndexInternalInterfaceFQN = $"{NamespaceWithGlobal}.Internal.{IInstanceIndexInternalInterfaceName}";
 
+    public const string ITrackedInternalInterfaceName = "ITracked";
+    public const string ITrackedInternalInterfaceFQN = $"{NamespaceWithGlobal}.Internal.{ITrackedInternalInterfaceName}";
+
+    public const string ITrackedTransformAccessArrayInternalInterfaceName = "ITrackedTransformAccessArray";
+    public const string ITrackedTransformAccessArrayInternalInterfaceFQN = $"{NamespaceWithGlobal}.Internal.{ITrackedTransformAccessArrayInternalInterfaceName}";
+
+    public const string ITrackedUnmanagedDataInternalInterfaceName = "ITrackedUnmanagedData";
+    public const string ITrackedUnmanagedDataInternalInterfaceFQN = $"{NamespaceWithGlobal}.Internal.{ITrackedUnmanagedDataInternalInterfaceName}";
+
     public const string MedicineFindClassFQN = "global::Medicine.Find";
 
     public static class Alias

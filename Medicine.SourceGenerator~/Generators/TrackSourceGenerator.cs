@@ -679,6 +679,52 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         };
     }
 
+    static void AppendInterface(SourceWriter src, ref bool hasInterfaces, string interfaceFqn)
+    {
+        src.Write(hasInterfaces ? ", " : " : ");
+        src.Write(interfaceFqn);
+        hasInterfaces = true;
+    }
+
+    static void AppendTrackedMarkerInterfaces(
+        SourceWriter src,
+        string typeFqn,
+        TrackAttributeSettings attributeSettings,
+        string[] unmanagedDataFQNs,
+        ref bool hasInterfaces
+    )
+    {
+        bool hasDerivedTrackedMarker = false;
+
+        if (attributeSettings.TrackTransforms)
+        {
+            AppendInterface(src, ref hasInterfaces, $"{ITrackedTransformAccessArrayInternalInterfaceFQN}<{typeFqn}>");
+            hasDerivedTrackedMarker = true;
+        }
+
+        foreach (var unmanagedDataTypeFqn in unmanagedDataFQNs)
+        {
+            AppendInterface(src, ref hasInterfaces, $"{ITrackedUnmanagedDataInternalInterfaceFQN}<{typeFqn}, {unmanagedDataTypeFqn}>");
+            hasDerivedTrackedMarker = true;
+        }
+
+        if (!hasDerivedTrackedMarker)
+            AppendInterface(src, ref hasInterfaces, $"{ITrackedInternalInterfaceFQN}<{typeFqn}>");
+    }
+
+    static TrackAttributeSettings GetTrackAttributeSettings(AttributeData attributeData, CancellationToken ct)
+        => attributeData
+            .GetAttributeConstructorArguments(ct)
+            .Select(x => new TrackAttributeSettings(
+                    SingletonStrategy: x.Get<SingletonStrategy>("strategy", null),
+                    TrackTransforms: x.Get("transformAccessArray", false),
+                    InitialCapacity: x.Get("transformInitialCapacity", 64),
+                    DesiredJobCount: x.Get("transformDesiredJobCount", -1),
+                    CacheEnabledState: x.Get("cacheEnabledState", false),
+                    Manual: x.Get("manual", false)
+                )
+            );
+
     static void GenerateTrackedInterfaceHelper(SourceProductionContext context, SourceWriter src, InterfaceGeneratorInput input)
     {
         if (input is not { TypeFQN.Length: > 0, IsGenericType: false })
@@ -701,9 +747,26 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         src.Linebreak();
 
         var declarations = input.ContainingTypeDeclaration.AsArray();
+        int lastDeclaration = declarations.Length - 1;
 
-        foreach (var declaration in declarations)
-            src.Line.Write(declaration).OpenBrace();
+        for (int i = 0; i < declarations.Length; i++)
+        {
+            src.Line.Write(declarations[i]);
+
+            if (i == lastDeclaration)
+            {
+                bool hasInterfaces = false;
+                AppendTrackedMarkerInterfaces(
+                    src: src,
+                    typeFqn: input.TypeFQN ?? "",
+                    attributeSettings: input.AttributeSettings,
+                    unmanagedDataFQNs: input.UnmanagedDataFQNs.AsArray(),
+                    hasInterfaces: ref hasInterfaces
+                );
+            }
+
+            src.OpenBrace();
+        }
 
         src.Line.Write("public static class Track");
 
@@ -748,19 +811,6 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         src.TrimEndWhitespace();
     }
-
-    static TrackAttributeSettings GetTrackAttributeSettings(AttributeData attributeData, CancellationToken ct)
-        => attributeData
-            .GetAttributeConstructorArguments(ct)
-            .Select(x => new TrackAttributeSettings(
-                    SingletonStrategy: x.Get<SingletonStrategy>("strategy", null),
-                    TrackTransforms: x.Get("transformAccessArray", false),
-                    InitialCapacity: x.Get("transformInitialCapacity", 64),
-                    DesiredJobCount: x.Get("transformDesiredJobCount", -1),
-                    CacheEnabledState: x.Get("cacheEnabledState", false),
-                    Manual: x.Get("manual", false)
-                )
-            );
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
@@ -825,7 +875,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 .Distinct()
                 .OrderBy(x => x, StringComparer.Ordinal)
                 .ToArray()
-            : Array.Empty<string>();
+            : [];
 
         var declarations = input.ContainingTypeDeclaration.AsSpan();
         int lastDeclaration = declarations.Length - 1;
@@ -864,15 +914,28 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             if (i == lastDeclaration)
             {
-                if (input.Attribute is TrackAttributeMetadataName && trackedStorageTypes.Length > 0)
+                bool hasInterfaces = false;
+
+                if (input.Attribute is TrackAttributeMetadataName)
                 {
-                    src.Write($" : {IInstanceIndexInternalInterfaceFQN}<{trackedStorageTypes[0]}>");
-                    for (int j = 1; j < trackedStorageTypes.Length; j++)
-                        src.Write($", {IInstanceIndexInternalInterfaceFQN}<{trackedStorageTypes[j]}>");
+                    AppendTrackedMarkerInterfaces(
+                        src: src,
+                        typeFqn: input.TypeFQN ?? "",
+                        attributeSettings: input.AttributeSettings,
+                        unmanagedDataFQNs: input.UnmanagedDataFQNs.AsArray(),
+                        hasInterfaces: ref hasInterfaces
+                    );
+
+                    if (trackedStorageTypes.Length > 0)
+                    {
+                        AppendInterface(src, ref hasInterfaces, $"{IInstanceIndexInternalInterfaceFQN}<{trackedStorageTypes[0]}>");
+                        for (int j = 1; j < trackedStorageTypes.Length; j++)
+                            AppendInterface(src, ref hasInterfaces, $"{IInstanceIndexInternalInterfaceFQN}<{trackedStorageTypes[j]}>");
+                    }
                 }
 
                 if (input.EmitIInstanceIndex)
-                    src.Write($", {IInstanceIndexInterfaceFQN}");
+                    AppendInterface(src, ref hasInterfaces, IInstanceIndexInterfaceFQN);
             }
 
             src.OpenBrace();
