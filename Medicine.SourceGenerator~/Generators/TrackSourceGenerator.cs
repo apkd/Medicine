@@ -519,10 +519,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         {
             foreach (var interfaceType in classSymbol.Interfaces)
             {
-                if (interfaceType.OriginalDefinition.Is(knownSymbols.UnmanagedDataInterface))
-                    if (interfaceType.TypeArguments is [{ FQN: { Length: > 0 } unmanagedDataFqn }])
-                        if (seenUnmanagedData.Add(unmanagedDataFqn))
-                            unmanagedDataFQNsList.Add(unmanagedDataFqn);
+                TryAddUnmanagedData(interfaceType);
+                TryAddInheritedUnmanagedData(interfaceType);
 
                 TryAddCustomStorage(interfaceType);
 
@@ -533,6 +531,38 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             classUnmanagedDataFQNs = unmanagedDataFQNsList.ToArray();
             classCustomStorageTypeFQNs = customStorageTypeFQNsList.ToArray();
+
+            void TryAddUnmanagedData(INamedTypeSymbol symbol)
+            {
+                if (symbol.OriginalDefinition.Is(knownSymbols.UnmanagedDataInterface))
+                    if (symbol.TypeArguments is [{ FQN: { Length: > 0 } unmanagedDataFqn }])
+                if (seenUnmanagedData.Add(unmanagedDataFqn))
+                    unmanagedDataFQNsList.Add(unmanagedDataFqn);
+            }
+
+            void TryAddInheritedUnmanagedData(INamedTypeSymbol symbol)
+            {
+                if (IsTrackedInterface(symbol))
+                    return;
+
+                foreach (var inheritedInterface in symbol.Interfaces)
+                {
+                    if (IsTrackedInterface(inheritedInterface))
+                        continue;
+
+                    TryAddUnmanagedData(inheritedInterface);
+                    TryAddInheritedUnmanagedData(inheritedInterface);
+                }
+            }
+
+            bool IsTrackedInterface(INamedTypeSymbol symbol)
+            {
+                var symbolForLookup = symbol is { IsGenericType: true, IsUnboundGenericType: false }
+                    ? symbol.OriginalDefinition
+                    : symbol;
+
+                return symbolForLookup.HasAttribute(knownSymbols.TrackAttribute);
+            }
 
             void TryAddCustomStorage(INamedTypeSymbol symbol)
             {

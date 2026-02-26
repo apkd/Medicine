@@ -27,6 +27,18 @@ static class TrackSourceGeneratorTest
     public static readonly DiagnosticTest InterfaceHelperCustomStorageCase =
         new("Track generator emits custom storage helper APIs for tracked interfaces", RunInterfaceHelperCustomStorage);
 
+    public static readonly DiagnosticTest NonTrackedInterfaceUnmanagedPropagationCase =
+        new("Track generator treats non-tracked inherited unmanaged-data interfaces like direct implementation", RunNonTrackedInterfaceUnmanagedPropagation);
+
+    public static readonly DiagnosticTest TrackedInterfaceUnmanagedNoImplicitClassPropagationCase =
+        new("Track generator does not implicitly copy unmanaged-data from tracked interfaces to implementing class type", RunTrackedInterfaceUnmanagedNoImplicitClassPropagation);
+
+    public static readonly DiagnosticTest NonTrackedInterfaceUnmanagedNoDerivedClassInheritanceCase =
+        new("Track generator does not implicitly inherit non-tracked unmanaged-data marker interfaces through class inheritance", RunNonTrackedInterfaceUnmanagedNoDerivedClassInheritance);
+
+    public static readonly DiagnosticTest ExplicitClassUnmanagedAlongTrackedInterfaceCase =
+        new("Track generator keeps direct class unmanaged-data implementation even when tracked interface also provides same unmanaged-data type", RunExplicitClassUnmanagedAlongTrackedInterface);
+
     static void Run()
         => SourceGeneratorTester.AssertGeneratesMoreSourcesThanBaseline(
             baselineSource: """
@@ -568,6 +580,307 @@ partial class TrackSourceGeneratorInterfaceCustomStorage : MonoBehaviour, ITrack
             $"Actual payload property: {helperPayloadPropertyCount}, ITrackInstanceIDs property: {helperTrackInstanceIdsPropertyCount}, " +
             $"payload register: {helperPayloadRegisterCount}, payload unregister: {helperPayloadUnregisterCount}, " +
             $"ITrackInstanceIDs register: {helperTrackInstanceIdsRegisterCount}, ITrackInstanceIDs unregister: {helperTrackInstanceIdsUnregisterCount}."
+        );
+
+        static int CountOccurrences(string source, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while (true)
+            {
+                index = source.IndexOf(value, index, StringComparison.Ordinal);
+                if (index < 0)
+                    return count;
+
+                count++;
+                index += value.Length;
+            }
+        }
+    }
+
+    static void RunNonTrackedInterfaceUnmanagedPropagation()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+using UnityEngine;
+
+struct NonTrackedMarkerData
+{
+    public int Value;
+}
+
+interface INonTrackedMarkerData : IUnmanagedData<NonTrackedMarkerData> { }
+
+[Track]
+partial class NonTrackedMarkerConsumer : MonoBehaviour, INonTrackedMarkerData { }
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new TrackSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "non-tracked inherited unmanaged-data marker should be handled without generator exceptions"
+        );
+
+        int classRegisterCount = 0;
+        int classUnregisterCount = 0;
+        foreach (var result in run.Results)
+        foreach (var generatedSource in result.GeneratedSources)
+        {
+            var text = generatedSource.SourceText.ToString();
+            classRegisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::NonTrackedMarkerConsumer, global::NonTrackedMarkerData>.Register(this)");
+            classUnregisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::NonTrackedMarkerConsumer, global::NonTrackedMarkerData>.Unregister(this, index)");
+        }
+
+        if (classRegisterCount is 1 && classUnregisterCount is 1)
+            return;
+
+        throw new InvalidOperationException(
+            "Expected non-tracked inherited unmanaged-data marker to emit class-level unmanaged registration lifecycle calls." + Environment.NewLine +
+            $"Actual class register: {classRegisterCount}, class unregister: {classUnregisterCount}."
+        );
+
+        static int CountOccurrences(string source, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while (true)
+            {
+                index = source.IndexOf(value, index, StringComparison.Ordinal);
+                if (index < 0)
+                    return count;
+
+                count++;
+                index += value.Length;
+            }
+        }
+    }
+
+    static void RunTrackedInterfaceUnmanagedNoImplicitClassPropagation()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+using UnityEngine;
+
+struct TrackedInterfaceData
+{
+    public int Value;
+}
+
+[Track]
+partial interface ITrackedUnmanagedDataCarrier : IUnmanagedData<TrackedInterfaceData> { }
+
+[Track]
+partial class TrackedUnmanagedDataConsumer : MonoBehaviour, ITrackedUnmanagedDataCarrier { }
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new TrackSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "tracked-interface unmanaged-data should not rely on class-level unmanaged-data propagation"
+        );
+
+        int classRegisterCount = 0;
+        int classUnregisterCount = 0;
+        int interfaceRegisterCount = 0;
+        int interfaceUnregisterCount = 0;
+        int localAccessorCount = 0;
+        foreach (var result in run.Results)
+        foreach (var generatedSource in result.GeneratedSources)
+        {
+            var text = generatedSource.SourceText.ToString();
+            classRegisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::TrackedUnmanagedDataConsumer, global::TrackedInterfaceData>.Register(this)");
+            classUnregisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::TrackedUnmanagedDataConsumer, global::TrackedInterfaceData>.Unregister(this, index)");
+            interfaceRegisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::ITrackedUnmanagedDataCarrier, global::TrackedInterfaceData>.Register(this)");
+            interfaceUnregisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::ITrackedUnmanagedDataCarrier, global::TrackedInterfaceData>.Unregister(this, ");
+            localAccessorCount += CountOccurrences(text, "LocalTrackedInterfaceData");
+        }
+
+        if (
+            classRegisterCount is 0 &&
+            classUnregisterCount is 0 &&
+            interfaceRegisterCount is 1 &&
+            interfaceUnregisterCount is 1 &&
+            localAccessorCount is 0
+           )
+            return;
+
+        throw new InvalidOperationException(
+            "Expected tracked-interface unmanaged-data to stay interface-scoped and not be implicitly copied to class unmanaged-data APIs." + Environment.NewLine +
+            $"Actual class register: {classRegisterCount}, class unregister: {classUnregisterCount}, interface register: {interfaceRegisterCount}, interface unregister: {interfaceUnregisterCount}, local accessor count: {localAccessorCount}."
+        );
+
+        static int CountOccurrences(string source, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while (true)
+            {
+                index = source.IndexOf(value, index, StringComparison.Ordinal);
+                if (index < 0)
+                    return count;
+
+                count++;
+                index += value.Length;
+            }
+        }
+    }
+
+    static void RunNonTrackedInterfaceUnmanagedNoDerivedClassInheritance()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+using UnityEngine;
+
+struct InheritedMarkerData
+{
+    public int Value;
+}
+
+interface INonTrackedInheritedMarker : IUnmanagedData<InheritedMarkerData> { }
+
+[Track]
+partial class BaseWithNonTrackedMarker : MonoBehaviour, INonTrackedInheritedMarker { }
+
+[Track]
+partial class DerivedWithoutMarker : BaseWithNonTrackedMarker { }
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new TrackSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "non-tracked unmanaged-data markers should be limited to interfaces implemented at each class inheritance level"
+        );
+
+        int baseRegisterCount = 0;
+        int derivedRegisterCount = 0;
+        foreach (var result in run.Results)
+        foreach (var generatedSource in result.GeneratedSources)
+        {
+            var text = generatedSource.SourceText.ToString();
+            baseRegisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::BaseWithNonTrackedMarker, global::InheritedMarkerData>.Register(this)");
+            derivedRegisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::DerivedWithoutMarker, global::InheritedMarkerData>.Register(this)");
+        }
+
+        if (baseRegisterCount is 1 && derivedRegisterCount is 0)
+            return;
+
+        throw new InvalidOperationException(
+            "Expected only the class that explicitly implements the non-tracked unmanaged-data marker interface to receive class-level unmanaged-data registration." + Environment.NewLine +
+            $"Actual base register: {baseRegisterCount}, derived register: {derivedRegisterCount}."
+        );
+
+        static int CountOccurrences(string source, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while (true)
+            {
+                index = source.IndexOf(value, index, StringComparison.Ordinal);
+                if (index < 0)
+                    return count;
+
+                count++;
+                index += value.Length;
+            }
+        }
+    }
+
+    static void RunExplicitClassUnmanagedAlongTrackedInterface()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+using UnityEngine;
+
+struct ExplicitClassData
+{
+    public int Value;
+}
+
+[Track]
+partial interface ITrackedExplicitClassData : IUnmanagedData<ExplicitClassData> { }
+
+[Track]
+partial class ExplicitClassDataConsumer : MonoBehaviour, ITrackedExplicitClassData, IUnmanagedData<ExplicitClassData> { }
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new TrackSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "explicit class-level unmanaged-data implementation should remain active alongside tracked-interface unmanaged-data"
+        );
+
+        int classRegisterCount = 0;
+        int classUnregisterCount = 0;
+        int interfaceRegisterCount = 0;
+        int interfaceUnregisterCount = 0;
+        foreach (var result in run.Results)
+        foreach (var generatedSource in result.GeneratedSources)
+        {
+            var text = generatedSource.SourceText.ToString();
+            classRegisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::ExplicitClassDataConsumer, global::ExplicitClassData>.Register(this)");
+            classUnregisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::ExplicitClassDataConsumer, global::ExplicitClassData>.Unregister(this, index)");
+            interfaceRegisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::ITrackedExplicitClassData, global::ExplicitClassData>.Register(this)");
+            interfaceUnregisterCount += CountOccurrences(text, "Storage.UnmanagedData<global::ITrackedExplicitClassData, global::ExplicitClassData>.Unregister(this, ");
+        }
+
+        if (classRegisterCount is 1 && classUnregisterCount is 1 && interfaceRegisterCount is 1 && interfaceUnregisterCount is 1)
+            return;
+
+        throw new InvalidOperationException(
+            "Expected explicit class-level unmanaged-data and tracked-interface unmanaged-data to both emit lifecycle calls exactly once." + Environment.NewLine +
+            $"Actual class register: {classRegisterCount}, class unregister: {classUnregisterCount}, interface register: {interfaceRegisterCount}, interface unregister: {interfaceUnregisterCount}."
         );
 
         static int CountOccurrences(string source, string value)
