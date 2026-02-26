@@ -17,7 +17,7 @@ namespace Medicine.Internal
     {
         [EditorBrowsable(Never)]
         public static class UnmanagedData<T, TData>
-            where T : class, IUnmanagedData<TData>
+            where T : class
             where TData : unmanaged
         {
             public static NativeList<TData> List = Initialize();
@@ -58,7 +58,7 @@ namespace Medicine.Internal
                 TData state;
                 try
                 {
-                    instance.Initialize(out state);
+                    ((IUnmanagedData<TData>)instance).Initialize(out state);
                 }
                 catch (System.Exception ex)
                 {
@@ -97,7 +97,7 @@ namespace Medicine.Internal
                         return; // possible right before domain reload
 #endif
 
-                    instance.Cleanup(ref List.ElementAt(elementIndex));
+                    ((IUnmanagedData<TData>)instance).Cleanup(ref List.ElementAt(elementIndex));
                 }
                 catch (System.Exception ex)
                 {
