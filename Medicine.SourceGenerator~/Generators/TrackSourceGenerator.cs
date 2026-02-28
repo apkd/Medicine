@@ -130,7 +130,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         public EquatableArray<string> ContainingTypeDeclaration;
         public string? ContainingTypeFQN;
         public EquatableArray<string> InterfacesWithAttribute;
-        public EquatableIgnore<Func<TrackInterfaceRegistration[]>?> TrackedInterfacesBuilderFunc;
+        public Defer<TrackInterfaceRegistration[]>? TrackedInterfacesDeferred;
         public EquatableArray<string> UnmanagedDataFQNs;
         public EquatableArray<string> CustomStorageTypeFQNs;
         public EquatableArray<TrackingIdRegistration> TrackingIdRegistrations;
@@ -153,7 +153,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         public EquatableArray<string> TrackingIdTypeFQNs;
         public string? TypeFQN;
         public string? ContainingTypeFQN;
-        public EquatableIgnore<Func<string>?> TypeDisplayNameBuilderFunc;
+        public Defer<string>? TypeDisplayNameBuilderDeferred;
         public bool IsGenericType;
         public TypeFlags Flags;
     }
@@ -603,7 +603,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             HasBaseDeclarationsWithAttribute = hasBaseDeclarationsWithAttribute,
             ManualInheritanceMismatch = manualInheritanceMismatch,
             InterfacesWithAttribute = interfacesWithAttribute.ToArray(),
-            TrackedInterfacesBuilderFunc = new(() => trackedInterfaces),
+            TrackedInterfacesDeferred = new(() => trackedInterfaces),
             Flags = 0
                     | (context.SemanticModel.IsAccessible(position: 0, classSymbol) ? IsAccessible : 0)
                     | (classSymbol.ContainingSymbol is { } containing && context.SemanticModel.IsAccessible(position: 0, containing) ? ContainingTypeIsAccessible : 0)
@@ -702,7 +702,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             CustomStorageTypeFQNs = customStorageTypeFQNs,
             TrackingIdTypeFQNs = trackingIdTypeFQNs,
             TypeFQN = interfaceSymbol.FQN,
-            TypeDisplayNameBuilderFunc = new(() => interfaceSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode()),
+            TypeDisplayNameBuilderDeferred = new(() => interfaceSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).HtmlEncode()),
             IsGenericType = interfaceSymbol.IsGenericType,
             Flags = 0
                     | (context.SemanticModel.IsAccessible(position: 0, interfaceSymbol) ? IsAccessible : 0)
@@ -771,7 +771,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         );
 
         string typeDisplayName
-            = input.TypeDisplayNameBuilderFunc.Value?.Invoke()
+            = input.TypeDisplayNameBuilderDeferred?.Value
               ?? input.TypeFQN;
 
         src.Line.Write(Alias.UsingStorage);
@@ -1242,7 +1242,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             EmitTrackLocalUnmanagedAccessors();
 
-            var trackedInterfaces = input.TrackedInterfacesBuilderFunc.Value?.Invoke() ?? [];
+            var trackedInterfaces = input.TrackedInterfacesDeferred?.Value ?? [];
 
             IEnumerable<string> EnumerateTrackedInterfaceEnableCalls()
             {

@@ -66,8 +66,8 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         public bool? MakePublic;
         public EquatableArray<string> NamespaceImports;
         public EquatableArray<string> ContainingTypeDeclaration;
-        public EquatableIgnore<Func<string>> ClassName;
-        public EquatableIgnore<Func<InitExpressionInfo[]>> InitExpressionInfoArrayBuilderFunc = new(() => []);
+        public Defer<string>? ClassNameDeferred;
+        public Defer<InitExpressionInfo[]>? InitExpressionInfoArrayDeferred = new(() => []);
 
         // ReSharper disable once NotAccessedField.Local
         public EquatableArray<byte> MethodTextCheckSumForCache;
@@ -192,12 +192,12 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
         // defer the expensive calls to the source gen phase
 
-        output.ClassName = new(() => context.SemanticModel
+        output.ClassNameDeferred = new(() => context.SemanticModel
             .GetDeclaredSymbol(classDecl, ct)
             ?.ToMinimalDisplayString(context.SemanticModel, targetNode.SpanStart, MinimallyQualifiedFormat) ?? ""
         );
 
-        output.InitExpressionInfoArrayBuilderFunc = new(() =>
+        output.InitExpressionInfoArrayDeferred = new(() =>
             {
                 var assignments = targetNode
                     .DescendantNodes(x => x is MethodDecl or LocalFunctionDecl or BlockSyntax or ArrowExpressionClauseSyntax or ExpressionStatementSyntax or ReturnStatementSyntax)
@@ -714,7 +714,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
     {
         src.ShouldEmitDocs = input.ShouldEmitDocs;
 
-        var expressions = input.InitExpressionInfoArrayBuilderFunc.Value();
+        var expressions = input.InitExpressionInfoArrayDeferred?.Value ?? [];
 
         foreach (var group in expressions.GroupBy(x => x.PropertyName).Where(x => x.Count() > 1))
         foreach (var x in group)
@@ -737,7 +737,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         string storagePropName = $"{m}MedicineInternal{storageSuffix}";
         string storageStructName = $"{m}MedicineInternalBackingStorage{storageSuffix}";
 
-        string className = input.ClassName.Value();
+        string className = input.ClassNameDeferred?.Value ?? "";
 
         using var r1 = Scratch.RentA<List<string>>(out var deferredLines);
 

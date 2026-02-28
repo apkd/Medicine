@@ -21,8 +21,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public bool IsTracked;
         public GeneratorEnvironment GeneratorEnvironment;
         public AttributeSettings AttributeSettings;
-        public EquatableIgnore<Func<bool>?> HasCachedEnableBuilderFunc;
-        public EquatableIgnore<Func<bool>?> HasIInstanceIndexBuilderFunc;
+        public Defer<bool>? HasCachedEnableBuilderDeferred;
+        public Defer<bool>? HasIInstanceIndexBuilderDeferred;
         public EquatableArray<FieldInfo> Fields;
     }
 
@@ -125,7 +125,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             IsUnityObject = typeSymbol.InheritsFrom(knownSymbols.UnityObject),
             IsTracked = trackAttribute is not null,
             SourceGeneratorErrorLocation = new(typeDecl.Identifier.GetLocation()),
-            HasCachedEnableBuilderFunc = new(() =>
+            HasCachedEnableBuilderDeferred = new(() =>
                 {
                     if (trackAttribute is null)
                         return false;
@@ -142,7 +142,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                            && !hasBaseCachedEnable;
                 }
             ),
-            HasIInstanceIndexBuilderFunc = new(() =>
+            HasIInstanceIndexBuilderDeferred = new(() =>
                 trackAttribute is not null
             ),
         };
@@ -223,8 +223,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 src.Doc?.Write(line);
         }
 
-        bool hasCachedEnable = input.HasCachedEnableBuilderFunc.Value?.Invoke() ?? false;
-        bool hasIInstanceIndex = input.HasIInstanceIndexBuilderFunc.Value?.Invoke() ?? false;
+        bool hasCachedEnable = input.HasCachedEnableBuilderDeferred?.Value ?? false;
+        bool hasIInstanceIndex = input.HasIInstanceIndexBuilderDeferred?.Value ?? false;
 
         if ((hasCachedEnable ? 1 : 0) + (hasIInstanceIndex ? 1 : 0) is > 0 and var generatedFieldCount)
         {
