@@ -41,7 +41,7 @@ public static class Utility
         }
     }
 
-    public static string GetOutputFilename(string filePath, string targetFQN, string label, string shadowTargetFQN = "", bool includeFilename = true)
+    public static string GetOutputFilename(string filePath, string targetFQN, string label = "", string shadowTargetFQN = "", bool includeFilename = true)
     {
         string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(filePath);
         string typename;
@@ -60,13 +60,9 @@ public static class Utility
             typename = sanitized.ToString();
         }
 
-        var result = includeFilename
-            ? $"{fileNameWithoutExtension}.{typename}.{label}.{Hash():x8}.g.cs"
-            : $"{typename}.{label}.{Hash():x8}.g.cs";
-
-        ;
-
-        return result;
+        return includeFilename
+            ? $"{label}{fileNameWithoutExtension}.{typename}.{Hash():x8}.g.cs"
+            : $"{label}{typename}.{Hash():x8}.g.cs";
 
         int Hash()
         {
@@ -81,6 +77,9 @@ public static class Utility
                     hash = hash * 31 + c;
 
                 foreach (char c in shadowTargetFQN)
+                    hash = hash * 31 + c;
+
+                foreach (char c in label)
                     hash = hash * 31 + c;
 
                 return hash;

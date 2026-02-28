@@ -536,8 +536,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             {
                 if (symbol.OriginalDefinition.Is(knownSymbols.UnmanagedDataInterface))
                     if (symbol.TypeArguments is [{ FQN: { Length: > 0 } unmanagedDataFqn }])
-                if (seenUnmanagedData.Add(unmanagedDataFqn))
-                    unmanagedDataFQNsList.Add(unmanagedDataFqn);
+                        if (seenUnmanagedData.Add(unmanagedDataFqn))
+                            unmanagedDataFQNsList.Add(unmanagedDataFqn);
             }
 
             void TryAddInheritedUnmanagedData(INamedTypeSymbol symbol)
@@ -566,14 +566,10 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             void TryAddCustomStorage(INamedTypeSymbol symbol)
             {
-                if (!symbol.OriginalDefinition.Is(knownSymbols.CustomStorageInterface))
-                    return;
-
-                if (symbol.TypeArguments is not [{ FQN: { Length: > 0 } customStorageFqn }])
-                    return;
-
-                if (seenCustomStorage.Add(customStorageFqn))
-                    customStorageTypeFQNsList.Add(customStorageFqn);
+                if (symbol.OriginalDefinition.Is(knownSymbols.CustomStorageInterface))
+                    if (symbol.TypeArguments is [{ FQN: { Length: > 0 } customStorageFqn }])
+                        if (seenCustomStorage.Add(customStorageFqn))
+                            customStorageTypeFQNsList.Add(customStorageFqn);
             }
         }
 
@@ -581,8 +577,14 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         {
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
                 filePath: typeDeclaration.SyntaxTree.FilePath,
-                targetFQN: classSymbol.FQN,
-                label: attributeName,
+                targetFQN: classSymbol.Name,
+                shadowTargetFQN: classSymbol.FQN,
+                label: attributeName switch
+                {
+                    TrackAttributeMetadataName => "[Track]",
+                    SingletonAttributeMetadataName => "[Singleton]",
+                    _ => attributeName,
+                },
                 includeFilename: false
             ),
             Environment = environment,
@@ -687,8 +689,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         {
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
                 filePath: typeDeclaration.SyntaxTree.FilePath,
-                targetFQN: interfaceSymbol.FQN,
-                label: "Track.InterfaceHelper",
+                targetFQN: interfaceSymbol.Name,
+                shadowTargetFQN: interfaceSymbol.FQN,
+                label: "[Track]",
                 includeFilename: false
             ),
             SourceGeneratorErrorLocation = attributeData.ApplicationSyntaxReference.GetLocation() ?? typeDeclaration.Identifier.GetLocation(),

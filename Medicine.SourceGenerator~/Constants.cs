@@ -23,7 +23,8 @@ static class Constants
     public const string TrackAttributeMetadataName = $"{Namespace}.{TrackAttributeName}";
     public const string TrackAttributeFQN = $"{NamespaceWithGlobal}.{TrackAttributeName}";
 
-    public const string WrapValueEnumerableAttributeName = "WrapValueEnumerableAttribute";
+    public const string WrapValueEnumerableAttributeNameShort = "WrapValueEnumerable";
+    public const string WrapValueEnumerableAttributeName = $"{WrapValueEnumerableAttributeNameShort}Attribute";
     public const string WrapValueEnumerableAttributeMetadataName = $"{Namespace}.{WrapValueEnumerableAttributeName}";
     public const string WrapValueEnumerableAttributeFQN = $"{NamespaceWithGlobal}.{WrapValueEnumerableAttributeName}";
 
@@ -35,7 +36,8 @@ static class Constants
     public const string UnionStructAttributeMetadataName = $"{Namespace}.{UnionStructAttributeName}";
     public const string UnionStructAttributeFQN = $"{NamespaceWithGlobal}.{UnionStructAttributeName}";
 
-    public const string UnmanagedAccessAttributeName = "UnmanagedAccessAttribute";
+    public const string UnmanagedAccessAttributeNameShort = "UnmanagedAccess";
+    public const string UnmanagedAccessAttributeName = $"{UnmanagedAccessAttributeNameShort}Attribute";
     public const string UnmanagedAccessAttributeMetadataName = $"{Namespace}.{UnmanagedAccessAttributeName}";
     public const string UnmanagedAccessAttributeFQN = $"{NamespaceWithGlobal}.{UnmanagedAccessAttributeName}";
 

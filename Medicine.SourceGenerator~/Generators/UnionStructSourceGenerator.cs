@@ -170,7 +170,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         {
             return new()
             {
-                SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "Union"),
+                SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "[Union]"),
             };
         }
 
@@ -201,7 +201,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
         return new()
         {
-            SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "Union"),
+            SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "[Union]"),
             BaseDeclaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
             BaseTypeName = symbol.Name,
             BaseTypeFQN = symbol.FQN,

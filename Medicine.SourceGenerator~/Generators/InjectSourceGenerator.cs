@@ -167,7 +167,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                 filePath: classDecl.Identifier.ValueText,
                 targetFQN: injectMethodName,
                 shadowTargetFQN: (targetNode as LocalFunctionDecl)?.Identifier.ValueText ?? "",
-                label: InjectAttributeName
+                label: $"[{InjectAttributeNameShort}]"
             ),
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(classDecl, context.SemanticModel, ct),
             MethodTextCheckSumForCache = targetNode.GetText().GetChecksum().AsArray(),

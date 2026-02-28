@@ -115,7 +115,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
                 filePath: typeDecl.SyntaxTree.FilePath,
                 targetFQN: typeSymbol.ToDisplayString(CSharpShortErrorMessageFormat),
-                label: "UnmanagedAccess",
+                label: $"[{UnmanagedAccessAttributeNameShort}]",
                 includeFilename: false
             ),
             AttributeSettings = settings,
