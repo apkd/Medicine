@@ -976,6 +976,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         void EmitRegistrationMethod(string methodName, string? prependCall = null, Action? emitPreBody = null, params string?[] methodCalls)
         {
+            bool register = methodName is "OnEnableINTERNAL";
+
             if (!input.AttributeSettings.Manual)
             {
                 src.Line.Write(Alias.Hidden);
@@ -985,7 +987,6 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             }
             else
             {
-                bool register = methodName is "OnEnableINTERNAL";
                 methodName = register ? "RegisterInstance" : "UnregisterInstance";
                 src.Doc?.Write($"/// <summary>");
                 src.Doc?.Write($"/// Manually {(register ? "registers" : "unregisters")} this instance {(register ? "in" : "from")} the <c>{input.Attribute}</c> storage.");
@@ -1001,6 +1002,17 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             using (src.Braces)
             {
+                if (input is { Attribute: TrackAttributeMetadataName })
+                {
+                    string check = register
+                        ? $"{m}MedicineInternalInstanceIndex >= 0"
+                        : $"{m}MedicineInternalInstanceIndex is -1";
+
+                    src.Line.Write($"if ({check})");
+                    using (src.Indent)
+                        src.Line.Write("return;");
+                }
+
                 if (prependCall is { Length: > 0 })
                     src.Line.Write(prependCall);
 
