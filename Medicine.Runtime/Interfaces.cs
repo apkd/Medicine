@@ -68,8 +68,8 @@ namespace Medicine
         /// <typeparam name="TSelf">The tracked type itself.</typeparam>
         /// <typeparam name="TData">The unmanaged data type.</typeparam>
         [EditorBrowsable(EditorBrowsableState.Never)]
-        public interface ITrackedUnmanagedData<TSelf, TData> : ITracked<TSelf>, IUnmanagedData<TData>
-            where TSelf : ITrackedUnmanagedData<TSelf, TData>
+        public interface ITrackedUnmanagedData<TSelf, TData> : ITracked<TSelf>
+            where TSelf : ITrackedUnmanagedData<TSelf, TData>, IUnmanagedData<TData>
             where TData : unmanaged { }
     }
 
