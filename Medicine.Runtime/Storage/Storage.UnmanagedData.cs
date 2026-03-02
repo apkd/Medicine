@@ -49,6 +49,17 @@ namespace Medicine.Internal
                 };
 #endif
 #endif
+
+#if UNITY_EDITOR
+                enterPlayModeCleanup += static () =>
+                {
+                    if (!List.IsCreated)
+                        return;
+
+                    List.Clear();
+                    Array = List.AsArray();
+                };
+#endif
                 Array = List.AsArray();
                 return List;
             }

@@ -19,6 +19,19 @@ namespace Medicine.Internal
             [EditorBrowsable(EditorBrowsableState.Never)]
             public static readonly Dictionary<TId, T> Map = new(capacity: 8);
 
+            static class StaticInit
+            {
+                [MethodImpl(AggressiveInlining)]
+                internal static void RunOnce() { }
+
+                static StaticInit()
+                {
+#if UNITY_EDITOR
+                    enterPlayModeCleanup += static () => Map.Clear();
+#endif
+                }
+            }
+
             [MethodImpl(NoInlining)]
             static void LogIdMismatch(TId id, T instance)
                 => LogError($"ID mismatch for {typeof(T).Name}: {id} != {instance.ID} (instance: {instance})");
@@ -49,6 +62,7 @@ namespace Medicine.Internal
 
             public static void Register(T target)
             {
+                StaticInit.RunOnce();
                 var id = target.ID;
 #if DEBUG
                 if (Map.TryGetValue(id, out T? other))

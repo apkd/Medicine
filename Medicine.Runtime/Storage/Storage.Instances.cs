@@ -130,34 +130,42 @@ namespace Medicine.Internal
                 var selfTrackIndex = (IInstanceIndex<T>)instance;
                 var index = selfTrackIndex.InstanceIndex;
 #if DEBUG
-                if (!Utility.EditMode)
+                if (listView.Count == 0)
                 {
-                    if (listView.Count == 0)
+                    if (!Utility.EditMode)
                     {
                         Debug.LogError(
                             $"Tried to unregister {typeof(T).Name} from an empty tracked list. " +
                             "This probably indicates a logic error in your code."
                         );
-                        return -1;
                     }
+                    return -1;
+                }
 
-                    if ((uint)index >= (uint)listView.Count)
+                if ((uint)index >= (uint)listView.Count)
+                {
+                    if (!Utility.EditMode)
                     {
                         Debug.LogError(
                             $"Invalid InstanceIndex for {typeof(T).Name}: {index} (count: {listView.Count}). " +
                             "This probably indicates a logic error in your code, and will cause errors in release builds."
                         );
-                        return -1;
                     }
 
-                    if (!ReferenceEquals(array[index], instance))
+                    return -1;
+                }
+
+                if (!ReferenceEquals(array[index], instance))
+                {
+                    if (!Utility.EditMode)
                     {
                         Debug.LogError(
                             $"InstanceIndex mismatch for {typeof(T).Name}: stored index {index} does not match instance. " +
                             "This probably indicates a logic error in your code, and will cause errors in release builds."
                         );
-                        return -1;
                     }
+
+                    return -1;
                 }
 
                 if (index != listView.Count - 1)
