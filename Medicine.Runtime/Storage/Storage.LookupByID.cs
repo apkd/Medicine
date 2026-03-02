@@ -17,7 +17,7 @@ namespace Medicine.Internal
             where TId : unmanaged, IEquatable<TId>
         {
             [EditorBrowsable(EditorBrowsableState.Never)]
-            public static readonly Dictionary<TId, T> Map = new(capacity: 8);
+            public static readonly Dictionary<TId, T> Map = new(capacity: StaticInitArgs<T>.Capacity);
 
             static class StaticInit
             {

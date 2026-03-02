@@ -174,8 +174,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         string? ContainingTypeFQN,
         TypeFlags Flags,
         bool IsAutoInstantiate,
+        bool EmitCapacityInit,
+        int InitialCapacity,
         bool EmitTransformAccessInit,
-        int TransformInitialCapacity,
         int TransformDesiredJobCount
     );
 
@@ -817,7 +818,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             .Select(x => new TrackAttributeSettings(
                     SingletonStrategy: x.Get<SingletonStrategy>("strategy", null),
                     TrackTransforms: x.Get("transformAccessArray", false),
-                    InitialCapacity: x.Get("transformInitialCapacity", 64),
+                    InitialCapacity: x.Get("initialCapacity", 64),
                     DesiredJobCount: x.Get("transformDesiredJobCount", -1),
                     CacheEnabledState: x.Get("cacheEnabledState", false),
                     Manual: x.Get("manual", false)
@@ -900,8 +901,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     ContainingTypeFQN: input.ContainingTypeFQN,
                     Flags: input.Flags,
                     IsAutoInstantiate: false,
+                    EmitCapacityInit: true,
+                    InitialCapacity: input.AttributeSettings.InitialCapacity,
                     EmitTransformAccessInit: input.AttributeSettings.TrackTransforms,
-                    TransformInitialCapacity: input.AttributeSettings.InitialCapacity,
                     TransformDesiredJobCount: input.AttributeSettings.DesiredJobCount
                 ),
                 containingDeclarations: declarations.AsSpan()[..^1]
@@ -1448,8 +1450,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 ContainingTypeFQN: input.ContainingTypeFQN,
                 Flags: input.Flags,
                 IsAutoInstantiate: input is { Attribute: SingletonAttributeMetadataName } && effectiveSingletonStrategy.Has(SingletonStrategy.AutoInstantiate),
+                EmitCapacityInit: input.Attribute is TrackAttributeMetadataName,
+                InitialCapacity: input.AttributeSettings.InitialCapacity,
                 EmitTransformAccessInit: input is { Attribute: TrackAttributeMetadataName, AttributeSettings.TrackTransforms: true },
-                TransformInitialCapacity: input.AttributeSettings.InitialCapacity,
                 TransformDesiredJobCount: input.AttributeSettings.DesiredJobCount
             ),
             containingDeclarations: declarations[..^1]
@@ -1463,6 +1466,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         string typeNameSanitized = input.TypeFQN.Sanitize();
         string typeFlagsInitName = $"InitBakedTypeInfo_{typeNameSanitized}";
+        string capacityInitName = $"InitCapacity_{typeNameSanitized}";
         string transformInitName = $"InitTransformAccess_{typeNameSanitized}";
 
         void AssignTypeFlags()
@@ -1517,12 +1521,20 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                         AssignTypeFlags();
                     }
 
+                    if (input.EmitCapacityInit)
+                    {
+                        src.Linebreak();
+                        src.Line.Write($"static int {capacityInitName}");
+                        using (src.Indent)
+                            src.Line.Write($"= {m}Storage.StaticInitArgs<{input.TypeFQN}>.Capacity = {input.InitialCapacity};");
+                    }
+
                     if (input.EmitTransformAccessInit)
                     {
                         src.Linebreak();
                         src.Line.Write($"static int {transformInitName}");
                         using (src.Indent)
-                            src.Line.Write($"= {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize({input.TransformInitialCapacity}, {input.TransformDesiredJobCount});");
+                            src.Line.Write($"= {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize({input.TransformDesiredJobCount});");
                     }
                 }
             }
@@ -1546,12 +1558,20 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 AssignTypeFlags();
             }
 
+            if (input.EmitCapacityInit)
+            {
+                src.Line.Write(Alias.Hidden);
+                src.Line.Write($"internal static int {capacityInitName}()");
+                using (src.Indent)
+                    src.Line.Write($"=> {m}Storage.StaticInitArgs<{input.TypeFQN}>.Capacity = {input.InitialCapacity};");
+            }
+
             if (input.EmitTransformAccessInit)
             {
                 src.Line.Write(Alias.Hidden);
                 src.Line.Write($"internal static int {transformInitName}()");
                 using (src.Indent)
-                    src.Line.Write($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize({input.TransformInitialCapacity}, {input.TransformDesiredJobCount});");
+                    src.Line.Write($"=> {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize({input.TransformDesiredJobCount});");
             }
 
             foreach (var _ in containingDeclarations)
@@ -1569,6 +1589,14 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     src.Line.Write($"static {m}Utility.TypeFlags {typeFlagsInitName}");
                     using (src.Indent)
                         src.Line.Write($"= {containingTypeFqn}.{typeFlagsInitName}();");
+
+                    if (input.EmitCapacityInit)
+                    {
+                        src.Linebreak();
+                        src.Line.Write($"static int {capacityInitName}");
+                        using (src.Indent)
+                            src.Line.Write($"= {containingTypeFqn}.{capacityInitName}();");
+                    }
 
                     if (input.EmitTransformAccessInit)
                     {

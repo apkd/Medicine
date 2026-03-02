@@ -174,7 +174,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     {
                         MetadataName = field.Name,
                         Name = field.IsImplicitlyDeclared
-                            ? field.Name[1..^16]
+                            ? field.Name[1..^16] // trim generated backing field name
                             : field.Name,
                         TypeFQN = field.Type.FQN,
                         IsPublic = field.DeclaredAccessibility is Accessibility.Public,

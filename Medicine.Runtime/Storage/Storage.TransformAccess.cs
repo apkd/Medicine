@@ -17,12 +17,12 @@ namespace Medicine.Internal
             public static TransformAccessArray Transforms;
 
             // ReSharper disable once UnusedMethodReturnValue.Global
-            public static int Initialize(int initialCapacity, int desiredJobCount)
+            public static int Initialize(int desiredJobCount)
             {
                 if (Transforms.isCreated)
                     return 0;
 
-                Transforms = new(initialCapacity, desiredJobCount);
+                Transforms = new(StaticInitArgs<T>.Capacity, desiredJobCount);
 #if UNITY_EDITOR
                 beforeAssemblyUnload += static () => Transforms.Dispose();
 #endif
@@ -33,9 +33,8 @@ namespace Medicine.Internal
             {
                 if (!Transforms.isCreated)
                 {
-                    // initialize with default settings when no statically-provided capacity
-                    // and job count values were provided
-                    Initialize(64, -1);
+                    // initialize with default desired-job-count when no static init was emitted
+                    Initialize(-1);
                 }
 
                 Transforms.Add(transform);

@@ -36,9 +36,9 @@ namespace Medicine.Internal
             static NativeList<TData> Initialize()
             {
 #if UNITY_2023_1_OR_NEWER
-                List = new(initialCapacity: 8, Allocator.Domain);
+                List = new(initialCapacity: StaticInitArgs<T>.Capacity, Allocator.Domain);
 #else
-                List = new(initialCapacity: 8, Allocator.Persistent);
+                List = new(initialCapacity: StaticInitArgs<T>.Capacity, Allocator.Persistent);
 #if UNITY_EDITOR
                 beforeAssemblyUnload += static () =>
                 {

@@ -148,7 +148,7 @@ public partial class TrackAttributePlayModeTests
         public int Value;
     }
 
-    [Track(transformAccessArray: true, transformInitialCapacity: 16)]
+    [Track(transformAccessArray: true, initialCapacity: 16)]
     partial interface ITrackByInterfaceFeatures : IFindByID<int>, IUnmanagedData<InterfaceFeatureData> { }
 
     [Track]
@@ -199,7 +199,7 @@ public partial class TrackAttributePlayModeTests
         c.enabled = false;
     }
 
-    [Track(transformAccessArray: true, transformInitialCapacity: 11)]
+    [Track(transformAccessArray: true, initialCapacity: 11)]
     interface ITrackGenericTransformFallback<T> { }
 
     [Track]
@@ -609,7 +609,7 @@ public partial class TrackAttributePlayModeTests
 
     //////////////////////////////////////////////////////////////////////////////
 
-    [Track(transformAccessArray: true, transformInitialCapacity: 1337)]
+    [Track(transformAccessArray: true, initialCapacity: 1337)]
     sealed partial class MBTrackTransformAccessArray : MonoBehaviour { }
 
     [Test]

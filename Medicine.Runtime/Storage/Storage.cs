@@ -18,6 +18,12 @@ namespace Medicine.Internal
     [EditorBrowsable(Never)]
     public static partial class Storage
     {
+        [EditorBrowsable(Never)]
+        public static class StaticInitArgs<T>
+        {
+            public static int Capacity = 8;
+        }
+
 #if UNITY_EDITOR
         // used to release static native resources (e.g., TransformAccessArray)
         static Action? beforeAssemblyUnload;

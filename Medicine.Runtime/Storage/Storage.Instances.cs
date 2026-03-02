@@ -33,7 +33,7 @@ namespace Medicine.Internal
 
                 static StaticInit()
                 {
-                    List.Capacity = 64;
+                    List.Capacity = StaticInitArgs<T>.Capacity;
                     Instances.UntypedAccess.Add(typeof(T), static () => List);
 #if UNITY_EDITOR
                     enterPlayModeCleanup += static () => List.Clear();

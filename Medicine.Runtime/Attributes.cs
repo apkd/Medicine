@@ -215,8 +215,8 @@ namespace Medicine
         /// <param name="transformAccessArray">
         /// Enables the automatic tracking of object transforms in a <see cref="UnityEngine.Jobs.TransformAccessArray"/>.
         /// </param>
-        /// <param name="transformInitialCapacity">
-        /// The starting size of the internal array used to track transform instances.
+        /// <param name="initialCapacity">
+        /// The starting capacity of internal tracking storage.
         /// </param>
         /// <param name="transformDesiredJobCount">
         /// A hint that tells the Job System how many parallel batches it should try to create when
@@ -236,7 +236,7 @@ namespace Medicine
         /// </param>
         public TrackAttribute(
             bool transformAccessArray = false,
-            int transformInitialCapacity = 64,
+            int initialCapacity = 64,
             int transformDesiredJobCount = -1,
             bool cacheEnabledState = false,
             bool manual = false

@@ -115,7 +115,7 @@ static class Stubs
                   public TrackAttribute(
                       SingletonAttribute.Strategy strategy = SingletonAttribute.Strategy.Replace,
                       bool transformAccessArray = false,
-                      int transformInitialCapacity = 64,
+                      int initialCapacity = 64,
                       int transformDesiredJobCount = -1,
                       bool cacheEnabledState = false,
                       bool manual = false
