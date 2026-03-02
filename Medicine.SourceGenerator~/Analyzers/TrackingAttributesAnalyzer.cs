@@ -110,7 +110,7 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
                 diagnosticDescriptor: MED001,
                 methodName: "Singleton",
                 attributeSymbol: knownSymbols.SingletonAttribute,
-                attributeDisplayName: Constants.SingletonAttributeShort
+                attributeDisplayName: Constants.SingletonAttributeNameShort
             ),
             SyntaxKind.InvocationExpression
         );
@@ -169,7 +169,7 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
             ReportMissingPartialForClass(
                 typeSymbol,
                 context,
-                attributeShortName: hasTrack ? "Track" : Constants.SingletonAttributeShort
+                attributeShortName: hasTrack ? "Track" : Constants.SingletonAttributeNameShort
             );
         }
 
@@ -185,7 +185,7 @@ public sealed class TrackingAttributesAnalyzer : DiagnosticAnalyzer
             typeSymbol,
             context,
             requiredAttribute: knownSymbols.SingletonAttribute,
-            attributeShortName: Constants.SingletonAttributeShort,
+            attributeShortName: Constants.SingletonAttributeNameShort,
             allowTrackViaBaseType: false
         );
     }

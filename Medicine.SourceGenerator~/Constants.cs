@@ -14,12 +14,13 @@ static class Constants
     public const string InjectAttributeMetadataName = $"{Namespace}.{InjectAttributeName}";
     public const string InjectAttributeFQN = $"{NamespaceWithGlobal}.{InjectAttributeName}";
 
-    public const string SingletonAttributeShort = "Singleton";
-    public const string SingletonAttributeName = $"{SingletonAttributeShort}Attribute";
+    public const string SingletonAttributeNameShort = "Singleton";
+    public const string SingletonAttributeName = $"{SingletonAttributeNameShort}Attribute";
     public const string SingletonAttributeMetadataName = $"{Namespace}.{SingletonAttributeName}";
     public const string SingletonAttributeFQN = $"{NamespaceWithGlobal}.{SingletonAttributeName}";
 
-    public const string TrackAttributeName = "TrackAttribute";
+    public const string TrackAttributeNameShort = "Track";
+    public const string TrackAttributeName = $"{TrackAttributeNameShort}Attribute";
     public const string TrackAttributeMetadataName = $"{Namespace}.{TrackAttributeName}";
     public const string TrackAttributeFQN = $"{NamespaceWithGlobal}.{TrackAttributeName}";
 
@@ -53,6 +54,7 @@ static class Constants
     public const string CustomStorageInterfaceFQN = $"{NamespaceWithGlobal}.{CustomStorageInterfaceName}";
 
     public const string TrackInstanceIDsInterfaceName = "ITrackInstanceIDs";
+    public const string TrackInstanceIDsInterfaceMetadataName = $"{Namespace}.{TrackInstanceIDsInterfaceName}";
     public const string TrackInstanceIDsInterfaceFQN = $"{NamespaceWithGlobal}.{TrackInstanceIDsInterfaceName}";
 
     public const string TrackingIdInterfaceName = "IFindByID";
@@ -64,18 +66,23 @@ static class Constants
     public const string AssetIdTypeFQN = "global::Unity.Mathematics.uint4";
 
     public const string IInstanceIndexInterfaceName = "IInstanceIndex";
+    public const string IInstanceIndexInterfaceMetadataName = $"{Namespace}.{IInstanceIndexInterfaceName}";
     public const string IInstanceIndexInterfaceFQN = $"{NamespaceWithGlobal}.{IInstanceIndexInterfaceName}";
 
     public const string IInstanceIndexInternalInterfaceName = "IInstanceIndex";
+    public const string IInstanceIndexInternalInterfaceMetadataName = $"{Namespace}.Internal.{IInstanceIndexInternalInterfaceName}";
     public const string IInstanceIndexInternalInterfaceFQN = $"{NamespaceWithGlobal}.Internal.{IInstanceIndexInternalInterfaceName}";
 
     public const string ITrackedInternalInterfaceName = "ITracked";
+    public const string ITrackedInternalInterfaceMetadataName = $"{Namespace}.Internal.{ITrackedInternalInterfaceName}";
     public const string ITrackedInternalInterfaceFQN = $"{NamespaceWithGlobal}.Internal.{ITrackedInternalInterfaceName}";
 
     public const string ITrackedTransformAccessArrayInternalInterfaceName = "ITrackedTransformAccessArray";
+    public const string ITrackedTransformAccessArrayInternalInterfaceMetadataName = $"{Namespace}.Internal.{ITrackedTransformAccessArrayInternalInterfaceName}";
     public const string ITrackedTransformAccessArrayInternalInterfaceFQN = $"{NamespaceWithGlobal}.Internal.{ITrackedTransformAccessArrayInternalInterfaceName}";
 
     public const string ITrackedUnmanagedDataInternalInterfaceName = "ITrackedUnmanagedData";
+    public const string ITrackedUnmanagedDataInternalInterfaceMetadataName = $"{Namespace}.Internal.{ITrackedUnmanagedDataInternalInterfaceName}";
     public const string ITrackedUnmanagedDataInternalInterfaceFQN = $"{NamespaceWithGlobal}.Internal.{ITrackedUnmanagedDataInternalInterfaceName}";
 
     public const string MedicineFindClassFQN = "global::Medicine.Find";

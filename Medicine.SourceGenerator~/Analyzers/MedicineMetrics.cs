@@ -58,8 +58,6 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
                     shouldResetTransformTime.TryRemove(filename, out _);
                     goto default;
                 case Stat.SourceGenerationTimeMs:
-                    shouldResetTransformTime.TryAdd(filename, true);
-                    goto default;
                 case Stat.LinesOfCodeGenerated:
                 case Stat.FullCompilationTimeMs:
                 default:
@@ -69,7 +67,11 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
         }
 
         public void ReportStartCompilation()
-            => stopwatch.Restart();
+        {
+            foreach (var metric in stats.Keys)
+                shouldResetTransformTime[metric.Filename] = true;
+            stopwatch.Restart();
+        }
 
         public void ReportEndCompilation()
         {

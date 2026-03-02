@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 using static System.StringComparison;
 using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 
@@ -89,6 +90,44 @@ public static partial class ExtensionMethods
 
     extension(ISymbol? self)
     {
+        public ulong GetDeclarationHierarchyChecksum(CancellationToken ct)
+        {
+            if (self is not ITypeSymbol typeSymbol)
+                return 0;
+
+            ulong combinedHash = 0;
+            foreach (var syntaxReference in self.DeclaringSyntaxReferences)
+                if (syntaxReference.GetSyntax(ct) is TypeDeclarationSyntax decl)
+                    XorHash(ref combinedHash, decl.GetDeclarationChecksum(ct));
+
+            switch (typeSymbol.TypeKind)
+            {
+                case TypeKind.Class:
+                {
+                    for (var baseType = typeSymbol.BaseType; baseType is not null; baseType = baseType.BaseType)
+                        foreach (var syntaxReference in baseType.DeclaringSyntaxReferences)
+                            if (syntaxReference.GetSyntax(ct) is TypeDeclarationSyntax decl)
+                                XorHash(ref combinedHash, decl.GetDeclarationChecksum(ct));
+
+                    goto default;
+                }
+                default:
+                {
+                    foreach (var inheritedInterface in typeSymbol.AllInterfaces)
+                    foreach (var syntaxReference in inheritedInterface.DeclaringSyntaxReferences)
+                        if (syntaxReference.GetSyntax(ct) is TypeDeclarationSyntax decl)
+                            XorHash(ref combinedHash, decl.GetDeclarationChecksum(ct));
+
+                    break;
+                }
+            }
+
+            return combinedHash;
+
+            static void XorHash(ref ulong accumulator, ulong hash)
+                => accumulator ^= hash;
+        }
+
         public bool Is(ISymbol other)
             => SymbolEqualityComparer.Default.Equals(self, other);
 
@@ -182,6 +221,26 @@ public static partial class ExtensionMethods
 
     extension(MemberDeclarationSyntax? self)
     {
+        /// <summary>
+        /// Returns the full name of the member, including the namespace and containing type name(s).
+        /// </summary>
+        public string FullName
+        {
+            get
+            {
+                using var c1 = Scratch.RentA<List<string>>(out var segments);
+
+                for (SyntaxNode? current = self; current is not null; current = current.Parent)
+                    if (current.ShortName is { Length: > 0 } segment)
+                        segments.Add(segment);
+
+                if (segments.Count is 0)
+                    return "";
+
+                segments.Reverse();
+                return string.Join(".", segments);
+            }
+        }
         public bool HasAttribute(Func<NameSyntax, bool> predicate)
         {
             if (self is null)
@@ -210,6 +269,76 @@ public static partial class ExtensionMethods
                     return x;
 
             return null;
+        }
+
+        public ulong GetAttributeListChecksum(CancellationToken ct)
+        {
+            if (self?.AttributeLists is not { Count: > 0 } lists)
+                return 0;
+
+            var span = TextSpan.FromBounds(lists[0].FullSpan.Start, lists[^1].FullSpan.End);
+
+            return self
+                .SyntaxTree
+                .GetText(ct)
+                .GetSubText(span)
+                .CalculateChecksum64();
+        }
+    }
+
+    extension(PropertyDeclarationSyntax? property)
+    {
+        public bool IsAutoProperty
+        {
+            get
+            {
+                if (property is not { ExpressionBody: null, AccessorList.Accessors: { Count: > 0 } accessors })
+                    return false;
+
+                foreach (var accessor in accessors)
+                    if (accessor is not { Body: null, ExpressionBody: null })
+                        return false;
+
+                return true;
+            }
+        }
+    }
+
+    extension(BaseTypeDeclarationSyntax? self)
+    {
+        public ulong GetDeclarationChecksum(CancellationToken ct)
+        {
+            if (self is null)
+                return 0;
+
+            int start = int.MaxValue;
+            int end = int.MinValue;
+
+            if (self.AttributeLists.Count > 0)
+            {
+                start = self.AttributeLists[0].FullSpan.Start;
+                end = self.AttributeLists[^1].FullSpan.End;
+            }
+
+            if (self.BaseList is { } baseList)
+            {
+                if (baseList.FullSpan.Start < start)
+                    start = baseList.FullSpan.Start;
+
+                if (baseList.FullSpan.End > end)
+                    end = baseList.FullSpan.End;
+            }
+
+            if (start > end)
+                return 0;
+
+            var span = TextSpan.FromBounds(start, end);
+
+            return self
+                .SyntaxTree
+                .GetText(ct)
+                .GetSubText(span)
+                .CalculateChecksum64();
         }
     }
 
@@ -245,16 +374,47 @@ public static partial class ExtensionMethods
         }
     }
 
-    extension(SyntaxNode node)
+    extension(SyntaxNode self)
     {
+        public string? ShortName
+        {
+            get
+            {
+                return self switch
+                {
+                    BaseNamespaceDeclarationSyntax ns          => ns.Name.ToString(),
+                    BaseTypeDeclarationSyntax type             => type.Identifier.ValueText,
+                    MethodDeclarationSyntax method             => method.Identifier.ValueText,
+                    ConstructorDeclarationSyntax ctor          => ctor.Identifier.ValueText,
+                    DestructorDeclarationSyntax dtor           => $"~{dtor.Identifier.ValueText}",
+                    PropertyDeclarationSyntax property         => property.Identifier.ValueText,
+                    EventDeclarationSyntax @event              => @event.Identifier.ValueText,
+                    EventFieldDeclarationSyntax @event         => GetVariableName(@event.Declaration),
+                    FieldDeclarationSyntax @field              => GetVariableName(@field.Declaration),
+                    LocalFunctionStatementSyntax localFunction => localFunction.Identifier.ValueText,
+                    _                                          => null,
+                };
+
+                static string? GetVariableName(VariableDeclarationSyntax? declaration)
+                    => declaration is { Variables.Count: > 0 } ? declaration.Variables[0].Identifier.ValueText : null;
+            }
+        }
+
+        public ulong GetNodeChecksum(CancellationToken ct)
+            => self
+                .SyntaxTree
+                .GetText(ct)
+                .GetSubText(self.FullSpan)
+                .CalculateChecksum64();
+
         public SyntaxNode RewriteThisAndFullyQualityReferences(
             string replacement,
             SemanticModel semanticModel,
             CancellationToken ct
         )
         {
-            return node.ReplaceNodes(
-                nodes: node.DescendantNodesAndSelf(),
+            return self.ReplaceNodes(
+                nodes: self.DescendantNodesAndSelf(),
                 computeReplacementNode: (original, rewritten) => rewritten switch
                 {
                     // explicit this
@@ -296,8 +456,8 @@ public static partial class ExtensionMethods
         }
 
         public SyntaxNode WithFullyQualifiedReferences(SemanticModel semanticModel, CancellationToken ct)
-            => node.ReplaceNodes(
-                nodes: node.DescendantNodesAndSelf(),
+            => self.ReplaceNodes(
+                nodes: self.DescendantNodesAndSelf(),
                 computeReplacementNode: (original, rewritten)
                     => rewritten is SimpleNameSyntax && semanticModel.GetSymbolInfo(original, ct).Symbol?.FQN is { } qualifiedName
                         ? SyntaxFactory.IdentifierName(qualifiedName)
@@ -443,6 +603,18 @@ public static partial class ExtensionMethods
             => nameSyntax.Identifier.ValueText;
     }
 
+    extension(NameSyntax nameSyntax)
+    {
+        public string? Text
+            => nameSyntax switch
+            {
+                SimpleNameSyntax x         => x.Text,
+                QualifiedNameSyntax x      => x.Right.Text,
+                AliasQualifiedNameSyntax x => x.Name.Text,
+                _                          => null,
+            };
+    }
+
     extension(SyntaxReference? self)
     {
         public Location? GetLocation()
@@ -469,29 +641,12 @@ public static partial class ExtensionMethods
             => Unsafe.As<ImmutableArray<T>, ValueTuple<T[]>>(ref self).Item1 ?? [];
     }
 
-    extension(PropertyDeclarationSyntax property)
-    {
-        public bool IsAutoProperty
-        {
-            get
-            {
-                if (property is not { ExpressionBody: null, AccessorList.Accessors: { Count: > 0 } accessors })
-                    return false;
-
-                foreach (var accessor in accessors)
-                    if (accessor is not { Body: null, ExpressionBody: null })
-                        return false;
-
-                return true;
-            }
-        }
-    }
-
     public static bool None(this SyntaxTokenList modifiers, params ReadOnlySpan<SyntaxKind> kinds)
     {
         foreach (var kind in kinds)
             if (modifiers.Any(kind))
                 return false;
+
         return true;
     }
 

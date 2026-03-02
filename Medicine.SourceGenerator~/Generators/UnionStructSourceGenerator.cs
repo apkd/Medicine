@@ -60,7 +60,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
 
         public string DerivedFQN { get; init; }
         public string DerivedName { get; init; }
@@ -72,14 +72,14 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public Defer<DerivedDeferredInput>? DeferredInputBuilderDeferred { get; init; }
 
         // ReSharper disable once UnusedAutoPropertyAccessor.Local
-        public EquatableArray<byte> DerivedTextCheckSumForCache { get; init; }
+        public ulong DerivedTextCheckSumForCache { get; init; }
     }
 
     record struct GeneratorInput : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
         public bool ShouldEmitDocs { get; init; }
 
         public LanguageVersion LangVersion { get; init; }
@@ -106,7 +106,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public Defer<int>? EstimatedBaseSizeInBytesBuilderDeferred { get; init; }
 
         // ReSharper disable once UnusedAutoPropertyAccessor.Local
-        public EquatableArray<byte> BaseTextCheckSumForCache { get; init; }
+        public ulong BaseTextCheckSumForCache { get; init; }
     }
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -121,15 +121,18 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: UnionHeaderStructAttributeMetadataName,
                 predicate: (node, _) => node is StructDeclarationSyntax,
-                transform: TransformBase
+                transform: TransformForCache
+            )
+            .SelectEx((x, ct) => TransformBase(x.Context.Value, ct)
             );
 
         var candidateStructs = context.SyntaxProvider
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: UnionStructAttributeMetadataName,
                 predicate: (node, _) => node is StructDeclarationSyntax { BaseList.Types.Count: > 0 },
-                transform: TransformDerivedCandidate
+                transform: TransformForCache
             )
+            .SelectEx((x, ct) => TransformDerivedCandidate(x.Context.Value, ct))
             .Collect();
 
         context.RegisterSourceOutputEx(
@@ -144,14 +147,44 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         );
     }
 
+    static ContextWithCacheGeneratorInput TransformForCache(GeneratorAttributeSyntaxContext context, CancellationToken ct)
+        => new()
+        {
+            Context = context,
+            SourceGeneratorOutputFilename = GetOutputFilename(context),
+            SourceGeneratorLocation = context.TargetNode.GetLocation(),
+            Checksum64ForCache = context.TargetNode.GetNodeChecksum(ct),
+        };
+
+    static string? GetOutputFilename(GeneratorAttributeSyntaxContext context)
+    {
+        if (context.TargetNode is not TypeDeclarationSyntax
+            {
+                ShortName: { Length: > 0 } name,
+                FullName: { Length: > 0 } fullName,
+                SyntaxTree.FilePath: { Length: > 0 } filePath,
+            })
+            return null;
+
+        return Utility.GetOutputFilename(
+            filePath: filePath,
+            targetNodeName: name,
+            additionalNameForHash: fullName,
+            label: $"[Union]"
+        );
+    }
+
     static GeneratorInput TransformBase(GeneratorAttributeSyntaxContext context, CancellationToken ct)
     {
+        string? outputFilename = GetOutputFilename(context);
+
         if (context is not { TargetSymbol: ITypeSymbol symbol, TargetNode: StructDeclarationSyntax structDecl })
         {
             return new()
             {
+                SourceGeneratorOutputFilename = outputFilename,
                 SourceGeneratorError = "Unexpected target shape for [UnionHeader].",
-                SourceGeneratorErrorLocation = new LocationInfo(context.TargetNode.GetLocation()),
+                SourceGeneratorLocation = context.TargetNode.GetLocation(),
             };
         }
 
@@ -159,8 +192,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         {
             return new()
             {
+                SourceGeneratorOutputFilename = outputFilename,
                 SourceGeneratorError = "Unexpected target symbol for [UnionHeader].",
-                SourceGeneratorErrorLocation = new LocationInfo(context.TargetNode.GetLocation()),
+                SourceGeneratorLocation = context.TargetNode.GetLocation(),
             };
         }
 
@@ -174,7 +208,8 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         {
             return new()
             {
-                SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "[Union]"),
+                SourceGeneratorOutputFilename = outputFilename,
+                SourceGeneratorLocation = context.TargetNode.GetLocation(),
             };
         }
 
@@ -209,8 +244,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
         return new()
         {
-            SourceGeneratorOutputFilename = Utility.GetOutputFilename(structDecl.SyntaxTree.FilePath, symbol.Name, "[Union]"),
-            BaseDeclaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
+            SourceGeneratorOutputFilename = outputFilename,
+            SourceGeneratorLocation = context.TargetNode.GetLocation(),
+            BaseDeclaration = Utility.DeconstructTypeDeclaration(structDecl),
             BaseTypeName = symbol.Name,
             BaseTypeFQN = baseTypeFQN,
             InterfaceFQN = interfaceFQN,
@@ -231,7 +267,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             HeaderFieldsBuilderDeferred = new(() => BuildHeaderFields(baseSymbol)),
             IsGenericType = baseSymbol.IsGenericType,
             EstimatedBaseSizeInBytesBuilderDeferred = new(() => StructSizeEstimator.EstimateTypeSizeInBytes(baseSymbol)),
-            BaseTextCheckSumForCache = structDecl.GetText().GetChecksum().AsArray(),
+            BaseTextCheckSumForCache = structDecl.GetNodeChecksum(ct),
         };
 
         static bool ImplementsInterface(INamedTypeSymbol symbol, INamedTypeSymbol interfaceSymbol)
@@ -396,13 +432,13 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         if (forcedId == 0)
             forcedId = null;
 
-        var fileChecksum = structDecl.SyntaxTree.GetText(ct).GetChecksum().AsArray();
+        ulong fileChecksum = structDecl.SyntaxTree.GetText(ct).CalculateChecksum64();
 
         return new()
         {
             DerivedFQN = symbol.FQN,
             DerivedName = symbol.Name,
-            Declaration = Utility.DeconstructTypeDeclaration(structDecl, context.SemanticModel, ct),
+            Declaration = Utility.DeconstructTypeDeclaration(structDecl),
             ForcedId = forcedId,
             DerivedFactsDeferred = new(() => BuildDerivedFacts(symbol)),
             EstimatedSizeInBytesDeferred = new(() => StructSizeEstimator.EstimateTypeSizeInBytes(symbol)),
@@ -524,7 +560,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 => BuildDerivedStructs(candidates, result.InterfaceFQN, result.RootInterfaceFQN, result.BaseTypeFQN, result.RootTypeFQN)
             ),
             SourceGeneratorError = firstError?.error,
-            SourceGeneratorErrorLocation = firstError?.location,
+            SourceGeneratorLocation = firstError?.location,
         };
     }
 

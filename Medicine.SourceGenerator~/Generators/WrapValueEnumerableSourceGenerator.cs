@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -12,8 +11,6 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 {
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var generatorEnvironment = context.GetGeneratorEnvironment();
-
         var wrapRequests =
             context
                 .SyntaxProvider
@@ -22,57 +19,39 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
                     predicate: static (x, ct) => x is MethodDeclarationSyntax or PropertyDeclarationSyntax,
                     transform: TransformForCache
                 )
-                .Combine(generatorEnvironment)
-                .SelectEx((x, ct) => Transform(x.Left, x.Right.KnownSymbols, ct) with
-                    {
-                        Symbols = x.Right.PreprocessorSymbols,
-                    }
-                );
+                .Combine(context.GetGeneratorEnvironment())
+                .SelectEx((x, ct) => Transform(x.Left, x.Right, ct));
 
         context.RegisterSourceOutputEx(wrapRequests, GenerateSource);
     }
 
-    [SuppressMessage("ReSharper", "NotAccessedPositionalProperty.Local")]
-    record struct CacheInput : ISourceGeneratorPassData
-    {
-        public EquatableIgnore<GeneratorAttributeSyntaxContext> Context { get; init; }
-
-        public string? SourceGeneratorOutputFilename { get; set; }
-        public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
-
-        // explicitly avoid regenerating code unless this property has changed.
-        // - this generator is fairly slow and can potentially depend on a lot of unpredictable context
-        // - in most cases, though, we're only interested in the body of the method/property changing
-        //   ReSharper disable once NotAccessedField.Local
-        public EquatableArray<byte> RawTextForCache;
-    }
-
-    static CacheInput TransformForCache(GeneratorAttributeSyntaxContext context, CancellationToken ct)
+    static ContextWithCacheGeneratorInput TransformForCache(GeneratorAttributeSyntaxContext context, CancellationToken ct)
         => new()
         {
-            RawTextForCache = (context.TargetNode.Parent ?? context.TargetNode).GetText().GetChecksum().AsArray(),
             Context = context,
+            SourceGeneratorOutputFilename = GetOutputFilename(context),
+            SourceGeneratorLocation = context.TargetNode.GetLocation(),
+            Checksum64ForCache = (context.TargetNode.Parent ?? context.TargetNode).GetNodeChecksum(ct),
         };
 
     record struct GeneratorInput : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
 
-        public EquatableArray<string> Declaration;
-        public string? WrapperName;
-        public string? EnumerableFQN;
-        public string? EnumeratorFQN;
-        public string? EnumeratorInnerFQN;
-        public string? ElementTypeFQN;
-        public string? GetEnumeratorNamespace;
-        public bool IsPublic;
-        public ActivePreprocessorSymbolNames Symbols;
+        public GeneratorEnvironment GeneratorEnvironment { get; init; }
+        public EquatableArray<string> Declaration { get; init; }
+        public string? WrapperName { get; init; }
+        public string? EnumerableFQN { get; init; }
+        public string? EnumeratorFQN { get; init; }
+        public string? EnumeratorInnerFQN { get; init; }
+        public string? ElementTypeFQN { get; init; }
+        public string? GetEnumeratorNamespace { get; init; }
+        public bool IsPublic { get; init; }
 
         // ReSharper disable once NotAccessedField.Local
-        public ImmutableArray<byte> MethodTextChecksumForCache;
+        public ulong MethodTextChecksumForCache;
     }
 
     static readonly string wrapEnumerableExample = """
@@ -87,9 +66,10 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
         """.Trim()
         .HtmlEncode();
 
-    static GeneratorInput Transform(CacheInput cacheInput, in KnownSymbols knownSymbols, CancellationToken ct)
+    static GeneratorInput Transform(ContextWithCacheGeneratorInput cacheInput, GeneratorEnvironment generatorEnvironment, CancellationToken ct)
     {
         var context = cacheInput.Context.Value;
+        var knownSymbols = context.SemanticModel.Compilation.GetKnownSymbols();
         ITypeSymbol wrapperType;
         string wrapperName;
         MemberDeclarationSyntax declSyntax;
@@ -153,17 +133,11 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
             return new() { SourceGeneratorError = $"Unexpected symbol type." };
         }
 
-        var outputFilename = Utility.GetOutputFilename(
-            filePath: declSyntax.SyntaxTree.FilePath,
-            targetFQN: wrapperName,
-            label: $"[{WrapValueEnumerableAttributeNameShort}]",
-            shadowTargetFQN: context.TargetSymbol.FQN
-        );
         var retExpr = GetSymbolRetExpr(context.TargetSymbol);
 
         var output = new GeneratorInput
         {
-            SourceGeneratorOutputFilename = outputFilename,
+            SourceGeneratorOutputFilename = GetOutputFilename(context),
         };
 
         if (retExpr is null)
@@ -230,21 +204,45 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 
         return output with
         {
-            Declaration = Utility.DeconstructTypeDeclaration(declSyntax, context.SemanticModel, ct),
+            Declaration = Utility.DeconstructTypeDeclaration(declSyntax),
             WrapperName = wrapperName,
-            MethodTextChecksumForCache = context.TargetNode.GetText().GetChecksum(),
+            MethodTextChecksumForCache = context.TargetNode.GetNodeChecksum(ct),
             EnumerableFQN = retExprType.FQN,
             EnumeratorFQN = getEnumerator.ReturnType.FQN,
             EnumeratorInnerFQN = (getEnumerator.ReturnType as INamedTypeSymbol)!.TypeArguments.First().FQN,
             ElementTypeFQN = (retExprType as INamedTypeSymbol)!.TypeArguments.Last().FQN,
             GetEnumeratorNamespace = enumeratorNamespace,
             IsPublic = declSyntax.Modifiers.Any(SyntaxKind.PublicKeyword),
+            GeneratorEnvironment = generatorEnvironment,
         };
+    }
+
+    static string? GetOutputFilename(GeneratorAttributeSyntaxContext context)
+    {
+        if (context.TargetNode is not MemberDeclarationSyntax memberDecl)
+            return null;
+
+        string? wrapperName = context.TargetNode switch
+        {
+            MethodDeclarationSyntax x   => (x.ReturnType as NameSyntax)?.Text,
+            PropertyDeclarationSyntax x => (x.Type as NameSyntax)?.Text,
+            _                           => null,
+        };
+
+        if (wrapperName is null)
+            return null;
+
+        return Utility.GetOutputFilename(
+            filePath: context.TargetNode.SyntaxTree.FilePath,
+            targetNodeName: wrapperName,
+            label: $"[{WrapValueEnumerableAttributeNameShort}]",
+            additionalNameForHash: memberDecl.FullName
+        );
     }
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
-        src.ShouldEmitDocs = input.Symbols.Has(UNITY_EDITOR);
+        src.ShouldEmitDocs = input.GeneratorEnvironment.PreprocessorSymbols.Has(UNITY_EDITOR);
 
         if (input.GetEnumeratorNamespace is not null)
         {
@@ -477,5 +475,4 @@ sealed class WrapValueEnumerableSourceGenerator : IIncrementalGenerator
 
         return assignmentTypesByIdentifier;
     }
-
 }

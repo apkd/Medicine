@@ -18,7 +18,7 @@ public static class Utility
 
     public static string GetErrorOutputFilename(LocationInfo? location, string error)
     {
-        string filename = Path.GetFileNameWithoutExtension(location?.FileLineSpan.Path);
+        string filename = Path.GetFileNameWithoutExtension(location?.FileLineSpan.Path ?? "");
         if (string.IsNullOrEmpty(filename))
             filename = "Unknown";
         string result = $"{filename}.Exception.{Hash():x8}.g.cs";
@@ -41,12 +41,12 @@ public static class Utility
         }
     }
 
-    public static string GetOutputFilename(string filePath, string targetFQN, string label = "", string shadowTargetFQN = "", bool includeFilename = true)
+    public static string GetOutputFilename(string filePath, string targetNodeName, string label = "", string additionalNameForHash = "", bool includeFilename = true)
     {
         string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(filePath);
         string typename;
         {
-            var source = targetFQN.AsSpan();
+            var source = targetNodeName.AsSpan();
             var sanitized = source.Length <= 1024
                 ? stackalloc char[source.Length]
                 : new char[source.Length];
@@ -60,7 +60,7 @@ public static class Utility
             typename = sanitized.ToString();
         }
 
-        return includeFilename
+        return includeFilename && fileNameWithoutExtension != typename
             ? $"{label}{fileNameWithoutExtension}.{typename}.{Hash():x8}.g.cs"
             : $"{label}{typename}.{Hash():x8}.g.cs";
 
@@ -73,10 +73,10 @@ public static class Utility
                 foreach (char c in fileNameWithoutExtension)
                     hash = hash * 31 + c;
 
-                foreach (char c in targetFQN)
+                foreach (char c in targetNodeName)
                     hash = hash * 31 + c;
 
-                foreach (char c in shadowTargetFQN)
+                foreach (char c in additionalNameForHash)
                     hash = hash * 31 + c;
 
                 foreach (char c in label)
@@ -156,8 +156,6 @@ public static class Utility
     /// </summary>
     public static EquatableArray<string> DeconstructTypeDeclaration(
         MemberDeclarationSyntax memberDeclarationSyntax,
-        SemanticModel semanticModel,
-        CancellationToken ct,
         string? extraInterfaces = null
     )
     {
@@ -182,9 +180,6 @@ public static class Utility
                 var interfaces = firstDeclaration
                     ? extraInterfaces ?? ""
                     : "";
-
-                // string FormatConstraintClauses(SyntaxList<TypeParameterConstraintClauseSyntax> constraintClauses)
-                //     => string.Join(" ", constraintClauses.Select(x => x.WithFullyQualitiedReferences(semanticModel, ct)));
 
                 string? line = syntax switch
                 {

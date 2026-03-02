@@ -25,7 +25,7 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
 
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
     }
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext init)
@@ -50,7 +50,7 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
                         return new GeneratorInput
                         {
                             SourceGeneratorOutputFilename = "Medicine.Constants.g.cs",
-                            SourceGeneratorErrorLocation = attribute.ApplicationSyntaxReference?.GetLocation(),
+                            SourceGeneratorLocation = attribute.ApplicationSyntaxReference?.GetLocation(),
                             Namespace = namespaceName,
                             ClassName = className,
                             ExtensionsClassName = $"{className}Extensions",
@@ -81,7 +81,7 @@ public sealed class ConstantsSourceGenerator : IIncrementalGenerator
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {
         if (input.DiagnosticDescriptor.Value is { } diagnostic)
-            context.ReportDiagnostic(Diagnostic.Create(diagnostic, input.SourceGeneratorErrorLocation?.ToLocation()));
+            context.ReportDiagnostic(Diagnostic.Create(diagnostic, input.SourceGeneratorLocation?.ToLocation()));
 
         if (input.TagManager?.GetText(context.CancellationToken)?.ToString() is not { Length: > 0 } content)
             return;

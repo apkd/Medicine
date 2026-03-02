@@ -140,7 +140,7 @@ public sealed class SingletonStrategyAnalyzer : DiagnosticAnalyzer
             _                              => nameSyntax.ToString(),
         };
 
-        isSingleton = name is Constants.SingletonAttributeShort or Constants.SingletonAttributeName;
+        isSingleton = name is Constants.SingletonAttributeNameShort or Constants.SingletonAttributeName;
 
         if (isSingleton)
             return true;

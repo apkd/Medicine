@@ -1,7 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.Text;
 using static System.StringComparison;
 using static ActivePreprocessorSymbolNames;
 using static Constants;
@@ -55,7 +54,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
 
         public ActivePreprocessorSymbolNames Symbols;
         public bool ShouldEmitDocs;
@@ -64,13 +63,13 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         public bool IsSealed;
         public bool IsStatic;
         public bool? MakePublic;
+        public string? ClassName;
         public EquatableArray<string> NamespaceImports;
         public EquatableArray<string> ContainingTypeDeclaration;
-        public Defer<string>? ClassNameDeferred;
         public Defer<InitExpressionInfo[]>? InitExpressionInfoArrayDeferred = new(() => []);
 
         // ReSharper disable once NotAccessedField.Local
-        public EquatableArray<byte> MethodTextCheckSumForCache;
+        public ulong CheckSumForCache;
     }
 
     record struct InitExpressionInfo
@@ -118,12 +117,12 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                         LocalFunctionDecl x => !x.Modifiers.Any(SyntaxKind.AbstractKeyword),
                         _                   => false,
                     },
-                transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
+                transform: static (context, _) => new GeneratorAttributeContextInput(context, GetOutputFilename)
             )
             .CombineWithGeneratorEnvironment(context)
             .SelectEx((x, ct) =>
                 {
-                    var input = TransformSyntaxContext(x.Values.Context, x.Environment.KnownSymbols, ct);
+                    var input = TransformSyntaxContext(x.Values.Context, ct);
                     input.MakePublic ??= x.Environment.MedicineSettings.MakePublic;
                     input.Symbols = x.Environment.PreprocessorSymbols;
                     input.ShouldEmitDocs = x.Environment.ShouldEmitDocs;
@@ -137,7 +136,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         );
     }
 
-    static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, KnownSymbols knownSymbols, CT ct)
+    static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, CT ct)
     {
         var targetNode = context.TargetNode;
 
@@ -146,8 +145,6 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
         if (targetNode.FirstAncestorOrSelf<MethodDecl>() is not { } methodDecl)
             return default;
-
-        var containingClassSymbol = context.SemanticModel.GetDeclaredSymbol(classDecl, ct);
 
         var (injectMethodName, injectMethodModifiers) = targetNode switch
         {
@@ -159,18 +156,16 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         if (injectMethodName is null)
             return default;
 
+        var outputFilename = GetOutputFilename(context);
+        string? localFunctionName = (targetNode as LocalFunctionDecl)?.Identifier.ValueText;
+
         var output = new GeneratorInput
         {
             InjectMethodName = injectMethodName,
-            InjectMethodOrLocalFunctionName = (targetNode as LocalFunctionDecl)?.Identifier.ValueText ?? injectMethodName,
-            SourceGeneratorOutputFilename = Utility.GetOutputFilename(
-                filePath: classDecl.Identifier.ValueText,
-                targetFQN: injectMethodName,
-                shadowTargetFQN: (targetNode as LocalFunctionDecl)?.Identifier.ValueText ?? "",
-                label: $"[{InjectAttributeNameShort}]"
-            ),
-            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(classDecl, context.SemanticModel, ct),
-            MethodTextCheckSumForCache = targetNode.GetText().GetChecksum().AsArray(),
+            InjectMethodOrLocalFunctionName = localFunctionName ?? injectMethodName,
+            SourceGeneratorOutputFilename = outputFilename,
+            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(classDecl),
+            CheckSumForCache = (targetNode.Parent ?? targetNode).GetNodeChecksum(ct),
         };
 
         if (targetNode.SyntaxTree.GetRoot(ct) is CompilationUnitSyntax compilationUnit)
@@ -187,18 +182,16 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
             .GetAttributeConstructorArguments(ct)
             .Select(x => x.Get<bool>("makePublic", null));
 
+        output.ClassName = context.TargetNode.ShortName;
         output.IsSealed = classDecl.Modifiers.IsSealed;
         output.IsStatic = injectMethodModifiers.IsStatic;
 
         // defer the expensive calls to the source gen phase
 
-        output.ClassNameDeferred = new(() => context.SemanticModel
-            .GetDeclaredSymbol(classDecl, ct)
-            ?.ToMinimalDisplayString(context.SemanticModel, targetNode.SpanStart, MinimallyQualifiedFormat) ?? ""
-        );
-
         output.InitExpressionInfoArrayDeferred = new(() =>
             {
+                var containingClassSymbol = context.SemanticModel.GetDeclaredSymbol(classDecl, ct);
+
                 var assignments = targetNode
                     .DescendantNodes(x => x is MethodDecl or LocalFunctionDecl or BlockSyntax or ArrowExpressionClauseSyntax or ExpressionStatementSyntax or ReturnStatementSyntax)
                     .OfType<AssignmentExpressionSyntax>()
@@ -250,6 +243,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
 
                 InitExpressionInfo CreateInitExpressionInfo(AssignmentExpressionSyntax assignment, ITypeSymbol? typeSymbol)
                 {
+                    var knownSymbols = context.SemanticModel.Compilation.GetKnownSymbols();
                     var typeSymbolForDisplayName = typeSymbol;
                     var flags = default(ExpressionFlags);
                     var normalizedExpression = NormalizeExpressionText(assignment.Right.ToString());
@@ -273,7 +267,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
                     {
                         if (GetDelegateReturnType(assignment.Right) is { } exprType)
                         {
-                            typeSymbol = knownSymbols.SystemFunc1?.Construct(exprType);
+                            typeSymbol = knownSymbols.SystemFunc1.Construct(exprType);
                             typeSymbolForDisplayName = exprType;
                             flags.Set(IsTransient, true);
                         }
@@ -670,6 +664,36 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         return output;
     }
 
+    static string? GetOutputFilename(GeneratorAttributeSyntaxContext context)
+    {
+        var targetNode = context.TargetNode;
+
+        if (targetNode.FirstAncestorOrSelf<TypeDeclarationSyntax>() is not { } classDecl)
+            return null;
+
+        if (targetNode.FirstAncestorOrSelf<MethodDecl>() is not { } methodDecl)
+            return null;
+
+        var injectMethodName = targetNode switch
+        {
+            MethodDecl x        => x.Identifier.Text,
+            LocalFunctionDecl x => methodDecl.Identifier.Text,
+            _                   => null,
+        };
+
+        if (injectMethodName is null)
+            return null;
+
+        string? localFunctionName = (targetNode as LocalFunctionDecl)?.Identifier.ValueText;
+
+        return Utility.GetOutputFilename(
+            filePath: classDecl.Identifier.ValueText,
+            targetNodeName: injectMethodName,
+            additionalNameForHash: localFunctionName ?? "",
+            label: $"[{InjectAttributeNameShort}]"
+        );
+    }
+
     static string NormalizeExpressionText(string text)
         => NormalizeText(text.AsSpan(), replaceStandaloneLfWithSpace: false);
 
@@ -736,8 +760,7 @@ public sealed class InjectSourceGenerator : IIncrementalGenerator
         string storageSuffix = input.InjectMethodOrLocalFunctionName is "Awake" ? "" : $"For{input.InjectMethodOrLocalFunctionName}";
         string storagePropName = $"{m}MedicineInternal{storageSuffix}";
         string storageStructName = $"{m}MedicineInternalBackingStorage{storageSuffix}";
-
-        string className = input.ClassNameDeferred?.Value ?? "";
+        string className = input.ClassName ?? "";
 
         using var r1 = Scratch.RentA<List<string>>(out var deferredLines);
 

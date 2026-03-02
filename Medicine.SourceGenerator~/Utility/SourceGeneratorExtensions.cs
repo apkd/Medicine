@@ -66,16 +66,14 @@ public static class SourceGeneratorExtensions
             => init
                 .CompilationProvider
                 .Combine(init.ParseOptionsProvider)
-                .Combine(init.GetKnownSymbolsProvider())
                 .Select((x, ct) =>
                     {
-                        var args = x.Left.Left.Assembly
+                        var args = x.Left.Assembly
                             .GetAttribute(Constants.MedicineSettingsAttributeFQN)
                             .GetAttributeConstructorArguments(ct);
 
                         return new GeneratorEnvironment(
-                            KnownSymbols: x.Right,
-                            PreprocessorSymbols: x.Left.Right.GetActivePreprocessorSymbols(forceDebugValue: args.Get("debug", 0)),
+                            PreprocessorSymbols: x.Right.GetActivePreprocessorSymbols(forceDebugValue: args.Get("debug", 0)),
                             MedicineSettings: new()
                             {
                                 MakePublic = args.Get("makePublic", true),
@@ -199,12 +197,12 @@ public static class SourceGeneratorExtensions
     static TResult ErrorResult<TResult>(Exception exception, object? locationSource) where TResult : ISourceGeneratorPassData, new()
         => locationSource switch
         {
-            ISourceGeneratorPassData { SourceGeneratorErrorLocation: { IsInSource: true } location }
-                => new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = location },
+            ISourceGeneratorPassData { SourceGeneratorLocation: { IsInSource: true } location }
+                => new() { SourceGeneratorError = $"{exception}", SourceGeneratorLocation = location },
             Location location
-                => new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = new LocationInfo(location) },
+                => new() { SourceGeneratorError = $"{exception}", SourceGeneratorLocation = new LocationInfo(location) },
             LocationInfo { IsInSource: true } locationInfo
-                => new() { SourceGeneratorError = $"{exception}", SourceGeneratorErrorLocation = locationInfo },
+                => new() { SourceGeneratorError = $"{exception}", SourceGeneratorLocation = locationInfo },
             _
                 => new() { SourceGeneratorError = $"{exception}" },
         };
@@ -248,10 +246,10 @@ public static class SourceGeneratorExtensions
         // handle errors/exceptions
         try
         {
-            var errorLocation = input.SourceGeneratorErrorLocation?.ToLocation();
+            var errorLocation = input.SourceGeneratorLocation?.ToLocation();
             context.ReportDiagnostic(Diagnostic.Create(descriptor: Utility.ExceptionDiagnosticDescriptor, location: errorLocation, messageArgs: error));
 
-            string filename = input.SourceGeneratorOutputFilename ?? Utility.GetErrorOutputFilename(input.SourceGeneratorErrorLocation, error);
+            string filename = input.SourceGeneratorOutputFilename ?? Utility.GetErrorOutputFilename(input.SourceGeneratorLocation, error);
             AddOutputSourceTextToCompilation(filename, context, writer);
         }
         catch (Exception exception)

@@ -89,23 +89,11 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         string PropertyName
     );
 
-    record struct GeneratorAttributeSyntaxContextPassData(GeneratorAttributeSyntaxContext Context) : ISourceGeneratorPassData
-    {
-        public string? SourceGeneratorOutputFilename { get; init; }
-        public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
-
-        public readonly GeneratorAttributeSyntaxContext Context = Context;
-
-        bool IEquatable<GeneratorAttributeSyntaxContextPassData>.Equals(GeneratorAttributeSyntaxContextPassData other) => false;
-        public readonly override int GetHashCode() => 0;
-    }
-
     record struct PrecomputedAttributeSettingsData : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
 
         public GeneratorEnvironment Environment;
         public EquatableIgnore<Dictionary<INamedTypeSymbol, TrackAttributeSettings>> AttributeSettingsByType;
@@ -114,11 +102,23 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         public readonly override int GetHashCode() => 0;
     }
 
+    record struct SingletonCacheInput : ISourceGeneratorPassData
+    {
+        public string? SourceGeneratorOutputFilename { get; init; }
+        public string? SourceGeneratorError { get; init; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
+
+        public GeneratorEnvironment Environment;
+        public EquatableIgnore<GeneratorAttributeSyntaxContext> Context;
+        public EquatableIgnore<Dictionary<INamedTypeSymbol, TrackAttributeSettings>> AttributeSettingsByType;
+        public ulong Checksum64ForCache;
+    }
+
     record struct GeneratorInput : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
 
         public GeneratorEnvironment Environment;
         public bool HasIInstanceIndex;
@@ -143,7 +143,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
 
         public GeneratorEnvironment Environment;
         public TrackAttributeSettings AttributeSettings;
@@ -204,7 +204,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: SingletonAttributeMetadataName,
                 predicate: static (node, _) => true,
-                transform: static (attributeContext, _) => new GeneratorAttributeSyntaxContextPassData(attributeContext)
+                transform: static (context, _) => new GeneratorAttributeContextInput(context, x => GetOutputFilename(x, $"[{SingletonAttributeNameShort}]"))
             )
             .Collect()
             .Combine(generatorEnvironment)
@@ -214,7 +214,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: TrackAttributeMetadataName,
                 predicate: static (node, _) => true,
-                transform: static (attributeContext, _) => new GeneratorAttributeSyntaxContextPassData(attributeContext)
+                transform: static (context, _) => new GeneratorAttributeContextInput(context, x => GetOutputFilename(x, $"[{TrackAttributeNameShort}]"))
             )
             .Collect()
             .Combine(generatorEnvironment)
@@ -222,16 +222,17 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         context.RegisterSourceOutputEx(
             context.SyntaxProvider
-                .ForAttributeWithMetadataName(
+                .ForAttributeWithMetadataNameEx(
                     fullyQualifiedMetadataName: SingletonAttributeMetadataName,
                     predicate: static (node, _) => node is ClassDeclarationSyntax,
-                    transform: static (attributeContext, _) => attributeContext
+                    transform: static (context, _) => new GeneratorAttributeContextInput(context, x => GetOutputFilename(x, $"[{SingletonAttributeNameShort}]"))
                 )
                 .Combine(singletonAttributeCache)
+                .SelectEx(TransformSingletonForCache)
                 .SelectEx((x, ct) => TransformSyntaxContext(
-                        context: x.Left,
-                        attributeSettingsByType: x.Right.AttributeSettingsByType,
-                        environment: x.Right.Environment,
+                        context: x.Context.Value,
+                        attributeSettingsByType: x.AttributeSettingsByType.Value,
+                        environment: x.Environment,
                         ct: ct,
                         attributeName: SingletonAttributeMetadataName
                     )
@@ -241,16 +242,17 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         context.RegisterSourceOutputEx(
             context.SyntaxProvider
-                .ForAttributeWithMetadataName(
+                .ForAttributeWithMetadataNameEx(
                     fullyQualifiedMetadataName: TrackAttributeMetadataName,
                     predicate: static (node, _) => node is ClassDeclarationSyntax,
-                    transform: static (attributeContext, _) => attributeContext
+                    transform: static (context, _) => new GeneratorAttributeContextInput(context, x => GetOutputFilename(x, $"[{TrackAttributeNameShort}]"))
                 )
                 .Combine(trackAttributeCache)
+                .SelectEx(TransformTrackForCache)
                 .SelectEx((x, ct) => TransformSyntaxContext(
-                        context: x.Left,
-                        attributeSettingsByType: x.Right.AttributeSettingsByType,
-                        environment: x.Right.Environment,
+                        context: x.Context.Value,
+                        attributeSettingsByType: x.AttributeSettingsByType.Value,
+                        environment: x.Environment,
                         ct: ct,
                         attributeName: TrackAttributeMetadataName
                     )
@@ -263,18 +265,24 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 .ForAttributeWithMetadataNameEx(
                     fullyQualifiedMetadataName: TrackAttributeMetadataName,
                     predicate: static (node, _) => node is InterfaceDeclarationSyntax,
-                    transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
+                    transform: static (context, _) => new GeneratorAttributeContextInput(context, x => GetOutputFilename(x, $"[{TrackAttributeNameShort}]"))
                 )
                 .Combine(trackAttributeCache)
+                .SelectEx(TransformTrackForCache)
                 .SelectEx((x, ct) =>
                     {
-                        var input = TransformInterfaceSyntaxContext(x.Left.Context, x.Right, ct);
+                        var input = TransformInterfaceSyntaxContext(
+                            context: x.Context.Value,
+                            attributeSettingsByType: x.AttributeSettingsByType.Value,
+                            ct: ct
+                        );
+
                         if (input.TypeFQN is not { Length: > 0 })
                             return input;
 
                         return input with
                         {
-                            Environment = x.Right.Environment,
+                            Environment = x.Environment,
                         };
                     }
                 )
@@ -283,8 +291,58 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         );
     }
 
+    static string? GetOutputFilename(GeneratorAttributeSyntaxContext context, string label)
+    {
+        if (context.TargetNode is not TypeDeclarationSyntax
+            {
+                ShortName: { Length: > 0 } name,
+                FullName: { Length: > 0 } fullName,
+                SyntaxTree.FilePath: { Length: > 0 } filePath,
+            })
+            return null;
+
+        return Utility.GetOutputFilename(
+            filePath: filePath,
+            targetNodeName: name,
+            additionalNameForHash: fullName,
+            label: label,
+            includeFilename: false
+        );
+    }
+
+    static SingletonCacheInput TransformSingletonForCache(
+        (GeneratorAttributeContextInput Left, PrecomputedAttributeSettingsData Right) input,
+        CancellationToken ct
+    ) => new()
+    {
+        SourceGeneratorOutputFilename = input.Left.SourceGeneratorOutputFilename,
+        SourceGeneratorLocation = input.Left.SourceGeneratorLocation,
+        Environment = input.Right.Environment,
+        Context = input.Left.Context,
+        AttributeSettingsByType = input.Right.AttributeSettingsByType.Value,
+        Checksum64ForCache = input.Left.Context.TargetNode switch
+        {
+            TypeDeclarationSyntax { AttributeLists.Count: > 0 } typeDeclaration
+                => typeDeclaration.GetAttributeListChecksum(ct),
+            _ => input.Left.Context.TargetNode.GetNodeChecksum(ct),
+        },
+    };
+
+    static SingletonCacheInput TransformTrackForCache(
+        (GeneratorAttributeContextInput Left, PrecomputedAttributeSettingsData Right) input,
+        CancellationToken ct
+    ) => new()
+    {
+        SourceGeneratorOutputFilename = input.Left.SourceGeneratorOutputFilename,
+        SourceGeneratorLocation = input.Left.SourceGeneratorLocation,
+        Environment = input.Right.Environment,
+        Context = input.Left.Context,
+        AttributeSettingsByType = input.Right.AttributeSettingsByType.Value,
+        Checksum64ForCache = input.Left.Context.TargetSymbol.GetDeclarationHierarchyChecksum(ct),
+    };
+
     PrecomputedAttributeSettingsData TransformSyntaxContextPrecompute(
-        (ImmutableArray<GeneratorAttributeSyntaxContextPassData>, GeneratorEnvironment) input,
+        (ImmutableArray<GeneratorAttributeContextInput>, GeneratorEnvironment) input,
         CancellationToken ct
     )
     {
@@ -306,6 +364,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         return new()
         {
+            SourceGeneratorOutputFilename = $"{nameof(TransformSyntaxContextPrecompute)}.cs",
             Environment = environment,
             AttributeSettingsByType = attributeSettingsByType,
         };
@@ -335,7 +394,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         if (!attributeSettingsLookup.TryGetValue(classSymbol, out var attributeArguments))
             return default;
 
-        var knownSymbols = environment.KnownSymbols;
+        var knownSymbols = context.SemanticModel.Compilation.GetKnownSymbols();
 
         bool hasBaseDeclarationsWithAttribute = false;
         bool hasBaseCachedEnabledState = false;
@@ -577,21 +636,21 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         {
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
                 filePath: typeDeclaration.SyntaxTree.FilePath,
-                targetFQN: classSymbol.Name,
-                shadowTargetFQN: classSymbol.FQN,
+                targetNodeName: classSymbol.Name,
+                additionalNameForHash: classSymbol.FQN,
                 label: attributeName switch
                 {
-                    TrackAttributeMetadataName => "[Track]",
-                    SingletonAttributeMetadataName => "[Singleton]",
-                    _ => attributeName,
+                    TrackAttributeMetadataName     => $"[{TrackAttributeNameShort}]",
+                    SingletonAttributeMetadataName => $"[{SingletonAttributeNameShort}]",
+                    _                              => attributeName,
                 },
                 includeFilename: false
             ),
             Environment = environment,
             HasIInstanceIndex = hasIIndexInstance,
             EmitIInstanceIndex = emitIIndexInstance,
-            SourceGeneratorErrorLocation = sourceLocation,
-            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration, context.SemanticModel, ct),
+            SourceGeneratorLocation = sourceLocation,
+            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDeclaration),
             ContainingTypeFQN = classSymbol.ContainingType?.FQN,
             Attribute = attributeName,
             AttributeSettings = attributeArguments,
@@ -620,12 +679,10 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
     static InterfaceGeneratorInput TransformInterfaceSyntaxContext(
         GeneratorAttributeSyntaxContext context,
-        PrecomputedAttributeSettingsData cache,
+        Dictionary<INamedTypeSymbol, TrackAttributeSettings>? attributeSettingsByType,
         CancellationToken ct
     )
     {
-        var knownSymbols = cache.Environment.KnownSymbols;
-
         if (context.TargetNode is not TypeDeclarationSyntax typeDeclaration)
             return default;
 
@@ -635,19 +692,28 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         if (context.Attributes.FirstOrDefault() is not { AttributeConstructor: not null } attributeData)
             return default;
 
+        var knownSymbols = context.SemanticModel.Compilation.GetKnownSymbols();
+        var interfaceSymbolForLookup = interfaceSymbol is { IsGenericType: true, IsUnboundGenericType: false }
+            ? interfaceSymbol.OriginalDefinition
+            : interfaceSymbol;
+
+        var interfaceAttributeSettings = attributeSettingsByType?.TryGetValue(interfaceSymbolForLookup, out var value) is true
+            ? value
+            : GetTrackAttributeSettings(attributeData, ct);
+
         var allDeclarations = Utility
-            .DeconstructTypeDeclaration(typeDeclaration, context.SemanticModel, ct)
+            .DeconstructTypeDeclaration(typeDeclaration)
             .AsArray();
 
         string[] unmanagedDataFQNs;
         string[] customStorageTypeFQNs;
         string[] trackingIdTypeFQNs;
         using (Scratch.RentA<List<string>>(out var unmanagedDataFQNsList))
-        using (Scratch.RentC<List<string>>(out var customStorageTypeFQNsList))
-        using (Scratch.RentB<List<string>>(out var trackingIdTypeFQNsList))
+        using (Scratch.RentB<List<string>>(out var customStorageTypeFQNsList))
+        using (Scratch.RentC<List<string>>(out var trackingIdTypeFQNsList))
         using (Scratch.RentA<HashSet<string>>(out var seenUnmanagedDataFQNs))
-        using (Scratch.RentC<HashSet<string>>(out var seenCustomStorageTypeFQNs))
-        using (Scratch.RentB<HashSet<string>>(out var seenTrackingIdTypeFQNs))
+        using (Scratch.RentB<HashSet<string>>(out var seenCustomStorageTypeFQNs))
+        using (Scratch.RentC<HashSet<string>>(out var seenTrackingIdTypeFQNs))
         {
             Add(interfaceSymbol);
             foreach (var inheritedInterface in interfaceSymbol.AllInterfaces)
@@ -689,13 +755,13 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         {
             SourceGeneratorOutputFilename = Utility.GetOutputFilename(
                 filePath: typeDeclaration.SyntaxTree.FilePath,
-                targetFQN: interfaceSymbol.Name,
-                shadowTargetFQN: interfaceSymbol.FQN,
-                label: "[Track]",
+                targetNodeName: interfaceSymbol.Name,
+                additionalNameForHash: interfaceSymbol.FQN,
+                label: $"[{TrackAttributeNameShort}]",
                 includeFilename: false
             ),
-            SourceGeneratorErrorLocation = attributeData.ApplicationSyntaxReference.GetLocation() ?? typeDeclaration.Identifier.GetLocation(),
-            AttributeSettings = cache.AttributeSettingsByType.Value[interfaceSymbol],
+            SourceGeneratorLocation = attributeData.ApplicationSyntaxReference.GetLocation() ?? typeDeclaration.Identifier.GetLocation(),
+            AttributeSettings = interfaceAttributeSettings,
             ContainingTypeDeclaration = allDeclarations,
             ContainingTypeFQN = interfaceSymbol.ContainingType?.FQN,
             UnmanagedDataFQNs = unmanagedDataFQNs,
@@ -767,7 +833,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             context: context,
             storageTypeFQNs: input.CustomStorageTypeFQNs,
             trackedTypeFQN: input.TypeFQN,
-            sourceGeneratorErrorLocation: input.SourceGeneratorErrorLocation
+            sourceGeneratorErrorLocation: input.SourceGeneratorLocation
         );
 
         string typeDisplayName
@@ -873,9 +939,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         if (input.ManualInheritanceMismatch)
         {
-            string attributeShortName = input.Attribute is SingletonAttributeMetadataName ? SingletonAttributeShort : "Track";
+            string attributeShortName = input.Attribute is SingletonAttributeMetadataName ? SingletonAttributeNameShort : "Track";
             string typeName = input.TypeFQN ?? "type";
-            var location = input.SourceGeneratorErrorLocation?.ToLocation() ?? Location.None;
+            var location = input.SourceGeneratorLocation?.ToLocation() ?? Location.None;
             context.ReportDiagnostic(Diagnostic.Create(MED029, location, typeName, attributeShortName));
         }
 
@@ -891,7 +957,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             context: context,
             storageTypeFQNs: input.CustomStorageTypeFQNs,
             trackedTypeFQN: input.TypeFQN,
-            sourceGeneratorErrorLocation: input.SourceGeneratorErrorLocation
+            sourceGeneratorErrorLocation: input.SourceGeneratorLocation
         );
 
         var findByIdTypeFQNs = input.TrackingIdRegistrations.AsArray()
@@ -1453,8 +1519,10 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
                     if (input.EmitTransformAccessInit)
                     {
+                        src.Linebreak();
                         src.Line.Write($"static int {transformInitName}");
-                        src.Line.Write($"= {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize({input.TransformInitialCapacity}, {input.TransformDesiredJobCount});");
+                        using (src.Indent)
+                            src.Line.Write($"= {m}Storage.TransformAccess<{input.TypeFQN}>.Initialize({input.TransformInitialCapacity}, {input.TransformDesiredJobCount});");
                     }
                 }
             }
@@ -1504,6 +1572,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
                     if (input.EmitTransformAccessInit)
                     {
+                        src.Linebreak();
                         src.Line.Write($"static int {transformInitName}");
                         using (src.Indent)
                             src.Line.Write($"= {containingTypeFqn}.{transformInitName}();");

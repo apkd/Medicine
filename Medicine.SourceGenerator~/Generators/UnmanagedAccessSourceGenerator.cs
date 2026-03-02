@@ -4,7 +4,6 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 using static ActivePreprocessorSymbolNames;
 using static Constants;
-using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 
 [Generator]
 public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
@@ -13,7 +12,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
     {
         public string? SourceGeneratorOutputFilename { get; init; }
         public string? SourceGeneratorError { get; init; }
-        public LocationInfo? SourceGeneratorErrorLocation { get; set; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
         public EquatableArray<string> ContainingTypeDeclaration;
         public string ClassName;
         public string ClassFQN;
@@ -73,14 +72,11 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: UnmanagedAccessAttributeMetadataName,
                 predicate: static (node, _) => node is ClassDeclarationSyntax,
-                transform: static (attributeContext, _) => new GeneratorAttributeContextInput { Context = attributeContext }
+                transform: TransformForCache
             )
             .Combine(generatorEnvironment)
-            .SelectEx((x, ct) => TransformSyntaxContext(x.Left.Context, x.Right.KnownSymbols, ct) with
-                {
-                    GeneratorEnvironment = x.Right,
-                }
-            );
+            .SelectEx((x, ct) => TransformSyntaxContext(x.Left.Context.Value, x.Right, ct)
+        );
 
         context.RegisterSourceOutputEx(
             source: inputProvider,
@@ -88,7 +84,16 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         );
     }
 
-    static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, KnownSymbols knownSymbols, CancellationToken ct)
+    static ContextWithCacheGeneratorInput TransformForCache(GeneratorAttributeSyntaxContext context, CancellationToken ct)
+        => new()
+        {
+            Context = context,
+            SourceGeneratorOutputFilename = GetOutputFilename(context),
+            SourceGeneratorLocation = context.TargetNode.GetLocation(),
+            Checksum64ForCache = (context.TargetNode.Parent ?? context.TargetNode).GetNodeChecksum(ct),
+        };
+
+    static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, GeneratorEnvironment generatorEnvironment, CancellationToken ct)
     {
         if (context.TargetNode is not TypeDeclarationSyntax typeDecl)
             return default;
@@ -96,6 +101,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         if (context.TargetSymbol is not ITypeSymbol typeSymbol)
             return default;
 
+        var knownSymbols = context.SemanticModel.Compilation.GetKnownSymbols();
         var unmanagedAccessAttribute = context.Attributes.First(x => x.AttributeClass.Is(knownSymbols.UnmanagedAccessAttribute));
 
         var settings = unmanagedAccessAttribute
@@ -112,19 +118,15 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
         var output = new GeneratorInput
         {
-            SourceGeneratorOutputFilename = Utility.GetOutputFilename(
-                filePath: typeDecl.SyntaxTree.FilePath,
-                targetFQN: typeSymbol.ToDisplayString(CSharpShortErrorMessageFormat),
-                label: $"[{UnmanagedAccessAttributeNameShort}]",
-                includeFilename: false
-            ),
+            SourceGeneratorOutputFilename = GetOutputFilename(context),
             AttributeSettings = settings,
-            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDecl, context.SemanticModel, ct),
+            GeneratorEnvironment = generatorEnvironment,
+            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDecl),
             ClassName = typeSymbol.Name,
             ClassFQN = typeSymbol.FQN,
             IsUnityObject = typeSymbol.InheritsFrom(knownSymbols.UnityObject),
             IsTracked = trackAttribute is not null,
-            SourceGeneratorErrorLocation = new(typeDecl.Identifier.GetLocation()),
+            SourceGeneratorLocation = new(typeDecl.Identifier.GetLocation()),
             HasCachedEnableBuilderDeferred = new(() =>
                 {
                     if (trackAttribute is null)
@@ -181,6 +183,25 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         }
 
         return output;
+    }
+
+    static string? GetOutputFilename(GeneratorAttributeSyntaxContext context)
+    {
+        if (context.TargetNode is not TypeDeclarationSyntax
+            {
+                ShortName: { Length: > 0 } name,
+                FullName: { Length: > 0 } fullName,
+                SyntaxTree.FilePath: { Length: > 0 } filePath,
+            })
+            return null;
+
+        return Utility.GetOutputFilename(
+            filePath: filePath,
+            targetNodeName: name,
+            additionalNameForHash: fullName,
+            label: $"[{UnmanagedAccessAttributeNameShort}]",
+            includeFilename: false
+        );
     }
 
     static string ToBindingFlagsVisibility(bool isPublic)
@@ -261,7 +282,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             context.ReportDiagnostic(
                 Diagnostic.Create(
                     descriptor: Utility.ExceptionDiagnosticDescriptor,
-                    location: input.SourceGeneratorErrorLocation?.ToLocation() ?? Location.None,
+                    location: input.SourceGeneratorLocation?.ToLocation() ?? Location.None,
                     messageArgs: "Class marked with [UnmanagedAccess] has no instance fields or properties with backing fields."
                 )
             );
