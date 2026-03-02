@@ -162,6 +162,13 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 if (member is not IFieldSymbol { IsStatic: false } field)
                     return;
 
+                bool treatAsUnmanagedWrapper = field.Type is IErrorTypeSymbol
+                {
+                    Name: "Wrapper",
+                    Arity: 0,
+                    ContainingType.TypeKind: TypeKind.Struct,
+                };
+
                 fields.Add(
                     new()
                     {
@@ -172,8 +179,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         TypeFQN = field.Type.FQN,
                         IsPublic = field.DeclaredAccessibility is Accessibility.Public,
                         IsReadOnly = field.IsReadOnly,
-                        IsUnmanagedType = field.Type.IsUnmanagedType,
-                        IsReferenceType = field.Type.IsReferenceType,
+                        IsUnmanagedType = field.Type.IsUnmanagedType || treatAsUnmanagedWrapper,
+                        IsReferenceType = field.Type.IsReferenceType && !treatAsUnmanagedWrapper,
                         IsPrivateInBaseType = isFromBaseType && field.DeclaredAccessibility is Accessibility.Private,
                     }
                 );
