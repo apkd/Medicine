@@ -77,7 +77,8 @@ namespace Medicine.Internal
 #if DEBUG
                 if (!Map.TryGetValue(id, out var stored) || stored is null)
                 {
-                    LogError($"Trying to unregister a missing instance: {typeof(T).Name} with ID {id} not found.");
+                    if (!Utility.EditMode)
+                        LogError($"Trying to unregister a missing instance: {typeof(T).Name} with ID {id} not found.");
                 }
                 else
                 {
@@ -89,7 +90,8 @@ namespace Medicine.Internal
                     if (!ReferenceEquals(stored, target))
                     {
                         var type = typeof(T).Name;
-                        LogError($"Instance mismatch for {type} with ID {id}: map has '{stored}', tried to unregister '{target}'.");
+                        if (!Utility.EditMode)
+                            LogError($"Instance mismatch for {type} with ID {id}: map has '{stored}', tried to unregister '{target}'.");
                     }
                 }
 #endif
