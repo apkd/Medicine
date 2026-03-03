@@ -627,7 +627,121 @@ public static partial class ExtensionMethods
     {
         public string HtmlEncode()
             => System.Web.HttpUtility.HtmlEncode(self);
+
+        public string GetTypeNameTail()
+        {
+            if (string.IsNullOrEmpty(self))
+                return self;
+
+            int tailStart = self.GetTypeNameTailStartIndex();
+            return tailStart is 0
+                ? self
+                : self[tailStart..];
+        }
+
+        public int GetTypeNameTailStartIndex()
+        {
+            if (string.IsNullOrEmpty(self))
+                return 0;
+
+            int genericDepth = 0;
+            for (int i = self.Length - 1; i >= 0; i--)
+            {
+                switch (self[i])
+                {
+                    case '>':
+                        genericDepth++;
+                        break;
+                    case '<':
+                        if (genericDepth > 0)
+                            genericDepth--;
+                        break;
+                    case '.' when genericDepth is 0:
+                    case ':' when genericDepth is 0 && i > 0 && self[i - 1] is ':':
+                        return i + 1;
+                }
+            }
+
+            return 0;
+        }
+
+        public string GetTypeDisplayNameForDocs()
+        {
+            if (string.IsNullOrEmpty(self))
+                return self;
+
+            var source = self.AsSpan(self.GetTypeNameTailStartIndex());
+            if (source.Length is 0)
+                return string.Empty;
+
+            Span<char> result = source.Length <= 1024
+                ? stackalloc char[source.Length]
+                : new char[source.Length];
+
+            int i = 0;
+            for (int j = 0; j < source.Length;)
+            {
+                if (HasGlobalPrefix(source, j))
+                {
+                    j += "global::".Length;
+                    continue;
+                }
+
+                result[i++] = source[j++];
+            }
+
+            return (i == source.Length ? source.ToString() : result[..i].ToString()).HtmlEncode();
+        }
+
+        public string GetTypeMemberName()
+        {
+            if (string.IsNullOrWhiteSpace(self))
+                return "_";
+
+            var source = self.AsSpan(self.GetTypeNameTailStartIndex());
+            if (source.Length is 0)
+                return "_";
+
+            var result = source.Length <= 1024
+                ? stackalloc char[source.Length]
+                : new char[source.Length];
+
+            int i = 0;
+            bool isFirst = true;
+            for (int j = 0; j < source.Length;)
+            {
+                if (HasGlobalPrefix(source, j))
+                {
+                    j += "global::".Length;
+                    continue;
+                }
+
+                char c = source[j++];
+
+                if (isFirst)
+                {
+                    result[i++] = char.IsLetter(c) || c is '_'
+                        ? c
+                        : '_';
+                    isFirst = false;
+                }
+                else
+                {
+                    result[i++] = char.IsLetterOrDigit(c) || c is '_'
+                        ? c
+                        : '_';
+                }
+            }
+
+            while (i > 0 && result[i - 1] is '_')
+                i--;
+
+            return i > 0 ? result[..i].ToString() : "_";
+        }
     }
+
+    static bool HasGlobalPrefix(ReadOnlySpan<char> source, int index)
+        => source[index..] is ['g', 'l', 'o', 'b', 'a', 'l', ':', ':', ..];
 
     extension(IEnumerable<string> self)
     {

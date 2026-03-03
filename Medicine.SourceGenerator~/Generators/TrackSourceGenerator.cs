@@ -952,7 +952,13 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         bool hasBaseRegistrationMethod = input is { HasBaseDeclarationsWithAttribute: true, ManualInheritanceMismatch: false };
         string registrationNew = hasBaseRegistrationMethod ? "new " : "";
         var unmanagedDataInfo = input.UnmanagedDataFQNs.AsArray()
-            .Select(x => (dataType: x, dataTypeShort: x.Split('.', ':').Last().HtmlEncode()))
+            .Select(
+                x => (
+                    dataType: x,
+                    dataTypeDisplay: x.GetTypeDisplayNameForDocs(),
+                    dataTypeMemberName: x.GetTypeMemberName()
+                )
+            )
             .ToArray();
 
         var customStorageProperties = GetCustomStorageProperties(
@@ -995,8 +1001,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     src.Line.Write($"/// And the following additional instance properties:");
                     src.Line.Write($"/// <list type=\"bullet\">");
                     src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.InstanceIndex\"/> property, which is the instance's index into the above arrays </item>");
-                    foreach (var (_, dataTypeShort) in unmanagedDataInfo)
-                        src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Local{dataTypeShort}\"/> per-instance data accessor </item>");
+                    foreach (var (_, _, dataTypeMemberName) in unmanagedDataInfo)
+                        src.Line.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Local{dataTypeMemberName}\"/> per-instance data accessor </item>");
 
                     src.Line.Write($"/// </list>");
 
@@ -1117,8 +1123,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             if (input.AttributeSettings.TrackTransforms)
                 src.Doc?.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.TransformAccessArray\"/> transform array </item>");
 
-            foreach (var (_, dataTypeShort) in unmanagedDataInfo)
-                src.Doc?.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/> data array </item>");
+            foreach (var (_, _, dataTypeMemberName) in unmanagedDataInfo)
+                src.Doc?.Write($"/// <item> The <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeMemberName}Array\"/> data array </item>");
         }
 
         void EmitTrackLocalUnmanagedAccessors()
@@ -1126,19 +1132,19 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             if (input.Attribute is not TrackAttributeMetadataName)
                 return;
 
-            foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
+            foreach (var (dataType, dataTypeDisplay, dataTypeMemberName) in unmanagedDataInfo)
             {
                 src.Linebreak();
                 src.Doc?.Write($"/// <summary>");
-                src.Doc?.Write($"/// Gets a reference to the <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instance.");
+                src.Doc?.Write($"/// Gets a reference to the <see cref=\"{dataTypeDisplay}\"/> data for the tracked type's currently active instance.");
                 src.Doc?.Write($"/// You can use this reference in jobs or Burst-compiled functions.");
                 src.Doc?.Write($"/// </summary>");
                 src.Doc?.Write($"/// <remarks>");
                 src.Doc?.Write($"/// The reference corresponds to the tracked instance with the appropriate instance index.");
-                src.Doc?.Write($"/// You can also access data statically via <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeShort}Array\"/>");
+                src.Doc?.Write($"/// You can also access data statically via <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeMemberName}Array\"/>");
                 src.Doc?.Write($"/// and initialize/dispose it by overriding methods in <see cref=\"Medicine.IUnmanagedData{{T}}\"/>.");
 
-                src.Line.Write($"public ref {dataType} Local{dataTypeShort}");
+                src.Line.Write($"public ref {dataType} Local{dataTypeMemberName}");
                 using (src.Braces)
                 {
                     src.Line.Write($"{Alias.Inline} get");
@@ -1675,7 +1681,13 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             return;
 
         var unmanagedDataInfo = input.UnmanagedDataFQNs.AsArray()
-            .Select(x => (dataType: x, dataTypeShort: x.Split('.', ':').Last().HtmlEncode()))
+            .Select(
+                x => (
+                    dataType: x,
+                    dataTypeDisplay: x.GetTypeDisplayNameForDocs(),
+                    dataTypeMemberName: x.GetTypeMemberName()
+                )
+            )
             .ToArray();
 
         src.Doc?.Write($"/// <summary>");
@@ -1687,28 +1699,28 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         src.Doc?.Write($"/// corresponds to the tracked instance with the appropriate <see cref=\"Medicine.IInstanceIndex\">instance index</see>.");
         src.Doc?.Write($"/// </remarks>");
         string s = input.UnmanagedDataFQNs.Length > 1 ? "s" : "";
-        string origin = unmanagedDataInfo.Select(x => $"<c>IUnmanagedData&lt;{x.dataTypeShort}&gt;</c>").Join(", ");
+        string origin = unmanagedDataInfo.Select(x => $"<c>IUnmanagedData&lt;{x.dataTypeDisplay}&gt;</c>").Join(", ");
         src.Doc?.Write($"/// <codegen>Generated because of the implemented interface{s}: {origin}</codegen>");
 
         src.Line.Write($"public static {input.NewModifier}partial class Unmanaged");
         using (src.Braces)
         {
-            foreach (var (dataType, dataTypeShort) in unmanagedDataInfo)
+            foreach (var (dataType, dataTypeDisplay, dataTypeMemberName) in unmanagedDataInfo)
             {
                 src.Linebreak();
                 src.Doc?.Write($"/// <summary>");
-                src.Doc?.Write($"/// Gets an array of <see cref=\"{dataTypeShort}\"/> data for the tracked type's currently active instances.");
+                src.Doc?.Write($"/// Gets an array of <see cref=\"{dataTypeDisplay}\"/> data for the tracked type's currently active instances.");
                 src.Doc?.Write($"/// You can use this array in jobs or Burst-compiled functions.");
                 src.Doc?.Write($"/// </summary>");
                 src.Doc?.Write($"/// <remarks>");
                 src.Doc?.Write($"/// Each element in the native array corresponds to the tracked instance with the appropriate instance index.");
-                src.Doc?.Write($"/// You can access per-instance data via the generated <see cref=\"{input.TypeDisplayName}.Local{dataTypeShort}\"/> property,");
+                src.Doc?.Write($"/// You can access per-instance data via the generated <see cref=\"{input.TypeDisplayName}.Local{dataTypeMemberName}\"/> property,");
                 src.Doc?.Write($"/// or you can access data statically via this array and");
                 src.Doc?.Write($"/// initialize/dispose it by overriding the methods in the <see cref=\"Medicine.IUnmanagedData{{T}}\"/> interface.");
                 src.Doc?.Write($"/// </remarks>");
-                src.Doc?.Write($"/// <codegen>Generated because of the following implemented interface: <c>IUnmanagedData&lt;{dataTypeShort}&gt;</c></codegen>");
+                src.Doc?.Write($"/// <codegen>Generated because of the following implemented interface: <c>IUnmanagedData&lt;{dataTypeDisplay}&gt;</c></codegen>");
 
-                src.Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataTypeShort}Array");
+                src.Line.Write($"public static ref global::Unity.Collections.NativeArray<{dataType}> {dataTypeMemberName}Array");
                 using (src.Braces)
                     src.Line.Write($"{Alias.Inline} get => ref {m}Storage.UnmanagedData<{input.TypeFQN}, {dataType}>.Array;");
             }
@@ -1804,7 +1816,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
         foreach (var storageTypeFQN in sortedStorageTypes)
         {
-            string storageTypeShortRaw = GetTypeNameTail(storageTypeFQN);
+            string storageTypeShortRaw = storageTypeFQN.GetTypeNameTail();
             string propertyName = GetCustomStoragePropertyName(storageTypeShortRaw);
 
             foreach (var existing in result)
@@ -1832,22 +1844,13 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             result.Add(
                 new(
                     StorageTypeFQN: storageTypeFQN,
-                    StorageTypeShort: storageTypeShortRaw.HtmlEncode(),
+                    StorageTypeShort: storageTypeFQN.GetTypeDisplayNameForDocs(),
                     PropertyName: propertyName
                 )
             );
         }
 
         return result.ToArray();
-
-        static string GetTypeNameTail(string typeFQN)
-        {
-            for (int i = typeFQN.Length - 1; i >= 0; i--)
-                if (typeFQN[i] is '.' or ':')
-                    return typeFQN[(i + 1)..];
-
-            return typeFQN;
-        }
 
         static string GetCustomStoragePropertyName(string storageTypeShort)
         {
