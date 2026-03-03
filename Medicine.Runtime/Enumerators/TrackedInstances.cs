@@ -134,6 +134,76 @@ namespace Medicine
         }
 
         /// <summary>
+        /// Allows direct access to the underlying tracked instance storage.
+        /// </summary>
+        /// <remarks><inheritdoc cref="UnsafeAPI"/></remarks>
+        [EditorBrowsable(Advanced)]
+        public UnsafeAPI Unsafe
+        {
+            [MethodImpl(AggressiveInlining)]
+            get => default;
+        }
+
+        /// <remarks>
+        /// Use with caution; do not modify the tracked instance list, and keep in mind that
+        /// enabling/disabling instances will mutate the storage.
+        /// </remarks>
+        [EditorBrowsable(Never)]
+        public struct UnsafeAPI
+        {
+            /// <summary>
+            /// Directly returns the actual list of tracked instances.
+            /// </summary>
+            /// <remarks><inheritdoc cref="UnsafeAPI"/></remarks>
+            [MethodImpl(AggressiveInlining)]
+            public List<T> AsList()
+                => Storage.Instances<T>.List;
+
+            /// <summary>
+            /// Returns a span view over the tracked instance list.
+            /// </summary>
+            /// <remarks><inheritdoc cref="UnsafeAPI"/></remarks>
+            [MethodImpl(AggressiveInlining)]
+            public ReadOnlySpan<T> AsSpan()
+                => Storage.Instances<T>.AsSpan();
+
+            /// <summary>
+            /// Returns the underlying array of tracked instance storage.
+            /// Not all array slots will contain valid references - the tail of the array will be filled with <c>null</c>.
+            /// </summary>
+            /// <remarks><inheritdoc cref="UnsafeAPI"/></remarks>
+            [MethodImpl(AggressiveInlining)]
+            public T[] AsArray()
+                => Storage.Instances<T>.List.AsInternalsView().Array;
+
+            /// <summary>
+            /// Returns an UnsafeList view over the tracked instance list.
+            /// Uses <see cref="UnmanagedRef{TClass}"/> to wrap instance references for compatibility with unmanaged code.
+            /// </summary>
+            /// <remarks><inheritdoc cref="UnsafeAPI"/></remarks>
+            [MethodImpl(AggressiveInlining)]
+            public Unity.Collections.LowLevel.Unsafe.UnsafeList<UnmanagedRef<T>> AsUnsafeList()
+                => Storage.Instances<T>.AsUnmanaged();
+        }
+
+        /// <summary>
+        /// Allows direct access to the underlying <see cref="IUnmanagedData{TData}"/> storage.
+        /// </summary>
+        /// <remarks>
+        /// Use with caution; keep in mind that enabling/disabling instances will mutate the storage.
+        /// </remarks>
+        [EditorBrowsable(Advanced)]
+        [MethodImpl(AggressiveInlining)]
+        public UnmanagedDataAPI<TData> UnmanagedData<TData>() where TData : unmanaged
+            => default;
+
+        [EditorBrowsable(Never)] // ReSharper disable once UnusedTypeParameter
+        public struct UnmanagedDataAPI<TData> where TData : unmanaged
+        {
+            // accessors implemented via extension methods (to allow generic constraints)
+        }
+
+        /// <summary>
         /// Stores the internal backing list before enumeration, instead of enumerating it directly.
         /// This is useful when instances are enabled/disabled during enumeration.
         /// </summary>
