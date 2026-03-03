@@ -2,7 +2,6 @@
 using NUnit.Framework;
 using UnityEngine;
 using Medicine;
-using Medicine.Internal;
 using Object = UnityEngine.Object;
 
 public partial class FindByTypeTests
