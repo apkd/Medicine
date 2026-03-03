@@ -228,6 +228,13 @@ namespace Medicine
             [MethodImpl(AggressiveInlining)]
             public unsafe ref Unity.Collections.LowLevel.Unsafe.UnsafeList<TData> AsUnsafeList()
                 => ref *Storage.UnmanagedData<T, TData>.List.GetUnsafeList();
+
+            /// <summary>
+            /// Returns a reference to the unmanaged data for the tracked instance at the specified index.
+            /// </summary>
+            [MethodImpl(AggressiveInlining)]
+            public unsafe ref TData ElementAt(int index)
+                => ref ((TData*)Storage.UnmanagedData<T, TData>.Array.GetUnsafePtr())[index];
         }
 
         /// <summary>
