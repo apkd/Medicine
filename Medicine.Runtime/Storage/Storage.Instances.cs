@@ -36,7 +36,13 @@ namespace Medicine.Internal
                     List.Capacity = StaticInitArgs<T>.Capacity;
                     Instances.UntypedAccess.Add(typeof(T), static () => List);
 #if UNITY_EDITOR
-                    enterPlayModeCleanup += static () => List.Clear();
+                    enterPlayModeCleanup += static () =>
+                    {
+                        if (Utility.TypeInfo<T>.IsScriptableObject)
+                            return;
+
+                        List.Clear();
+                    };
 #endif
                 }
             }

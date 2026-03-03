@@ -26,7 +26,13 @@ namespace Medicine.Internal
                 static StaticInit()
                 {
 #if UNITY_EDITOR
-                    enterPlayModeCleanup += static () => Map.Clear();
+                    enterPlayModeCleanup += static () =>
+                    {
+                        if (Utility.TypeInfo<T>.IsScriptableObject)
+                            return;
+
+                        Map.Clear();
+                    };
 #endif
                 }
             }

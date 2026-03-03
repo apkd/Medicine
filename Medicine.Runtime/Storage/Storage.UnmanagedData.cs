@@ -53,6 +53,9 @@ namespace Medicine.Internal
 #if UNITY_EDITOR
                 enterPlayModeCleanup += static () =>
                 {
+                    if (Utility.TypeInfo<T>.IsScriptableObject)
+                        return;
+
                     if (!List.IsCreated)
                         return;
 
