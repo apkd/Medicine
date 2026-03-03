@@ -208,42 +208,5 @@ namespace Medicine
 #endif
             => source.ToPooledList(out _);
 #endif
-
-        /// <summary>
-        /// Directly returns the underlying NativeList
-        /// containing the unmanaged data for the tracked instances.
-        /// </summary>
-        [MethodImpl(AggressiveInlining)]
-        public static Unity.Collections.NativeList<TData> AsNativeList<T, TData>(this TrackedInstances<T>.UnmanagedDataAPI<TData> _)
-            where T : class, ITracked, IUnmanagedData<TData>
-            where TData : unmanaged
-            => Storage.UnmanagedData<T, TData>.List;
-
-        /// <summary>
-        /// Returns a NativeArray view over the unmanaged data for the tracked instances.
-        /// </summary>
-        [MethodImpl(AggressiveInlining)]
-        public static Unity.Collections.NativeArray<TData> AsNativeArray<T, TData>(this TrackedInstances<T>.UnmanagedDataAPI<TData> _)
-            where T : class, ITracked, IUnmanagedData<TData>
-            where TData : unmanaged
-            => Storage.UnmanagedData<T, TData>.Array;
-
-        /// <summary>
-        /// Returns a span view over the unmanaged data for the tracked instances.
-        /// </summary>
-        [MethodImpl(AggressiveInlining)]
-        public static Span<TData> AsSpan<T, TData>(this TrackedInstances<T>.UnmanagedDataAPI<TData> _)
-            where T : class, ITracked, IUnmanagedData<TData>
-            where TData : unmanaged
-            => Storage.UnmanagedData<T, TData>.Array.AsSpan();
-
-        /// <summary>
-        /// Returns an UnsafeList view over the unmanaged data for the tracked instances.
-        /// </summary>
-        [MethodImpl(AggressiveInlining)]
-        public static unsafe ref Unity.Collections.LowLevel.Unsafe.UnsafeList<TData> AsUnsafeList<T, TData>(this TrackedInstances<T>.UnmanagedDataAPI<TData> _)
-            where T : class, ITracked, IUnmanagedData<TData>
-            where TData : unmanaged
-            => ref *Storage.UnmanagedData<T, TData>.List.GetUnsafeList();
     }
 }

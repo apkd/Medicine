@@ -200,7 +200,34 @@ namespace Medicine
         [EditorBrowsable(Never)] // ReSharper disable once UnusedTypeParameter
         public struct UnmanagedDataAPI<TData> where TData : unmanaged
         {
-            // accessors implemented via extension methods (to allow generic constraints)
+            /// <summary>
+            /// Directly returns the underlying NativeList
+            /// containing the unmanaged data for the tracked instances.
+            /// </summary>
+            [MethodImpl(AggressiveInlining)]
+            public Unity.Collections.NativeList<TData> AsNativeList()
+                => Storage.UnmanagedData<T, TData>.List;
+
+            /// <summary>
+            /// Returns a NativeArray view over the unmanaged data for the tracked instances.
+            /// </summary>
+            [MethodImpl(AggressiveInlining)]
+            public Unity.Collections.NativeArray<TData> AsNativeArray()
+                => Storage.UnmanagedData<T, TData>.Array;
+
+            /// <summary>
+            /// Returns a span view over the unmanaged data for the tracked instances.
+            /// </summary>
+            [MethodImpl(AggressiveInlining)]
+            public Span<TData> AsSpan()
+                => Storage.UnmanagedData<T, TData>.Array.AsSpan();
+
+            /// <summary>
+            /// Returns an UnsafeList view over the unmanaged data for the tracked instances.
+            /// </summary>
+            [MethodImpl(AggressiveInlining)]
+            public unsafe ref Unity.Collections.LowLevel.Unsafe.UnsafeList<TData> AsUnsafeList()
+                => ref *Storage.UnmanagedData<T, TData>.List.GetUnsafeList();
         }
 
         /// <summary>
@@ -306,7 +333,7 @@ namespace Medicine
                 index = frameCount % stride - stride;
                 this.stride = stride;
 #if DEBUG
-                this.listView = view;
+                listView = view;
                 version = view.Version;
 #endif
             }
