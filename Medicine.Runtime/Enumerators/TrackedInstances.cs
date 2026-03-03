@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using JetBrains.Annotations;
 using Medicine.Internal;
+using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine.Assertions;
 using static System.ComponentModel.EditorBrowsableState;
 using static System.Runtime.CompilerServices.MethodImplOptions;
@@ -66,7 +68,14 @@ namespace Medicine
             // todo: generic static access to Storage.Instances<T> is expensive
             // maybe cache it in the TrackedInstances struct?
             [MethodImpl(AggressiveInlining)]
-            get => Storage.Instances<T>.List[index];
+            get
+            {
+#if DEBUG
+                return Storage.Instances<T>.List[index];
+#else
+                return Storage.Instances<T>.Array[index];
+#endif
+            }
         }
 
 #if MODULE_ZLINQ
@@ -174,7 +183,7 @@ namespace Medicine
             /// <remarks><inheritdoc cref="UnsafeAPI"/></remarks>
             [MethodImpl(AggressiveInlining)]
             public T[] AsArray()
-                => Storage.Instances<T>.List.AsInternalsView().Array;
+                => Storage.Instances<T>.Array;
 
             /// <summary>
             /// Returns an UnsafeList view over the tracked instance list.
@@ -182,7 +191,7 @@ namespace Medicine
             /// </summary>
             /// <remarks><inheritdoc cref="UnsafeAPI"/></remarks>
             [MethodImpl(AggressiveInlining)]
-            public Unity.Collections.LowLevel.Unsafe.UnsafeList<UnmanagedRef<T>> AsUnsafeList()
+            public UnsafeList<UnmanagedRef<T>> AsUnsafeList()
                 => Storage.Instances<T>.AsUnmanaged();
         }
 
@@ -205,14 +214,14 @@ namespace Medicine
             /// containing the unmanaged data for the tracked instances.
             /// </summary>
             [MethodImpl(AggressiveInlining)]
-            public Unity.Collections.NativeList<TData> AsNativeList()
+            public NativeList<TData> AsNativeList()
                 => Storage.UnmanagedData<T, TData>.List;
 
             /// <summary>
             /// Returns a NativeArray view over the unmanaged data for the tracked instances.
             /// </summary>
             [MethodImpl(AggressiveInlining)]
-            public Unity.Collections.NativeArray<TData> AsNativeArray()
+            public NativeArray<TData> AsNativeArray()
                 => Storage.UnmanagedData<T, TData>.Array;
 
             /// <summary>
@@ -226,7 +235,7 @@ namespace Medicine
             /// Returns an UnsafeList view over the unmanaged data for the tracked instances.
             /// </summary>
             [MethodImpl(AggressiveInlining)]
-            public unsafe ref Unity.Collections.LowLevel.Unsafe.UnsafeList<TData> AsUnsafeList()
+            public unsafe ref UnsafeList<TData> AsUnsafeList()
                 => ref *Storage.UnmanagedData<T, TData>.List.GetUnsafeList();
 
             /// <summary>

@@ -34,6 +34,7 @@ namespace Medicine.Internal
                 static StaticInit()
                 {
                     List.Capacity = StaticInitArgs<T>.Capacity;
+                    Array = List.AsInternalsView().Array;
                     Instances.UntypedAccess.Add(typeof(T), static () => List);
 #if UNITY_EDITOR
                     enterPlayModeCleanup += static () =>
@@ -57,12 +58,14 @@ namespace Medicine.Internal
             /// </remarks>
             public static readonly List<T> List = new(capacity: 0);
 
+            public static T[]? Array = System.Array.Empty<T>();
+
             public static bool TypeIsRegistered
                 => List.Capacity > 0;
 
             [MethodImpl(AggressiveInlining)]
             public static Span<T> AsSpan()
-                => List.AsInternalsView().Array.AsSpanUnsafe(List.Count);
+                => Array.AsSpanUnsafe(List.Count);
 
             [MethodImpl(AggressiveInlining)]
             public static UnsafeList<UnmanagedRef<T>> AsUnmanaged()
@@ -91,6 +94,7 @@ namespace Medicine.Internal
                 trackIndex.InstanceIndex = index;
 
                 List.Add(instance);
+                Array = List.AsInternalsView().Array;
                 return index;
             }
 
@@ -128,7 +132,7 @@ namespace Medicine.Internal
                 //   and retrieve the stored index directly
 
                 var listView = list.AsInternalsView();
-                var array = listView.Array;
+                var array = Array;
 
                 if (array is null) // strictly speaking, never possible?
                     return -1;
@@ -224,7 +228,8 @@ namespace Medicine.Internal
 
                 static bool AnyInstanceBecameInvalid()
                 {
-                    var (array, n) = List.AsInternalsView();
+                    var array = Array;
+                    int n = List.Count;
 
                     if (array is null)
                         return false;
@@ -272,6 +277,8 @@ namespace Medicine.Internal
                                 if (instance is Behaviour { enabled: true })
                                     List.Add(instance);
                         }
+
+                        Array = List.AsInternalsView().Array;
                     }
                 }
             }
