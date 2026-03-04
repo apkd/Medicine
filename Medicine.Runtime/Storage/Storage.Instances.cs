@@ -65,7 +65,7 @@ namespace Medicine.Internal
 
             [MethodImpl(AggressiveInlining)]
             public static Span<T> AsSpan()
-                => Array.AsSpanUnsafe(List.Count);
+                => Array.AsSpanUnsafe(0, List.Count);
 
             [MethodImpl(AggressiveInlining)]
             public static UnsafeList<UnmanagedRef<T>> AsUnmanaged()

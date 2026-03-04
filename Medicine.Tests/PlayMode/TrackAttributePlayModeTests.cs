@@ -46,6 +46,22 @@ public partial class TrackAttributePlayModeTests
         }
     }
 
+    [Test]
+    public void Track_UnsafeAsSpan_MatchesTrackedList()
+    {
+        _ = new GameObject(null, typeof(MBTrackBasic));
+        _ = new GameObject(null, typeof(MBTrackBasic));
+        _ = new GameObject(null, typeof(MBTrackBasic));
+
+        var span = Find.Instances<MBTrackBasic>().Unsafe.AsSpan();
+        var list = Storage.Instances<MBTrackBasic>.List;
+
+        Assert.That(span.Length, Is.EqualTo(list.Count));
+
+        for (int i = 0; i < span.Length; i++)
+            Assert.That(span[i], Is.EqualTo(list[i]));
+    }
+
     //////////////////////////////////////////////////////////////////////////////
 
     [Track]
