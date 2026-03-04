@@ -267,7 +267,7 @@ namespace Medicine
             /// Type of tracked object to find. Must be tagged with <c>[Track]</c> and implement <see cref="IFindByID{TID}"/>.
             /// </typeparam>
             [MethodImpl(AggressiveInlining)]
-            public T? OfType<T>() where T : class, IEquatable<TID>, IFindByID<TID>
+            public T? OfType<T>() where T : class, IFindByID<TID>
                 => Storage.LookupByID<T, TID>.Find(id);
 
             /// <summary> Finds the tracked object instance with the provided ID. </summary>
