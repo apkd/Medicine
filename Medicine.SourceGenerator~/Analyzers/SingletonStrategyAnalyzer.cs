@@ -62,34 +62,28 @@ public sealed class SingletonStrategyAnalyzer : DiagnosticAnalyzer
 
         var conflicts = new List<string>();
 
-        void AddOnce(string value)
-        {
-            if (!conflicts.Contains(value, StringComparer.Ordinal))
-                conflicts.Add(value);
-        }
-
         if (conflictReplaceKeepExisting)
         {
-            AddOnce("Replace");
-            AddOnce("KeepExisting");
+            conflicts.AddUnique("Replace");
+            conflicts.AddUnique("KeepExisting");
         }
 
         if (conflictLogging)
         {
             if (hasThrowException)
-                AddOnce("ThrowException");
+                conflicts.AddUnique("ThrowException");
 
             if (hasLogError)
-                AddOnce("LogError");
+                conflicts.AddUnique("LogError");
 
             if (hasLogWarning)
-                AddOnce("LogWarning");
+                conflicts.AddUnique("LogWarning");
         }
 
         if (conflictThrowDestroy)
         {
-            AddOnce("ThrowException");
-            AddOnce("Destroy");
+            conflicts.AddUnique("ThrowException");
+            conflicts.AddUnique("Destroy");
         }
 
         if (conflicts.Count == 0)

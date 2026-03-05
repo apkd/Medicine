@@ -73,6 +73,14 @@ public static partial class ExtensionMethods
         }
     }
 
+    extension(INamedTypeSymbol self)
+    {
+        public INamedTypeSymbol OriginalDefinitionOrSelf
+            => self is { IsGenericType: true, IsUnboundGenericType: false }
+                ? self.OriginalDefinition
+                : self;
+    }
+
     extension(ISymbol self)
     {
         public string FQN
@@ -258,19 +266,6 @@ public static partial class ExtensionMethods
         public bool HasAttribute(Func<string, bool> predicate)
             => self.HasAttribute((Func<NameSyntax, bool>)(x => predicate(x.ToString())));
 
-        public AttributeSyntax? GetAttribute(Func<string, bool> predicate)
-        {
-            if (self is null)
-                return null;
-
-            foreach (var attributeList in self.AttributeLists)
-            foreach (var x in attributeList.Attributes)
-                if (predicate(x.Name.ToString()))
-                    return x;
-
-            return null;
-        }
-
         public ulong GetAttributeListChecksum(CancellationToken ct)
         {
             if (self?.AttributeLists is not { Count: > 0 } lists)
@@ -355,22 +350,6 @@ public static partial class ExtensionMethods
                     return true;
 
             return false;
-        }
-
-        public bool HasAttribute(Func<string, bool> predicate)
-            => self.HasAttribute((Func<NameSyntax, bool>)(x => predicate(x.ToString())));
-
-        public AttributeSyntax? GetAttribute(Func<string, bool> predicate)
-        {
-            if (self is null)
-                return null;
-
-            foreach (var attributeList in self.AttributeLists)
-            foreach (var x in attributeList.Attributes)
-                if (predicate(x.Name.ToString()))
-                    return x;
-
-            return null;
         }
     }
 
@@ -674,7 +653,7 @@ public static partial class ExtensionMethods
             if (source.Length is 0)
                 return string.Empty;
 
-            Span<char> result = source.Length <= 1024
+            var result = source.Length <= 1024
                 ? stackalloc char[source.Length]
                 : new char[source.Length];
 
@@ -780,9 +759,6 @@ public static partial class ExtensionMethods
     }
 #pragma warning restore CS0649
 
-    public static Span<T> AsSpan<T>(this List<T> list)
-        => Unsafe.As<List<T>, ListData<T>>(ref list).Items.AsSpan(0, list.Count);
-
     public static bool Has<TEnum>(this TEnum symbol, TEnum flag)
         where TEnum : unmanaged, Enum
     {
@@ -793,10 +769,25 @@ public static partial class ExtensionMethods
         return (a & b) != 0;
     }
 
-    public static void EnsureCapacity<T>(this List<T> list, int capacity)
+    extension<T>(List<T> list)
     {
-        if (list.Capacity < capacity)
-            list.Capacity = capacity;
+        public void EnsureCapacity(int capacity)
+        {
+            if (list.Capacity < capacity)
+                list.Capacity = capacity;
+        }
+
+        public bool AddUnique(T value)
+        {
+            if (list.Contains(value))
+                return false;
+
+            list.Add(value);
+            return true;
+        }
+
+        public Span<T> AsSpan()
+            => Unsafe.As<List<T>, ListData<T>>(ref list).Items.AsSpan(0, list.Count);
     }
 
     public static void Deconstruct<TKey, TValue>(this KeyValuePair<TKey, TValue> pair, out TKey key, out TValue value)

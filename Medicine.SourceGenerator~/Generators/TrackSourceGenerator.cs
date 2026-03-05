@@ -132,6 +132,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         public EquatableArray<string> InterfacesWithAttribute;
         public Defer<TrackInterfaceRegistration[]>? TrackedInterfacesDeferred;
         public EquatableArray<string> UnmanagedDataFQNs;
+        public EquatableArray<string> BaseUnmanagedDataMemberNames;
         public EquatableArray<string> CustomStorageTypeFQNs;
         public EquatableArray<TrackingIdRegistration> TrackingIdRegistrations;
         public string? TypeFQN;
@@ -396,28 +397,68 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             return default;
 
         var knownSymbols = context.SemanticModel.Compilation.GetKnownSymbols();
+        string[] baseUnmanagedDataMemberNames;
 
         bool hasBaseDeclarationsWithAttribute = false;
         bool hasBaseCachedEnabledState = false;
         bool manualInheritanceMismatch = false;
-        for (var baseType = classSymbol.BaseType; baseType is not null; baseType = baseType.BaseType)
+        using (Scratch.RentA<List<string>>(out var baseUnmanagedDataMemberNamesList))
         {
-            var symbolForLookup = baseType is { IsGenericType: true, IsUnboundGenericType: false }
-                ? baseType.OriginalDefinition
-                : baseType;
+            for (var baseType = classSymbol.BaseType; baseType is not null; baseType = baseType.BaseType)
+            {
+                if (!attributeSettingsLookup.TryGetValue(baseType.OriginalDefinitionOrSelf, out var baseAttributeSettings))
+                    continue;
 
-            if (!attributeSettingsLookup.TryGetValue(symbolForLookup, out var baseAttributeSettings))
-                continue;
+                hasBaseDeclarationsWithAttribute = true;
 
-            hasBaseDeclarationsWithAttribute = true;
+                if (attributeName is TrackAttributeMetadataName)
+                {
+                    hasBaseCachedEnabledState |= baseAttributeSettings.CacheEnabledState;
+                    CollectClassUnmanagedAccessors(baseType);
+                }
 
-            if (attributeName is TrackAttributeMetadataName)
-                hasBaseCachedEnabledState |= baseAttributeSettings.CacheEnabledState;
+                manualInheritanceMismatch = baseAttributeSettings.Manual != attributeArguments.Manual;
 
-            manualInheritanceMismatch = baseAttributeSettings.Manual != attributeArguments.Manual;
+                if (manualInheritanceMismatch)
+                    break;
+            }
 
-            if (manualInheritanceMismatch)
-                break;
+            baseUnmanagedDataMemberNames = baseUnmanagedDataMemberNamesList.ToArray();
+
+            void CollectClassUnmanagedAccessors(INamedTypeSymbol trackedClass)
+            {
+                foreach (var interfaceType in trackedClass.Interfaces)
+                {
+                    TryAddUnmanagedAccessor(interfaceType);
+                    TryAddInheritedUnmanagedAccessors(interfaceType);
+                }
+
+                void TryAddUnmanagedAccessor(INamedTypeSymbol symbol)
+                {
+                    if (!symbol.OriginalDefinition.Is(knownSymbols.UnmanagedDataInterface))
+                        return;
+
+                    if (symbol.TypeArguments is not [{ FQN: { Length: > 0 } unmanagedDataFqn }])
+                        return;
+
+                    baseUnmanagedDataMemberNamesList.AddUnique(unmanagedDataFqn.GetTypeMemberName());
+                }
+
+                void TryAddInheritedUnmanagedAccessors(INamedTypeSymbol symbol)
+                {
+                    if (symbol.OriginalDefinitionOrSelf.HasAttribute(knownSymbols.TrackAttribute))
+                        return;
+
+                    foreach (var inheritedInterface in symbol.Interfaces)
+                    {
+                        if (inheritedInterface.OriginalDefinitionOrSelf.HasAttribute(knownSymbols.TrackAttribute))
+                            continue;
+
+                        TryAddUnmanagedAccessor(inheritedInterface);
+                        TryAddInheritedUnmanagedAccessors(inheritedInterface);
+                    }
+                }
+            }
         }
 
         if (attributeName is TrackAttributeMetadataName)
@@ -452,11 +493,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 if (inheritedInterfaces.Contains(interfaceSymbol))
                     continue;
 
-                var symbolForLookup = interfaceSymbol is { IsGenericType: true, IsUnboundGenericType: false }
-                    ? interfaceSymbol.OriginalDefinition
-                    : interfaceSymbol;
-
-                if (!attributeSettingsLookup.TryGetValue(symbolForLookup, out var interfaceAttributeSettings))
+                if (!attributeSettingsLookup.TryGetValue(interfaceSymbol.OriginalDefinitionOrSelf, out var interfaceAttributeSettings))
                     continue;
 
                 interfacesWithAttributeData.Add((interfaceSymbol, interfaceAttributeSettings));
@@ -538,15 +575,13 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 if (!TryGetTrackingIdType(type, lookupType, out var idTypeFQN, out bool registerLookupType))
                     return;
 
-                if (!trackingIdList.Contains(new(classTypeFQN, idTypeFQN)))
-                    trackingIdList.Add(new(classTypeFQN, idTypeFQN));
+                trackingIdList.AddUnique(new(classTypeFQN, idTypeFQN));
 
                 // omit direct IFindByID<T> implementations
                 if (!registerLookupType)
                     return;
 
-                if (!trackingIdList.Contains(new(lookupTypeFQN, idTypeFQN)))
-                    trackingIdList.Add(new(lookupTypeFQN, idTypeFQN));
+                trackingIdList.AddUnique(new(lookupTypeFQN, idTypeFQN));
             }
 
             bool TryGetTrackingIdType(INamedTypeSymbol type, INamedTypeSymbol lookupType, out string idTypeFQN, out bool registerLookupType)
@@ -617,11 +652,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             bool IsTrackedInterface(INamedTypeSymbol symbol)
             {
-                var symbolForLookup = symbol is { IsGenericType: true, IsUnboundGenericType: false }
-                    ? symbol.OriginalDefinition
-                    : symbol;
-
-                return symbolForLookup.HasAttribute(knownSymbols.TrackAttribute);
+                return symbol.OriginalDefinitionOrSelf.HasAttribute(knownSymbols.TrackAttribute);
             }
 
             void TryAddCustomStorage(INamedTypeSymbol symbol)
@@ -656,6 +687,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             Attribute = attributeName,
             AttributeSettings = attributeArguments,
             UnmanagedDataFQNs = classUnmanagedDataFQNs,
+            BaseUnmanagedDataMemberNames = baseUnmanagedDataMemberNames.ToArray(),
             CustomStorageTypeFQNs = classCustomStorageTypeFQNs,
             TrackingIdRegistrations = trackingIdRegistrations,
             TypeFQN = classSymbol.FQN,
@@ -694,11 +726,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             return default;
 
         var knownSymbols = context.SemanticModel.Compilation.GetKnownSymbols();
-        var interfaceSymbolForLookup = interfaceSymbol is { IsGenericType: true, IsUnboundGenericType: false }
-            ? interfaceSymbol.OriginalDefinition
-            : interfaceSymbol;
-
-        var interfaceAttributeSettings = attributeSettingsByType?.TryGetValue(interfaceSymbolForLookup, out var value) is true
+        var interfaceAttributeSettings = attributeSettingsByType?.TryGetValue(interfaceSymbol.OriginalDefinitionOrSelf, out var value) is true
             ? value
             : GetTrackAttributeSettings(attributeData, ct);
 
@@ -1134,6 +1162,10 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
             foreach (var (dataType, dataTypeDisplay, dataTypeMemberName) in unmanagedDataInfo)
             {
+                string localAccessorNew = input.BaseUnmanagedDataMemberNames.AsArray().Contains(dataTypeMemberName)
+                    ? "new "
+                    : "";
+
                 src.Linebreak();
                 src.Doc?.Write($"/// <summary>");
                 src.Doc?.Write($"/// Gets a reference to the <see cref=\"{dataTypeDisplay}\"/> data for the tracked type's currently active instance.");
@@ -1144,7 +1176,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src.Doc?.Write($"/// You can also access data statically via <see cref=\"{input.TypeDisplayName}.Unmanaged.{dataTypeMemberName}Array\"/>");
                 src.Doc?.Write($"/// and initialize/dispose it by overriding methods in <see cref=\"Medicine.IUnmanagedData{{T}}\"/>.");
 
-                src.Line.Write($"public ref {dataType} Local{dataTypeMemberName}");
+                src.Line.Write($"public {localAccessorNew}ref {dataType} Local{dataTypeMemberName}");
                 using (src.Braces)
                 {
                     src.Line.Write($"{Alias.Inline} get");
@@ -1172,7 +1204,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Doc?.Write($"/// A value of -1 indicates that the instance is not currently active/registered.");
             src.Doc?.Write($"/// </remarks>");
 
-            src.Line.Write($"public int InstanceIndex => {m}MedicineInternalInstanceIndex;");
+            src.Line.Write($"public {@new}int InstanceIndex => {m}MedicineInternalInstanceIndex;");
             src.Linebreak();
 
             src.Line.Write($"int {IInstanceIndexInterfaceFQN}.InstanceIndex");

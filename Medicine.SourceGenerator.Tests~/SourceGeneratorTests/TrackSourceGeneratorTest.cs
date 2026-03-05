@@ -18,6 +18,9 @@ static class TrackSourceGeneratorTest
     public static readonly DiagnosticTest GenericInheritanceRegistrationCase =
         new("Track generator emits new + base registration methods for generic inheritance", RunGenericInheritanceRegistration);
 
+    public static readonly DiagnosticTest InheritedMemberHidingCase =
+        new("Track generator emits new for inherited tracked API members", RunInheritedMemberHiding);
+
     public static readonly DiagnosticTest InterfaceHelperCase =
         new("Track generator emits helper API for tracked interfaces", RunInterfaceHelper);
 
@@ -313,6 +316,77 @@ sealed partial class GenericTrackedDerived : GenericTrackedBase<int> { }
         throw new InvalidOperationException(
             "Expected derived generic tracked type to emit new + base registration methods." + Environment.NewLine +
             $"Actual new OnEnable: {newOnEnableCount}, new OnDisable: {newOnDisableCount}, base OnEnable: {baseOnEnableCount}, base OnDisable: {baseOnDisableCount}."
+        );
+
+        static int CountOccurrences(string source, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while (true)
+            {
+                index = source.IndexOf(value, index, StringComparison.Ordinal);
+                if (index < 0)
+                    return count;
+
+                count++;
+                index += value.Length;
+            }
+        }
+    }
+
+    static void RunInheritedMemberHiding()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+using UnityEngine;
+
+struct InheritedMemberData
+{
+    public int Value;
+}
+
+[Track]
+abstract partial class BaseTrackedInheritedMembers : MonoBehaviour, IUnmanagedData<InheritedMemberData> { }
+
+[Track]
+sealed partial class DerivedTrackedInheritedMembers : BaseTrackedInheritedMembers, IUnmanagedData<InheritedMemberData> { }
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new TrackSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "tracked inheritance with inherited helper members should not throw"
+        );
+
+        int newInstanceIndexCount = 0;
+        int newLocalAccessorCount = 0;
+        foreach (var result in run.Results)
+        foreach (var generatedSource in result.GeneratedSources)
+        {
+            var text = generatedSource.SourceText.ToString();
+            newInstanceIndexCount += CountOccurrences(text, "public new int InstanceIndex =>");
+            newLocalAccessorCount += CountOccurrences(text, "public new ref global::InheritedMemberData LocalInheritedMemberData");
+        }
+
+        if (newInstanceIndexCount is 1 && newLocalAccessorCount is 1)
+            return;
+
+        throw new InvalidOperationException(
+            "Expected derived tracked type to emit new for inherited tracked API members." + Environment.NewLine +
+            $"Actual new InstanceIndex: {newInstanceIndexCount}, new Local accessor: {newLocalAccessorCount}."
         );
 
         static int CountOccurrences(string source, string value)
