@@ -69,6 +69,12 @@ static class Stubs
 
               public class MonoBehaviour : Behaviour { }
 
+              [AttributeUsage(AttributeTargets.Field)]
+              public sealed class SerializeField : Attribute { }
+
+              [AttributeUsage(AttributeTargets.Field)]
+              public sealed class HideInInspector : Attribute { }
+
               public class ScriptableObject : Object
               {
                   public static T CreateInstance<T>() where T : ScriptableObject, new()

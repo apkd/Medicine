@@ -418,7 +418,7 @@ public partial class UnionNestedTests
         };
 
     [Test]
-    public void Wrapper_IsGenerated_ForNestedHeaders_WithExplicitLayout()
+    public void Wrapper_IsGenerated_ForNestedHeaders()
     {
         var rootWrapperType = typeof(RootState).GetNestedType("Wrapper");
         Assert.That(rootWrapperType, Is.Not.Null);
@@ -427,10 +427,10 @@ public partial class UnionNestedTests
         Assert.That(rootLayout, Is.Not.Null);
         Assert.That(rootLayout!.Value, Is.EqualTo(LayoutKind.Explicit));
 
-        var expectedRootSize = Math.Max(
+        var expectedRootSize = RoundUpToUlongSize(Math.Max(
             UnsafeUtility.SizeOf<PlainState>(),
             Math.Max(UnsafeUtility.SizeOf<ChildAState>(), UnsafeUtility.SizeOf<ChildBState>())
-        );
+        ));
         Assert.That(rootLayout.Size, Is.EqualTo(expectedRootSize));
 
         var childWrapperType = typeof(ChildState).GetNestedType("Wrapper");
@@ -440,7 +440,7 @@ public partial class UnionNestedTests
         Assert.That(childLayout, Is.Not.Null);
         Assert.That(childLayout!.Value, Is.EqualTo(LayoutKind.Explicit));
 
-        var expectedChildSize = Math.Max(UnsafeUtility.SizeOf<ChildAState>(), UnsafeUtility.SizeOf<ChildBState>());
+        var expectedChildSize = RoundUpToUlongSize(Math.Max(UnsafeUtility.SizeOf<ChildAState>(), UnsafeUtility.SizeOf<ChildBState>()));
         Assert.That(childLayout.Size, Is.EqualTo(expectedChildSize));
     }
 
@@ -496,4 +496,9 @@ public partial class UnionNestedTests
         polymorphic.Run(10);
         Assert.That(wrapper.Header.Counter, Is.EqualTo(3));
     }
+
+    static int RoundUpToUlongSize(int sizeInBytes)
+        => sizeInBytes % sizeof(ulong) is 0
+            ? sizeInBytes
+            : sizeInBytes + sizeof(ulong) - sizeInBytes % sizeof(ulong);
 }

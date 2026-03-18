@@ -764,7 +764,12 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             if (derived.EstimatedSizeInBytes > wrapperSizeInBytes)
                 wrapperSizeInBytes = derived.EstimatedSizeInBytes;
 
-        bool emitWrapper = !input.IsGenericType && wrapperSizeInBytes > 0;
+        int wrapperUlongCount = wrapperSizeInBytes > 0
+            ? (wrapperSizeInBytes + sizeof(ulong) - 1) / sizeof(ulong)
+            : 0;
+
+        wrapperSizeInBytes = wrapperUlongCount * sizeof(ulong);
+        bool emitWrapper = !input.IsGenericType && wrapperUlongCount > 0;
 
         src.Line.Write(Alias.UsingInline);
         src.Line.Write($"using {m}UnsafeUtility = global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility;");
@@ -974,6 +979,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
             if (emitWrapper)
             {
+                src.Line.Write("[global::System.Serializable]");
                 src.Line.Write($"[global::System.Runtime.InteropServices.StructLayout(global::System.Runtime.InteropServices.LayoutKind.Explicit, Size = {wrapperSizeInBytes})]");
                 src.Doc?.Write($"/// <summary>");
                 src.Doc?.Write($"/// Mutable wrapper that exposes the header through the generated union interface.");
@@ -981,12 +987,24 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Line.Write("public struct Wrapper : " + input.InterfaceFQN);
                 using (src.Braces)
                 {
+                    src.Line.Write("[global::System.NonSerialized]");
                     src.Line.Write("[global::System.Runtime.InteropServices.FieldOffset(0)]");
                     src.Doc?.Write($"/// <summary>");
                     src.Doc?.Write($"/// Underlying union header value.");
                     src.Doc?.Write($"/// </summary>");
                     src.Line.Write($"public {input.BaseTypeFQN} Header;");
                     src.Linebreak();
+
+                    for (int i = 0; i < wrapperUlongCount; i++)
+                    {
+                        int offset = i * sizeof(ulong);
+
+                        src.Line.Write("[global::UnityEngine.SerializeField]");
+                        src.Line.Write("[global::UnityEngine.HideInInspector]");
+                        src.Line.Write($"[global::System.Runtime.InteropServices.FieldOffset({offset})]");
+                        src.Line.Write($"ulong bytes{offset:D4};");
+                        src.Linebreak();
+                    }
 
                     foreach (var headerField in headerFields)
                     {

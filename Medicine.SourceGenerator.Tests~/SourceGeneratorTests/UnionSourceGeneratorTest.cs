@@ -1,4 +1,6 @@
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 static class UnionSourceGeneratorTest
 {
@@ -16,6 +18,9 @@ static class UnionSourceGeneratorTest
 
     public static readonly DiagnosticTest WrapperCase =
         new("Union generator emits Wrapper for non-generic headers", RunWrapper);
+
+    public static readonly DiagnosticTest SerializedWrapperCase =
+        new("Union generator emits Unity-serializable Wrapper storage", RunSerializedWrapper);
 
     public static readonly DiagnosticTest GenericWrapperSkipCase =
         new("Union generator does not emit Wrapper for generic headers", RunGenericWrapperSkip);
@@ -368,6 +373,84 @@ static class Usage
             "Expected generated Wrapper to implement all interface members." + Environment.NewLine +
             $"Actual diagnostics:{Environment.NewLine}{RoslynHarness.FormatDiagnostics(wrapperInterfaceErrors)}"
         );
+    }
+
+    static void RunSerializedWrapper()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+
+[UnionHeader]
+public partial struct CompactUnion
+{
+    public interface Interface
+    {
+        byte Value { get; }
+    }
+
+    public TypeIDs TypeID;
+    public byte Payload;
+}
+
+[Union(1)]
+public partial struct CompactUnionA : CompactUnion.Interface
+{
+    public CompactUnion Header;
+    public byte Value => Header.Payload;
+}
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new UnionStructSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "serialized wrapper generation should not throw in generator"
+        );
+
+        var wrapperSource = run.Results
+            .SelectMany(static x => x.GeneratedSources)
+            .Select(static x => x.SourceText.ToString())
+            .FirstOrDefault(x =>
+                x.Contains("public struct Wrapper", StringComparison.Ordinal) &&
+                x.Contains("CompactUnion", StringComparison.Ordinal)
+            );
+
+        if (wrapperSource is null)
+            throw new InvalidOperationException("Expected generator to emit Wrapper source for CompactUnion.");
+
+        RequirePattern(@"\[global::System\.Serializable\]");
+        RequirePattern(@"StructLayout\(global::System\.Runtime\.InteropServices\.LayoutKind\.Explicit, Size = 8\)");
+        RequirePattern(@"\[global::System\.NonSerialized\]\s+\[global::System\.Runtime\.InteropServices\.FieldOffset\(0\)\][\s\S]*?public global::CompactUnion Header;");
+        RequirePattern(@"\[global::UnityEngine\.SerializeField\]\s+\[global::UnityEngine\.HideInInspector\]\s+\[global::System\.Runtime\.InteropServices\.FieldOffset\(0\)\]\s+ulong bytes0000;");
+
+        if (wrapperSource.Contains("serialized0008", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "Expected compact wrapper to round up to a single serialized ulong field." + Environment.NewLine +
+                wrapperSource
+            );
+
+        void RequirePattern(string pattern)
+        {
+            if (Regex.IsMatch(wrapperSource, pattern, RegexOptions.CultureInvariant))
+                return;
+
+            throw new InvalidOperationException(
+                $"Expected generated wrapper source to match regex: {pattern}" + Environment.NewLine +
+                wrapperSource
+            );
+        }
     }
 
     static void RunGenericWrapperSkip()

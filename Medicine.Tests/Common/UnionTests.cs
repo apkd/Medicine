@@ -91,6 +91,25 @@ public partial class UnionTests
         public TypeIDs TypeID;
     }
 
+    [UnionHeader]
+    public partial struct CompactShape
+    {
+        public interface Interface
+        {
+            byte Value { get; }
+        }
+
+        public TypeIDs TypeID;
+        public byte Payload;
+    }
+
+    [Union(1)]
+    public partial struct CompactShapeA : CompactShape.Interface
+    {
+        public CompactShape Header;
+        public byte Value => Header.Payload;
+    }
+
     [Test]
     public void GeneratedTypesAndMembersExist()
     {
@@ -251,7 +270,7 @@ public partial class UnionTests
     }
 
     [Test]
-    public void Wrapper_IsGenerated_WithExplicitLayout_AndForwardsCalls()
+    public void Wrapper_IsGenerated_AndForwardsCalls()
     {
         var wrapperType = typeof(Shape).GetNestedType("Wrapper");
         Assert.That(wrapperType, Is.Not.Null);
@@ -260,7 +279,7 @@ public partial class UnionTests
         Assert.That(structLayout, Is.Not.Null);
         Assert.That(structLayout!.Value, Is.EqualTo(LayoutKind.Explicit));
 
-        var expectedSize = Math.Max(UnsafeUtility.SizeOf<Triangle>(), UnsafeUtility.SizeOf<Square>());
+        var expectedSize = RoundUpToUlongSize(Math.Max(UnsafeUtility.SizeOf<Triangle>(), UnsafeUtility.SizeOf<Square>()));
         Assert.That(structLayout.Size, Is.EqualTo(expectedSize));
 
         var wrapper = new Shape.Wrapper
@@ -306,4 +325,24 @@ public partial class UnionTests
         Assert.That(perimeter, Is.EqualTo(9));
         Assert.That(polymorphic.GetResult(10).Value, Is.EqualTo(13));
     }
+
+    [Test]
+    public void Wrapper_Size_RoundsUp_ToUlongBoundary()
+    {
+        var wrapperType = typeof(CompactShape).GetNestedType("Wrapper");
+        Assert.That(wrapperType, Is.Not.Null);
+
+        var structLayout = wrapperType!.StructLayoutAttribute;
+        Assert.That(structLayout, Is.Not.Null);
+        Assert.That(structLayout!.Value, Is.EqualTo(LayoutKind.Explicit));
+
+        var rawSize = Math.Max(UnsafeUtility.SizeOf<CompactShape>(), UnsafeUtility.SizeOf<CompactShapeA>());
+        Assert.That(rawSize, Is.LessThan(sizeof(ulong)));
+        Assert.That(structLayout.Size, Is.EqualTo(sizeof(ulong)));
+    }
+
+    static int RoundUpToUlongSize(int sizeInBytes)
+        => sizeInBytes % sizeof(ulong) is 0
+            ? sizeInBytes
+            : sizeInBytes + sizeof(ulong) - sizeInBytes % sizeof(ulong);
 }
