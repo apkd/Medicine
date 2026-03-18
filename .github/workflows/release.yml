@@ -50,7 +50,7 @@ jobs:
             echo "sha=" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ steps.target.outputs.sha || steps.target.outputs.ref }}
           fetch-depth: 0
