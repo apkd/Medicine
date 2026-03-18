@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using JetBrains.Annotations;
 using Unity.Collections.LowLevel.Unsafe;
+using UnityEditor;
 using static System.ComponentModel.EditorBrowsableState;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 
@@ -45,15 +46,22 @@ namespace Medicine.Internal
         public static bool EditMode
             = true; // seems reasonable to assume that the editor starts in edit mode...
 
+        /// <inheritdoc cref="AssetDatabase.IsAssetImportWorkerProcess"/>
+        public static bool IsAssetImportWorkerProcess;
+
         [UnityEditor.InitializeOnLoadMethod]
         static void Initialize()
         {
             EditMode = !UnityEditor.EditorApplication.isPlayingOrWillChangePlaymode;
+            IsAssetImportWorkerProcess = UnityEditor.AssetDatabase.IsAssetImportWorkerProcess();
             UnityEditor.EditorApplication.playModeStateChanged
                 += state => EditMode = state is UnityEditor.PlayModeStateChange.EnteredEditMode;
         }
 #else
         public const bool EditMode
+            = false; // always false
+
+        public const bool IsAssetImportWorkerProcess
             = false; // always false
 #endif
 
@@ -142,6 +150,14 @@ namespace Medicine.Internal
         [MethodImpl(AggressiveInlining)]
         public static bool IsNativeObjectDead([NotNullWhen(false)] UnityEngine.Object? obj)
             => ReferenceEquals(obj, null) || UnsafeUtility.As<UnityEngine.Object, UnityObjectInternals>(ref obj).m_CachedPtr == 0;
+
+        [MethodImpl(AggressiveInlining)]
+        public static bool IsNativeObjectAlive([NotNullWhen(true)] object? obj)
+            => !ReferenceEquals(obj, null) && (obj is not UnityEngine.Object || UnsafeUtility.As<object, UnityObjectInternals>(ref obj).m_CachedPtr != 0);
+
+        [MethodImpl(AggressiveInlining)]
+        public static bool IsNativeObjectDead([NotNullWhen(false)] object? obj)
+            => ReferenceEquals(obj, null) || obj is UnityEngine.Object && UnsafeUtility.As<object, UnityObjectInternals>(ref obj).m_CachedPtr == 0;
 
         [MethodImpl(AggressiveInlining)]
         internal static bool Has(this SingletonAttribute.Strategy strategy, SingletonAttribute.Strategy flag)

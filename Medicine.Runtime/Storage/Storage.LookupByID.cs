@@ -46,9 +46,10 @@ namespace Medicine.Internal
             {
                 bool ok = Map.TryGetValue(id, out T? result);
 #if DEBUG
-                if (ok)
-                    if (!result.ID.Equals(id))
-                        LogIdMismatch(id, result);
+                if (!Utility.IsAssetImportWorkerProcess)
+                    if (ok)
+                        if (!result.ID.Equals(id))
+                            LogIdMismatch(id, result);
 #endif
                 return result;
             }
@@ -58,9 +59,10 @@ namespace Medicine.Internal
             {
                 bool ok = Map.TryGetValue(id, out result);
 #if DEBUG
-                if (ok)
-                    if (!result.ID.Equals(id))
-                        LogIdMismatch(id, result);
+                if (!Utility.IsAssetImportWorkerProcess)
+                    if (ok)
+                        if (!result.ID.Equals(id))
+                            LogIdMismatch(id, result);
 #endif
                 return ok;
             }
@@ -70,8 +72,10 @@ namespace Medicine.Internal
                 StaticInit.RunOnce();
                 var id = target.ID;
 #if DEBUG
-                if (Map.TryGetValue(id, out T? other))
-                    LogError($"Duplicate instance with ID {id} for {typeof(T).Name}: '{target}' vs '{other}'");
+                if (!Utility.IsAssetImportWorkerProcess)
+                    if (Map.TryGetValue(id, out T? other))
+                        if (Utility.IsNativeObjectAlive(other))
+                            LogError($"Duplicate instance with ID {id} for {typeof(T).Name}: '{target}' vs '{other}'");
 #endif
                 Map[id] = target;
             }
@@ -80,23 +84,26 @@ namespace Medicine.Internal
             {
                 var id = target.ID;
 #if DEBUG
-                if (!Map.TryGetValue(id, out var stored) || stored is null)
+                if (!Utility.IsAssetImportWorkerProcess)
                 {
-                    if (!Utility.EditMode)
-                        LogError($"Trying to unregister a missing instance: {typeof(T).Name} with ID {id} not found.");
-                }
-                else
-                {
-                    // detect that the target's ID changed after registration
-                    if (!stored.ID.Equals(id))
-                        LogIdMismatch(id, stored);
-
-                    // detect that a different instance is stored under the target's ID
-                    if (!ReferenceEquals(stored, target))
+                    if (!Map.TryGetValue(id, out var stored) || Utility.IsNativeObjectDead(stored))
                     {
-                        var type = typeof(T).Name;
                         if (!Utility.EditMode)
-                            LogError($"Instance mismatch for {type} with ID {id}: map has '{stored}', tried to unregister '{target}'.");
+                            LogError($"Trying to unregister a missing instance: {typeof(T).Name} with ID {id} not found.");
+                    }
+                    else
+                    {
+                        // detect that the target's ID changed after registration
+                        if (!stored.ID.Equals(id))
+                            LogIdMismatch(id, stored);
+
+                        // detect that a different instance is stored under the target's ID
+                        if (!ReferenceEquals(stored, target))
+                        {
+                            var type = typeof(T).Name;
+                            if (!Utility.EditMode)
+                                LogError($"Instance mismatch for {type} with ID {id}: map has '{stored}', tried to unregister '{target}'.");
+                        }
                     }
                 }
 #endif
