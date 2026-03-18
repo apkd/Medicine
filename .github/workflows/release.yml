@@ -257,11 +257,13 @@ jobs:
               new_prefix="✨ "
             fi
           
-            info="$(gh api repos/$GITHUB_REPOSITORY/commits/$sha --jq '{email: .commit.author.email, login: (.author.login // .committer.login)}')"
+            info="$(gh api repos/$GITHUB_REPOSITORY/commits/$sha --jq '{email: .commit.author.email, login: (.author.login // .committer.login), profile: (.author.html_url // .committer.html_url), avatar: (.author.avatar_url // .committer.avatar_url)}')"
             login="$(jq -r '.login // empty' <<<"$info")"
+            profile="$(jq -r '.profile // empty' <<<"$info")"
+            avatar_url="$(jq -r '.avatar // empty' <<<"$info")"
           
-            if [[ -n "$login" && "$login" != "null" ]]; then
-              avatar="https://wsrv.nl/?url=github.com/${login}.png&w=48&h=48&mask=circle&fit=cover&maxage=1w"
+            if [[ -n "$avatar_url" && "$avatar_url" != "null" ]]; then
+              avatar="$avatar_url"
             else
               email_lookup="$(jq -r '.email // empty' <<<"$info" | tr '[:upper:]' '[:lower:]')"
               if [[ -n "$email_lookup" ]]; then
@@ -276,8 +278,8 @@ jobs:
             author_text="$author"
             author_text="${author_text//|/\\|}"
           
-            if [[ -n "$login" && "$login" != "null" ]]; then
-              author_cell="<a href=\"https://github.com/$login\"><img src=\"$avatar\" width=\"24\" height=\"24\" /></a> @$login"
+            if [[ -n "$login" && "$login" != "null" && -n "$profile" && "$profile" != "null" ]]; then
+              author_cell="<a href=\"$profile\"><img src=\"$avatar\" width=\"24\" height=\"24\" /></a> @$login"
             else
               author_cell="<img src=\"$avatar\" width=\"24\" height=\"24\" /> $author_text"
             fi
