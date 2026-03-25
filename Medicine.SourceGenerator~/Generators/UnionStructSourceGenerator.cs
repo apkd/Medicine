@@ -774,6 +774,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         src.Line.Write(Alias.UsingInline);
         src.Line.Write($"using {m}UnsafeUtility = global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility;");
         src.Line.Write($"using {m}BurstDiscard = global::Unity.Burst.BurstDiscardAttribute;");
+        src.Line.Write($"using {m}IgnoreWarning = global::Unity.Burst.CompilerServices.IgnoreWarningAttribute;");
         src.Linebreak();
 
         // 1. derived structs generated members
@@ -1354,6 +1355,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Doc?.Write($"/// <summary>");
                 src.Doc?.Write($"/// Reinterprets the union header as <see cref=\"{derived.FQN}\"/>.");
                 src.Doc?.Write($"/// </summary>");
+                src.Line.Write($"[{m}IgnoreWarning(1371)]");
                 src.Line.Write($"public static unsafe ref {derived.FQN} As{derived.Name}(this ref {input.BaseTypeFQN} self)");
                 using (src.Braces)
                 {
@@ -1374,6 +1376,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Doc?.Write($"/// <summary>");
                 src.Doc?.Write($"/// Reinterprets the wrapper as <see cref=\"{derived.FQN}\"/>.");
                 src.Doc?.Write($"/// </summary>");
+                src.Line.Write($"[{m}IgnoreWarning(1371)]");
                 src.Line.Write($"public static unsafe ref {derived.FQN} As{derived.Name}(this ref {input.BaseTypeFQN}.Wrapper self)");
                 using (src.Braces)
                 {
