@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -17,6 +19,9 @@ static class UnmanagedAccessSourceGeneratorTest
 
     public static readonly DiagnosticTest RangeIndexerCase =
         new("UnmanagedAccess generator emits AccessArray range indexers", RunRangeIndexerContract);
+
+    public static readonly DiagnosticTest ProjectionCase =
+        new("UnmanagedAccess generator projects nested access types and arrays", RunProjectionContract);
 
     static void Run()
         => SourceGeneratorTester.AssertGeneratesMoreSourcesThanBaseline(
@@ -206,6 +211,98 @@ sealed partial class UnmanagedAccessRangeContractComponent : MonoBehaviour
                 count++;
                 index += value.Length;
             }
+        }
+    }
+
+    static void RunProjectionContract()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using System;
+using Medicine;
+
+[UnmanagedAccess]
+partial class Inner
+{
+    public int Value;
+}
+
+[UnmanagedAccess]
+partial class Outer
+{
+    public Inner Child;
+    public int[] Values;
+    public Inner[] Children;
+    public string[] Names;
+    public Inner AutoChild { get; set; } = new();
+    public int[] AutoValues { get; set; } = Array.Empty<int>();
+    public Inner[] AutoChildren { get; set; } = Array.Empty<Inner>();
+}
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new UnmanagedAccessSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "projection codegen should not throw in generator"
+        );
+
+        var generatedText = string.Join(
+            Environment.NewLine,
+            run.Results
+                .SelectMany(static x => x.GeneratedSources)
+                .Select(static x => x.SourceText.ToString())
+        );
+
+        AssertContains("public global::Inner.Unmanaged.AccessRW Child");
+        AssertContains("public global::Unity.Collections.NativeArray<int> Values");
+        AssertContains("public global::Inner.Unmanaged.AccessArray Children");
+        AssertContainsAny(
+            "public ref Medicine.UnmanagedRef<global::System.String[]> Names",
+            "public ref Medicine.UnmanagedRef<string[]> Names"
+        );
+        AssertContains("public global::Inner.Unmanaged.AccessRW AutoChild");
+        AssertContains("public global::Unity.Collections.NativeArray<int> AutoValues");
+        AssertContains("public global::Inner.Unmanaged.AccessArray AutoChildren");
+
+        AssertContains("public global::Inner.Unmanaged.AccessRO Child");
+        AssertContains("public global::Unity.Collections.NativeArray<int>.ReadOnly Values");
+        AssertContains("public global::Inner.Unmanaged.AccessArray.ReadOnly Children");
+        AssertContains("public global::Inner.Unmanaged.AccessRO AutoChild");
+        AssertContains("public global::Unity.Collections.NativeArray<int>.ReadOnly AutoValues");
+        AssertContains("public global::Inner.Unmanaged.AccessArray.ReadOnly AutoChildren");
+
+        static void ThrowMissing(string expected)
+            => throw new InvalidOperationException($"Expected generated source to contain: {expected}");
+
+        static void ThrowMissingAny(string first, string second)
+            => throw new InvalidOperationException($"Expected generated source to contain one of: {first} || {second}");
+
+        void AssertContains(string expected)
+        {
+            if (generatedText.Contains(expected, StringComparison.Ordinal))
+                return;
+
+            ThrowMissing(expected);
+        }
+
+        void AssertContainsAny(string first, string second)
+        {
+            if (generatedText.Contains(first, StringComparison.Ordinal) || generatedText.Contains(second, StringComparison.Ordinal))
+                return;
+
+            ThrowMissingAny(first, second);
         }
     }
 

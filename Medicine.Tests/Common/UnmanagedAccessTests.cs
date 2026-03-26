@@ -7,6 +7,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using Medicine.Internal;
+using Unity.Collections;
 using static System.Reflection.BindingFlags;
 
 #pragma warning disable CS0414 // Field is assigned but its value is never used
@@ -95,7 +96,7 @@ public partial class UnmanagedAccessTests
     }
 
     [Test]
-    public void UnmanagedAccess_ReferenceFields_StoredAsUnmanagedRef()
+    public void UnmanagedAccess_ReferenceFields_ProjectNestedAccess()
     {
         var other = new BasicFields { IntField = 55 };
         var obj = new ReferenceFields { Other = other };
@@ -103,13 +104,120 @@ public partial class UnmanagedAccessTests
         UnmanagedRef<ReferenceFields> unmanagedRef = obj;
         var access = unmanagedRef.AccessRW();
 
-        Assert.That(access.Other.Ptr, Is.EqualTo(((UnmanagedRef<BasicFields>)other).Ptr));
-        Assert.That(access.Other.AccessRO().IntField, Is.EqualTo(55));
+        Assert.That(access.Other.IntField, Is.EqualTo(55));
 
-        var newOther = new BasicFields { IntField = 99 };
-        access.Other = newOther;
+        access.Other.IntField = 99;
 
-        Assert.That(obj.Other, Is.SameAs(newOther));
+        Assert.That(other.IntField, Is.EqualTo(99));
+        Assert.That(obj.Other.IntField, Is.EqualTo(99));
+    }
+
+    [UnmanagedAccess]
+    public partial class UnmanagedArrayFields
+    {
+        public int[] Values = new[] { 1, 2, 3 };
+    }
+
+    [Test]
+    public void UnmanagedAccess_UnmanagedArrayFields_ProjectNativeArray()
+    {
+        var obj = new UnmanagedArrayFields();
+        UnmanagedRef<UnmanagedArrayFields> unmanagedRef = obj;
+        var access = unmanagedRef.AccessRW();
+
+        Assert.That(access.Values.Length, Is.EqualTo(3));
+        Assert.That(access.Values[0], Is.EqualTo(1));
+        Assert.That(access.Values[2], Is.EqualTo(3));
+
+        var values = access.Values;
+        values[1] = 42;
+
+        Assert.That(obj.Values[1], Is.EqualTo(42));
+    }
+
+    [Test]
+    public void UnmanagedAccess_UnmanagedArrayFields_AccessRO_UsesReadOnlyView()
+    {
+        var property
+            = typeof(UnmanagedArrayFields.Unmanaged.AccessRO)
+                .GetProperty(nameof(UnmanagedArrayFields.Values));
+
+        Assert.That(property, Is.Not.Null);
+        Assert.That(property!.PropertyType, Is.EqualTo(typeof(NativeArray<int>.ReadOnly)));
+
+        var obj = new UnmanagedArrayFields();
+        var access = ((UnmanagedRef<UnmanagedArrayFields>)obj).AccessRO();
+
+        Assert.That(access.Values.Length, Is.EqualTo(3));
+        Assert.That(access.Values[1], Is.EqualTo(2));
+    }
+
+    [UnmanagedAccess]
+    public partial class AccessedArrayFields
+    {
+        public BasicFields[] Others = Array.Empty<BasicFields>();
+    }
+
+    [Test]
+    public void UnmanagedAccess_AccessedArrayFields_ProjectAccessArray()
+    {
+        var a = new BasicFields { IntField = 7 };
+        var b = new BasicFields { IntField = 9 };
+        var obj = new AccessedArrayFields { Others = new[] { a, b } };
+        UnmanagedRef<AccessedArrayFields> unmanagedRef = obj;
+        var access = unmanagedRef.AccessRW();
+
+        Assert.That(access.Others.Length, Is.EqualTo(2));
+        Assert.That(access.Others[0].IntField, Is.EqualTo(7));
+        Assert.That(access.Others[1].IntField, Is.EqualTo(9));
+
+        access.Others[1].IntField = 33;
+
+        Assert.That(b.IntField, Is.EqualTo(33));
+        Assert.That(obj.Others[1].IntField, Is.EqualTo(33));
+    }
+
+    [Test]
+    public void UnmanagedAccess_AccessedArrayFields_AccessRO_UsesReadOnlyAccessArray()
+    {
+        var property
+            = typeof(AccessedArrayFields.Unmanaged.AccessRO)
+                .GetProperty(nameof(AccessedArrayFields.Others));
+
+        Assert.That(property, Is.Not.Null);
+        Assert.That(property!.PropertyType, Is.EqualTo(typeof(BasicFields.Unmanaged.AccessArray.ReadOnly)));
+
+        var a = new BasicFields { IntField = 2 };
+        var b = new BasicFields { IntField = 4 };
+        var obj = new AccessedArrayFields { Others = new[] { a, b } };
+        var access = ((UnmanagedRef<AccessedArrayFields>)obj).AccessRO();
+
+        int sum = 0;
+        foreach (var other in access.Others)
+            sum += other.IntField;
+
+        Assert.That(sum, Is.EqualTo(6));
+    }
+
+    [UnmanagedAccess]
+    public partial class NullArrayFields
+    {
+        public int[] Values;
+        public BasicFields[] Others;
+    }
+
+    [Test]
+    public void UnmanagedAccess_NullArrayFields_ReturnDefaultViews()
+    {
+        var obj = new NullArrayFields();
+        UnmanagedRef<NullArrayFields> unmanagedRef = obj;
+        var accessRW = unmanagedRef.AccessRW();
+        var accessRO = unmanagedRef.AccessRO();
+
+        Assert.That(accessRW.Values.IsCreated, Is.False);
+        Assert.That(accessRO.Values.Length, Is.EqualTo(0));
+        Assert.That(accessRW.Others.Length, Is.EqualTo(0));
+        Assert.That(accessRO.Others.Length, Is.EqualTo(0));
     }
 
     [UnmanagedAccess]
@@ -340,6 +448,8 @@ public partial class UnmanagedAccessTests
     {
         public int AutoInt { get; set; } = 7;
         public BasicFields AutoRef { get; set; } = new() { IntField = 55 };
+        public int[] AutoValues { get; set; } = new[] { 4, 5, 6 };
+        public BasicFields[] AutoRefs { get; set; } = new[] { new BasicFields { IntField = 12 } };
         public int ManualField = 3;
     }
 
@@ -347,19 +457,34 @@ public partial class UnmanagedAccessTests
     public void UnmanagedAccess_AutoProperties_ReadWrite()
     {
         var other = new BasicFields { IntField = 9 };
-        var obj = new AutoPropertyFields { AutoInt = 5, AutoRef = other };
+        var otherArrayA = new BasicFields { IntField = 11 };
+        var otherArrayB = new BasicFields { IntField = 13 };
+        var obj = new AutoPropertyFields
+        {
+            AutoInt = 5,
+            AutoRef = other,
+            AutoValues = new[] { 8, 9, 10 },
+            AutoRefs = new[] { otherArrayA, otherArrayB },
+        };
         UnmanagedRef<AutoPropertyFields> unmanagedRef = obj;
         var access = unmanagedRef.AccessRW();
 
         Assert.That(access.AutoInt, Is.EqualTo(5));
-        Assert.That(access.AutoRef.AccessRO().IntField, Is.EqualTo(9));
+        Assert.That(access.AutoRef.IntField, Is.EqualTo(9));
+        Assert.That(access.AutoValues[1], Is.EqualTo(9));
+        Assert.That(access.AutoRefs[0].IntField, Is.EqualTo(11));
+        Assert.That(access.AutoRefs[1].IntField, Is.EqualTo(13));
 
         access.AutoInt = 42;
-        var newOther = new BasicFields { IntField = 99 };
-        access.AutoRef = newOther;
+        access.AutoRef.IntField = 99;
+        var autoValues = access.AutoValues;
+        autoValues[2] = 77;
+        access.AutoRefs[1].IntField = 21;
 
         Assert.That(obj.AutoInt, Is.EqualTo(42));
-        Assert.That(obj.AutoRef, Is.SameAs(newOther));
+        Assert.That(obj.AutoRef.IntField, Is.EqualTo(99));
+        Assert.That(obj.AutoValues[2], Is.EqualTo(77));
+        Assert.That(obj.AutoRefs[1].IntField, Is.EqualTo(21));
     }
 
     [Test]

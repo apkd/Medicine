@@ -3,6 +3,7 @@ using System.Text;
 using static System.StringComparison;
 
 var markdownReportPath = GetOptionalArg(args, "--markdown-report");
+var compact = HasFlag(args, "--compact");
 var failed = 0;
 var startedAt = Stopwatch.GetTimestamp();
 
@@ -73,6 +74,7 @@ DiagnosticTest[] cases =
     UnionNestedSourceGeneratorTest.HeaderFieldForwardingCase,
     UnmanagedAccessSourceGeneratorTest.Case,
     UnmanagedAccessSourceGeneratorTest.RangeIndexerCase,
+    UnmanagedAccessSourceGeneratorTest.ProjectionCase,
     UnmanagedAccessSourceGeneratorTest.CacheEnabledStateInheritanceCase,
     UnmanagedAccessSourceGeneratorTest.DirectIInstanceIndexCase,
     UnmanagedAccessSourceGeneratorTest.ImplicitIInstanceIndexCase,
@@ -91,7 +93,9 @@ foreach (var testCase in cases)
     {
         testCase.Run();
         var duration = Stopwatch.GetElapsedTime(testStartedAt);
-        Console.WriteLine($"[PASS] {testCase.Name} ({FormatDuration(duration)})");
+        if (ShouldPrintPassingTest(compact, duration))
+            Console.WriteLine($"[PASS] {testCase.Name} ({FormatDuration(duration)})");
+
         testResults.Add(new(testCase.Name, Passed: true, duration, ""));
     }
     catch (Exception ex)
@@ -136,6 +140,20 @@ static string? GetOptionalArg(string[] args, string name)
 
     return null;
 }
+
+static bool HasFlag(string[] args, string name)
+{
+    foreach (var arg in args)
+    {
+        if (arg.Equals(name, Ordinal))
+            return true;
+    }
+
+    return false;
+}
+
+static bool ShouldPrintPassingTest(bool compact, TimeSpan duration)
+    => !compact || duration.TotalMilliseconds > 1000;
 
 static string BuildMarkdownReport(TestResult[] results, TimeSpan totalDuration)
 {

@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using JetBrains.Annotations;
+using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEditor;
 using static System.ComponentModel.EditorBrowsableState;
@@ -96,6 +97,22 @@ namespace Medicine.Internal
             => list.AsUnsafeList<T, T>();
 
         [MethodImpl(AggressiveInlining)]
+        public static unsafe UnsafeList<TTo> AsUnsafeList<TFrom, TTo>(TFrom[]? array)
+            where TTo : unmanaged
+        {
+            if (array is not { Length: > 0 })
+                return default;
+
+            var arrayData = UnsafeUtility.As<TFrom[], ArrayView<TTo>>(ref array);
+            return new((TTo*)UnsafeUtility.AddressOf(ref arrayData.Elements), array.Length);
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public static UnsafeList<T> AsUnsafeList<T>(T[]? array)
+            where T : unmanaged
+            => AsUnsafeList<T, T>(array);
+
+        [MethodImpl(AggressiveInlining)]
         internal static Span<T> AsSpanUnsafe<T>(this T[]? array, int start = 0, int length = int.MinValue)
         {
             if (array is not { Length: > 0 })
@@ -116,6 +133,33 @@ namespace Medicine.Internal
 
             ref var first = ref UnsafeUtility.As<T[], ArrayView<T>>(ref array).Elements;
             return MemoryMarshal.CreateSpan(ref first, array.Length)[start..(start + length)];
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public static unsafe NativeArray<T> AsNativeArray<T>(T[]? array)
+            where T : unmanaged
+        {
+            if (array is not { Length: > 0 })
+                return default;
+
+            var arrayData = UnsafeUtility.As<T[], ArrayView<T>>(ref array);
+            var nativeArray = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<T>(
+                dataPointer: UnsafeUtility.AddressOf(ref arrayData.Elements),
+                length: array.Length,
+                allocator: Allocator.None
+            );
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref nativeArray, AtomicSafetyHandle.GetTempMemoryHandle());
+#endif
+            return nativeArray;
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public static NativeArray<T>.ReadOnly AsNativeArrayRO<T>(T[]? array)
+            where T : unmanaged
+        {
+            var nativeArray = AsNativeArray(array);
+            return nativeArray.AsReadOnly();
         }
 
         public static ushort GetFieldOffset(Type type, string fieldName, BindingFlags flags)
