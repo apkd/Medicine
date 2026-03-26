@@ -236,7 +236,7 @@ jobs:
           |---|---|---|---|
           MD
           
-          limit=12
+          limit=16
           count=0
           
           mapfile -t rel_tags < <(git for-each-ref --sort=creatordate --format='%(refname:short)' refs/tags | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
@@ -259,6 +259,7 @@ jobs:
           
             info="$(gh api repos/$GITHUB_REPOSITORY/commits/$sha --jq '{email: .commit.author.email, login: (.author.login // .committer.login), profile: (.author.html_url // .committer.html_url), avatar: (.author.avatar_url // .committer.avatar_url)}')"
             login="$(jq -r '.login // empty' <<<"$info")"
+            login_display="${login%\[bot\]}"
             profile="$(jq -r '.profile // empty' <<<"$info")"
             avatar_url="$(jq -r '.avatar // empty' <<<"$info")"
           
@@ -277,9 +278,10 @@ jobs:
           
             author_text="$author"
             author_text="${author_text//|/\\|}"
+            author_text="${author_text%\[bot\]}"
           
             if [[ -n "$login" && "$login" != "null" && -n "$profile" && "$profile" != "null" ]]; then
-              author_cell="<a href=\"$profile\"><img src=\"$avatar\" width=\"24\" height=\"24\" /></a> @$login"
+              author_cell="<a href=\"$profile\"><img src=\"$avatar\" width=\"24\" height=\"24\" /></a> @$login_display"
             else
               author_cell="<img src=\"$avatar\" width=\"24\" height=\"24\" /> $author_text"
             fi
@@ -302,8 +304,8 @@ jobs:
             fi
           done
           
-          printf '| | | [View diff](https://github.com/%s/compare/v%s...latest) | |\n' "$GITHUB_REPOSITORY" "${{ steps.ver.outputs.old }}" >> "$notes"
-          printf '| | | [More recent commits](https://github.com/%s/commits/master/) | |\n' "$GITHUB_REPOSITORY" >> "$notes"
+          printf '\n#### [View diff since previous tagged release](https://github.com/%s/compare/v%s...latest)\n' "$GITHUB_REPOSITORY" "${{ steps.ver.outputs.old }}" >> "$notes"
+          printf '#### [More recent commits](https://github.com/%s/commits/master/)\n' "$GITHUB_REPOSITORY" >> "$notes"
           
           git tag -fa "$tag" "$upper" -m "Latest rolling release"
           git push -f origin "refs/tags/$tag"
