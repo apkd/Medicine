@@ -75,9 +75,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -93,7 +93,7 @@ jobs:
           echo "CACHE_REF=ghcr.io/$REPO_LC/unity-ci:cache-${{ matrix.UNITY_VERSION }}" >> "$GITHUB_ENV"
           echo "unity_v_mm=$(printf '%s' '${{ matrix.UNITY_VERSION }}' | cut -d. -f1-2)" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         env:
           DOCKER_BUILD_SUMMARY: false
         with:
