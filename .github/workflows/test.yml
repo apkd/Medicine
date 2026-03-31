@@ -182,7 +182,7 @@ jobs:
 #              -username "$(cat /run/secrets/unity_user)" \
 #              -password "$(cat /run/secrets/unity_password)"
 
-      - uses: dorny/test-reporter@v2
+      - uses: dorny/test-reporter@v3
         if: ${{ !cancelled() }}
         with:
           name: Unity Test Results

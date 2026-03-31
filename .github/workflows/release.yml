@@ -51,72 +51,62 @@ jobs:
           fi
 
       - uses: actions/checkout@v6
+        name: actions/checkout@v6
         with:
           ref: ${{ steps.target.outputs.sha || steps.target.outputs.ref }}
           fetch-depth: 0
 
-      - name: Establish baseline
-        id: base
-        shell: bash
-        run: |
-          if [[ -n "${{ steps.target.outputs.sha }}" ]]; then
-            echo "sha=${{ steps.target.outputs.sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          fi
-          echo "ref=${{ steps.target.outputs.ref }}" >> "$GITHUB_OUTPUT"
-
-      - name: Cancel if branch advanced
+      - name: Verify release target
         id: guard
         shell: bash
         run: |
-          ref="${{ steps.base.outputs.ref }}"
+          ref="${{ steps.target.outputs.ref }}"
+          if [[ -n "${{ steps.target.outputs.sha }}" ]]; then
+            base_sha="${{ steps.target.outputs.sha }}"
+          else
+            base_sha="$(git rev-parse HEAD)"
+          fi
+
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "sha=$base_sha" >> "$GITHUB_OUTPUT"
+
           git fetch origin "$ref" --quiet
           remote_sha="$(git rev-parse "origin/$ref")"
-          base_sha="${{ steps.base.outputs.sha }}"
           if [[ "$remote_sha" != "$base_sha" ]]; then
             echo "::notice::Remote branch '$ref' advanced from $base_sha to $remote_sha; cancelling release."
             echo "changed=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Release skipped"
+              echo
+              echo "The branch no longer points to the tested commit."
+              echo
+              echo "- Ref: \`$ref\`"
+              echo "- Tested: \`$base_sha\`"
+              echo "- Current tip: \`$remote_sha\`"
+            } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Skipping release due to new commits
-        if: steps.guard.outputs.changed == 'true'
-        shell: bash
-        run: |
-          {
-            echo "### Release skipped"
-            echo
-            echo "The branch has advanced after the workflow was started."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Get previous tag
+      - name: Prepare version bump
         if: steps.guard.outputs.changed == 'false'
-        id: prev
-        shell: bash
-        run: |
-          prev_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
-          echo "tag=$prev_tag" >> "$GITHUB_OUTPUT"
-
-      - name: Read bump level
-        if: steps.guard.outputs.changed == 'false'
-        id: bump
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "level=${{ inputs.bump_level }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "level=patch" >> "$GITHUB_OUTPUT"
-          fi
-          echo "Selected bump level: ${{ steps.bump.outputs.level }}"
-
-      - name: Bump package.json
-        if: steps.guard.outputs.changed == 'false'
-        id: ver
+        id: prepare
         shell: bash
         run: |
           set -euo pipefail
+
+          prev_tag="$(
+            git for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags |
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
+            head -n 1 ||
+            true
+          )"
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            level="${{ inputs.bump_level }}"
+          else
+            level="patch"
+          fi
 
           if [ ! -f "$PACKAGE_JSON" ]; then
             echo "Package file not found at: $PACKAGE_JSON"
@@ -131,7 +121,6 @@ jobs:
 
           IFS='.' read -r major minor patch <<<"$current"
 
-          level="${{ steps.bump.outputs.level }}"
           case "$level" in
             major)
               major=$((major+1)); minor=0; patch=0
@@ -159,11 +148,13 @@ jobs:
           jq --arg v "$new" '.version=$v' "$PACKAGE_JSON" > "$tmp"
           mv "$tmp" "$PACKAGE_JSON"
 
+          echo "tag=$prev_tag" >> "$GITHUB_OUTPUT"
+          echo "level=$level" >> "$GITHUB_OUTPUT"
           echo "old=$current" >> "$GITHUB_OUTPUT"
           echo "new=$new" >> "$GITHUB_OUTPUT"
 
       - name: Commit and tag
-        if: steps.guard.outputs.changed == 'false' && steps.ver.outputs.new != ''
+        if: steps.guard.outputs.changed == 'false' && steps.prepare.outputs.new != ''
         id: push
         shell: bash
         run: |
@@ -172,10 +163,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$PACKAGE_JSON"
-          git commit -m "${{ github.event.repository.name }} ${{ steps.ver.outputs.new }} [release] [skip ci]"
+          git commit -m "${{ github.event.repository.name }} ${{ steps.prepare.outputs.new }} [release] [skip ci]"
 
-          ref="${{ steps.base.outputs.ref }}"
-          base_sha="${{ steps.base.outputs.sha }}"
+          ref="${{ steps.guard.outputs.ref }}"
+          base_sha="${{ steps.guard.outputs.sha }}"
           git fetch origin "$ref" --quiet
           remote_sha="$(git rev-parse "origin/$ref")"
 
@@ -189,13 +180,13 @@ jobs:
             exit 0
           fi
 
-          git tag "v${{ steps.ver.outputs.new }}"
-          git push origin "v${{ steps.ver.outputs.new }}"
+          git tag "v${{ steps.prepare.outputs.new }}"
+          git push origin "v${{ steps.prepare.outputs.new }}"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Create or update latest release
-        if: steps.ver.outputs.new != '' && steps.push.outputs.pushed == 'true'
+      - name: Create or update rolling release
+        if: steps.prepare.outputs.new != '' && steps.push.outputs.pushed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -205,7 +196,7 @@ jobs:
           upper="${{ steps.push.outputs.sha }}"
           
           declare -A since=()
-          prev_tag="${{ steps.prev.outputs.tag }}"
+          prev_tag="${{ steps.prepare.outputs.tag }}"
           if [[ -n "${prev_tag:-}" ]]; then
             while read -r s; do
               [[ -n "$s" ]] && since["$s"]=1
@@ -304,26 +295,26 @@ jobs:
             fi
           done
           
-          printf '\n#### [View diff since previous tagged release](https://github.com/%s/compare/v%s...latest)\n' "$GITHUB_REPOSITORY" "${{ steps.ver.outputs.old }}" >> "$notes"
+          printf '\n#### [View diff since previous tagged release](https://github.com/%s/compare/v%s...latest)\n' "$GITHUB_REPOSITORY" "${{ steps.prepare.outputs.old }}" >> "$notes"
           printf '#### [More recent commits](https://github.com/%s/commits/master/)\n' "$GITHUB_REPOSITORY" >> "$notes"
           
           git tag -fa "$tag" "$upper" -m "Latest rolling release"
           git push -f origin "refs/tags/$tag"
           
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release edit "$tag" --notes-file "$notes" --title "v${{ steps.ver.outputs.new }} ($date_utc)" --latest
+            gh release edit "$tag" --notes-file "$notes" --title "v${{ steps.prepare.outputs.new }} ($date_utc)" --latest
           else
-            gh release create "$tag" --title "v${{ steps.ver.outputs.new }} ($date_utc)" --notes-file "$notes" --target "$upper" --latest
+            gh release create "$tag" --title "v${{ steps.prepare.outputs.new }} ($date_utc)" --notes-file "$notes" --target "$upper" --latest
           fi
           
           {
-            echo "## ${{ steps.ver.outputs.new }}"
+            echo "## ${{ steps.prepare.outputs.new }}"
             echo
             cat "$notes"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Update latest branch
-        if: steps.ver.outputs.new != '' && steps.push.outputs.pushed == 'true'
+      - name: Update release branch
+        if: steps.prepare.outputs.new != '' && steps.push.outputs.pushed == 'true'
         shell: bash
         run: |
           set -euo pipefail
