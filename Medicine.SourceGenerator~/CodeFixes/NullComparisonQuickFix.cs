@@ -32,10 +32,10 @@ public sealed class NullComparisonQuickFix : CodeFixProvider
         if (targetExpression is null)
             return;
 
-        var methodName = diagnostic.Id == NullComparisonAnalyzer.MED026.Id ? "IsNull" : "IsNotNull";
+        var methodName = diagnostic.Id == NullComparisonAnalyzer.MED026.Id ? "IsInvalid" : "IsValid";
         var title = diagnostic.Id == NullComparisonAnalyzer.MED026.Id
-            ? "Use faster IsNull extension method"
-            : "Use faster IsNotNull extension method";
+            ? "Use faster IsInvalid extension method"
+            : "Use faster IsValid extension method";
 
         context.RegisterCodeFix(
             CodeAction.Create(

@@ -11,8 +11,8 @@ public sealed class NullComparisonAnalyzer : DiagnosticAnalyzer
 {
     public static readonly DiagnosticDescriptor MED026 = new(
         id: nameof(MED026),
-        title: "Use faster IsNull extension method",
-        messageFormat: "Use faster IsNull extension method",
+        title: "Use faster IsInvalid extension method",
+        messageFormat: "Use faster IsInvalid extension method",
         category: "Performance",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true
@@ -20,8 +20,8 @@ public sealed class NullComparisonAnalyzer : DiagnosticAnalyzer
 
     public static readonly DiagnosticDescriptor MED027 = new(
         id: nameof(MED027),
-        title: "Use faster IsNotNull extension method",
-        messageFormat: "Use faster IsNotNull extension method",
+        title: "Use faster IsValid extension method",
+        messageFormat: "Use faster IsValid extension method",
         category: "Performance",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true
