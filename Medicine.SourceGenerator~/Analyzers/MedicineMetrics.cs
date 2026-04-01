@@ -13,14 +13,6 @@ using static Constants;
 #pragma warning disable RS2008
 #pragma warning disable RS1012
 
-public enum Stat
-{
-    LinesOfCodeGenerated,
-    TransformTimeMs,
-    SourceGenerationTimeMs,
-    FullCompilationTimeMs,
-}
-
 /// <summary>
 /// Implements source generator performance metrics.
 /// This is useful for making sure that incremental generator caching works correctly.
@@ -39,53 +31,7 @@ public enum Stat
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class MedicineMetrics : DiagnosticAnalyzer
 {
-    // ReSharper disable once MemberCanBePrivate.Global
-    public struct StatsReporter
-    {
-        static readonly Stopwatch stopwatch = new();
-
-        public void Report(string? filename, Stat stat, float value)
-        {
-            if (filename is null)
-                return;
-
-            switch (stat)
-            {
-                case Stat.TransformTimeMs when !shouldResetTransformTime.ContainsKey(filename):
-                    stats.AddOrUpdate((stat, filename), value, (key, previous) => previous + value);
-                    break;
-                case Stat.TransformTimeMs:
-                    shouldResetTransformTime.TryRemove(filename, out _);
-                    goto default;
-                case Stat.SourceGenerationTimeMs:
-                case Stat.LinesOfCodeGenerated:
-                case Stat.FullCompilationTimeMs:
-                default:
-                    stats[(stat, filename)] = value;
-                    break;
-            }
-        }
-
-        public void ReportStartCompilation()
-        {
-            foreach (var metric in stats.Keys)
-                shouldResetTransformTime[metric.Filename] = true;
-            stopwatch.Restart();
-        }
-
-        public void ReportEndCompilation()
-        {
-            stopwatch.Stop();
-            Report(nameof(Stat.FullCompilationTimeMs), Stat.FullCompilationTimeMs, (float)stopwatch.Elapsed.TotalMilliseconds);
-        }
-    }
-
-    public static StatsReporter? Reporter { get; private set; }
-#if DEBUG
-        = new();
-#endif
-
-    static readonly ConcurrentDictionary<(Stat Stat, string Filename), float> stats = new();
+static readonly ConcurrentDictionary<(Stat Stat, string Filename), float> stats = new();
     static readonly ConcurrentDictionary<string, bool> shouldResetTransformTime = new();
 
     static readonly DiagnosticDescriptor diagnosticDescriptor = new(
@@ -102,8 +48,8 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
 
     public override void Initialize(AnalysisContext context)
     {
-        context.RegisterCompilationStartAction(x => Reporter?.ReportStartCompilation());
-        context.RegisterCompilationAction(x => Reporter?.ReportEndCompilation());
+        context.RegisterCompilationStartAction(x => SourceGeneratorMetrics.Reporter?.ReportStartCompilation());
+        context.RegisterCompilationAction(x => SourceGeneratorMetrics.Reporter?.ReportEndCompilation());
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
         context.RegisterSyntaxNodeAction(
@@ -117,7 +63,7 @@ public sealed class MedicineMetrics : DiagnosticAnalyzer
 
                 // enable reporting - we don't do this to avoid the overhead when
                 // the MedicineStats enum is not defined anywhere
-                Reporter = new();
+                SourceGeneratorMetrics.Reporter = new(stats, shouldResetTransformTime);
 
                 var summedStats
                     = stats

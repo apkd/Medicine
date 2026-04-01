@@ -8,7 +8,7 @@ using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 /// Shared helper for recovering expression type information by applying synthetic cast patches
 /// and rebinding the patched expression with Roslyn speculative binding.
 /// </summary>
-static class SpeculativeTypePatching
+public static class SpeculativeTypePatching
 {
 
     /// <param name="BindPosition">
@@ -178,3 +178,5 @@ static class SpeculativeTypePatching
                 : base.VisitIdentifierName(node);
     }
 }
+
+

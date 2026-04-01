@@ -1,12 +1,12 @@
 using Microsoft.CodeAnalysis;
 using static System.StringComparison;
 
-internal readonly struct MethodSignatureKey(IMethodSymbol symbol)
+public readonly struct MethodSignatureKey(IMethodSymbol symbol)
 {
     public readonly IMethodSymbol Symbol = symbol;
 }
 
-internal sealed class MethodSignatureComparer : IEqualityComparer<MethodSignatureKey>
+sealed class MethodSignatureComparer : IEqualityComparer<MethodSignatureKey>
 {
     public static readonly MethodSignatureComparer Instance = new();
     readonly SymbolEqualityComparer comparer = SymbolEqualityComparer.Default;
@@ -61,3 +61,5 @@ internal sealed class MethodSignatureComparer : IEqualityComparer<MethodSignatur
         }
     }
 }
+
+

@@ -11,7 +11,7 @@ public readonly struct ClearDisposable<TCollection>(TCollection collection) : ID
         => Scratch.ClearCollection(collection);
 }
 
-static class Scratch
+public static class Scratch
 {
     public static ClearDisposable<T> RentA<T>(out T value) where T : new()
         => Get(ref Storage<T>.a, out value);
@@ -107,3 +107,5 @@ static class Scratch
         }
     }
 }
+
+

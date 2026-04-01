@@ -1,6 +1,6 @@
 using Microsoft.CodeAnalysis;
 
-record struct GeneratorAttributeContextInput : ISourceGeneratorPassData
+public record struct GeneratorAttributeContextInput : ISourceGeneratorPassData
 {
     public string? SourceGeneratorOutputFilename { get; init; }
     public string? SourceGeneratorError { get; init; }
@@ -17,3 +17,5 @@ record struct GeneratorAttributeContextInput : ISourceGeneratorPassData
     bool IEquatable<GeneratorAttributeContextInput>.Equals(GeneratorAttributeContextInput other)
         => false;
 }
+
+

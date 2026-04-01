@@ -1,7 +1,7 @@
 using Microsoft.CodeAnalysis;
 using static System.StringComparison;
 
-static class StructSizeEstimator
+public static class StructSizeEstimator
 {
     const string StructLayoutAttributeFQN = "global::System.Runtime.InteropServices.StructLayoutAttribute";
     const string FieldOffsetAttributeFQN = "global::System.Runtime.InteropServices.FieldOffsetAttribute";
@@ -293,3 +293,5 @@ static class StructSizeEstimator
         return false;
     }
 }
+
+

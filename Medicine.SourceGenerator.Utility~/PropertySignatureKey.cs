@@ -1,12 +1,12 @@
 using Microsoft.CodeAnalysis;
 using static System.StringComparison;
 
-internal readonly struct PropertySignatureKey(IPropertySymbol symbol)
+public readonly struct PropertySignatureKey(IPropertySymbol symbol)
 {
     public readonly IPropertySymbol Symbol = symbol;
 }
 
-internal sealed class PropertySignatureComparer : IEqualityComparer<PropertySignatureKey>
+sealed class PropertySignatureComparer : IEqualityComparer<PropertySignatureKey>
 {
     public static readonly PropertySignatureComparer Instance = new();
     readonly SymbolEqualityComparer comparer = SymbolEqualityComparer.Default;
@@ -36,3 +36,5 @@ internal sealed class PropertySignatureComparer : IEqualityComparer<PropertySign
         }
     }
 }
+
+

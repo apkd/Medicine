@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>netstandard2.0</TargetFramework>
@@ -12,8 +12,8 @@
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
         <Deterministic>true</Deterministic>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <RootNamespace>Analyzers</RootNamespace>
-        <AssemblyName>Medicine.SourceGenerator</AssemblyName>
+        <RootNamespace>Medicine.SourceGenerator.Utility</RootNamespace>
+        <AssemblyName>Medicine.SourceGenerator.Utility</AssemblyName>
         <GenerateDependencyFile>false</GenerateDependencyFile>
         <WarningsAsErrors>true</WarningsAsErrors>
     </PropertyGroup>
@@ -33,16 +33,6 @@
           <PrivateAssets>all</PrivateAssets>
           <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-    </ItemGroup>
-
-    <ItemGroup>
-        <ProjectReference Include="..\Medicine.SourceGenerator.Utility~\Medicine.SourceGenerator.Utility.csproj"/>
-    </ItemGroup>
-
-    <ItemGroup>
-        <Compile Remove="Medicine.SourceGenerator.Test\**"/>
-        <EmbeddedResource Remove="Medicine.SourceGenerator.Test\**"/>
-        <None Remove="Medicine.SourceGenerator.Test\**"/>
     </ItemGroup>
 
 </Project>

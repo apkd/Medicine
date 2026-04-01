@@ -56,32 +56,11 @@ public static class SourceGeneratorExtensions
                 .Combine(provider3)
                 .Select((tuple, token) => (tuple.Left.Left, tuple.Left.Right, tuple.Right));
 
-        public IncrementalValuesProvider<(TSource Values, GeneratorEnvironment Environment)> CombineWithGeneratorEnvironment(IncrementalGeneratorInitializationContext context)
-            => source.Combine(context.GetGeneratorEnvironment());
+
     }
 
     extension(IncrementalGeneratorInitializationContext init)
     {
-        public IncrementalValueProvider<GeneratorEnvironment> GetGeneratorEnvironment()
-            => init
-                .CompilationProvider
-                .Combine(init.ParseOptionsProvider)
-                .Select((x, ct) =>
-                    {
-                        var args = x.Left.Assembly
-                            .GetAttribute(Constants.MedicineSettingsAttributeFQN)
-                            .GetAttributeConstructorArguments(ct);
-
-                        return new GeneratorEnvironment(
-                            PreprocessorSymbols: x.Right.GetActivePreprocessorSymbols(forceDebugValue: args.Get("debug", 0)),
-                            MedicineSettings: new()
-                            {
-                                MakePublic = args.Get("makePublic", true),
-                                SingletonStrategy = args.Get("singletonStrategy", SingletonStrategy.Replace),
-                            }
-                        );
-                    }
-                );
 
         public void RegisterSourceOutputEx<TInput>(
             IncrementalValueProvider<TInput> source,
@@ -138,7 +117,7 @@ public static class SourceGeneratorExtensions
                         var output = transform(context, ct);
                         float elapsed = (float)time.Elapsed.TotalMilliseconds;
                         if (output is { SourceGeneratorOutputFilename: { Length: > 0 } filename })
-                            MedicineMetrics.Reporter?.Report(filename, Stat.TransformTimeMs, elapsed);
+                            SourceGeneratorMetrics.Reporter?.Report(filename, Stat.TransformTimeMs, elapsed);
 
                         return output;
                     }
@@ -162,7 +141,7 @@ public static class SourceGeneratorExtensions
             var output = selector(input, ct);
             float elapsed = (float)time.Elapsed.TotalMilliseconds;
             if (output is { SourceGeneratorOutputFilename: { Length: > 0 } filename })
-                MedicineMetrics.Reporter?.Report(filename, Stat.TransformTimeMs, elapsed);
+                SourceGeneratorMetrics.Reporter?.Report(filename, Stat.TransformTimeMs, elapsed);
 
             return output;
         }
@@ -184,7 +163,7 @@ public static class SourceGeneratorExtensions
             var output = selector(input, ct);
             float elapsed = (float)time.Elapsed.TotalMilliseconds;
             if (output.FirstOrDefault() is { SourceGeneratorOutputFilename: { Length: > 0 } filename })
-                MedicineMetrics.Reporter?.Report(filename, Stat.TransformTimeMs, elapsed);
+                SourceGeneratorMetrics.Reporter?.Report(filename, Stat.TransformTimeMs, elapsed);
 
             return output;
         }
@@ -231,7 +210,7 @@ public static class SourceGeneratorExtensions
                 action(context, writer, input);
 
                 float elapsed = (float)time.Elapsed.TotalMilliseconds;
-                MedicineMetrics.Reporter?.Report(input.SourceGeneratorOutputFilename, Stat.SourceGenerationTimeMs, elapsed);
+                SourceGeneratorMetrics.Reporter?.Report(input.SourceGeneratorOutputFilename, Stat.SourceGenerationTimeMs, elapsed);
                 if (writer.IsDirty)
                     AddOutputSourceTextToCompilation(input.SourceGeneratorOutputFilename!, context, writer);
 
@@ -262,7 +241,7 @@ public static class SourceGeneratorExtensions
     {
         string output = writer.ToString();
 
-        if (MedicineMetrics.Reporter is { } reporter)
+        if (SourceGeneratorMetrics.Reporter is { } reporter)
         {
             int lineCount = 0;
             foreach (var c in output.AsSpan())
@@ -275,3 +254,5 @@ public static class SourceGeneratorExtensions
         context.AddSource(filename, SourceText.From(output, Encoding.UTF8));
     }
 }
+
+

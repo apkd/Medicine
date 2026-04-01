@@ -89,9 +89,6 @@ public static partial class ExtensionMethods
         public int Hash
             => SymbolEqualityComparer.Default.GetHashCode(self);
 
-        public bool IsInMedicineNamespace
-            => self.ContainingNamespace is { Name: Constants.Namespace, ContainingNamespace.IsGlobalNamespace: true };
-
         public bool IsAccessible
             => self.DeclaredAccessibility is Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal;
     }
@@ -793,3 +790,4 @@ public static partial class ExtensionMethods
     public static void Deconstruct<TKey, TValue>(this KeyValuePair<TKey, TValue> pair, out TKey key, out TValue value)
         => (key, value) = (pair.Key, pair.Value);
 }
+

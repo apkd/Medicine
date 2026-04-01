@@ -1,0 +1,4 @@
+.idea/
+obj/
+!*.csproj
+*.DotSettings.user
