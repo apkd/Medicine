@@ -3,8 +3,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using JetBrains.Annotations;
+using UnityEngine;
 using UnityEngine.Profiling;
-using Debug = UnityEngine.Debug;
 
 // ReSharper disable MethodOverloadWithOptionalParameter
 namespace Medicine
@@ -22,7 +22,7 @@ namespace Medicine
             ? 10000000.0 / Stopwatch.Frequency
             : 1.0;
 
-        /// <summary> Start a new benchmark with default name (based on call location). </summary>
+        /// <summary> Start a new benchmark with an automatic label (based on call location). </summary>
         public static Benchmark Start([CallerMemberName] string name = "", [CallerFilePath] string path = "", [CallerLineNumber] int cln = 0)
         {
             name = $"{name}() ({Path.GetFileName(path)}:{cln.ToString()})";
@@ -32,7 +32,7 @@ namespace Medicine
             return new(name, Stopwatch.GetTimestamp());
         }
 
-        /// <summary> Start a new benchmark with given name. </summary>
+        /// <summary> Start a new benchmark with a specific label. </summary>
         public static Benchmark Start(string name)
         {
 #if DEBUG
@@ -56,14 +56,27 @@ namespace Medicine
         public void Dispose()
         {
             var elapsed = Elapsed.TotalMilliseconds;
+
+            // suppress stack trace for the benchmark log message
+            var stackTraceLogType = Application.GetStackTraceLogType(LogType.Log);
+            Application.SetStackTraceLogType(LogType.Log, StackTraceLogType.None);
+
+            try
+            {
 #if DEBUG
-            Profiler.EndSample();
+                Profiler.EndSample();
 #endif
 #if UNITY_EDITOR
-            Debug.Log($"<b>[Benchmark] <i>{name}</i></b>: {elapsed:0.00}ms");
+                Debug.Log($"<b>[Benchmark] <i>{name}</i></b>: {elapsed:0.00}ms");
 #else
-            Debug.Log($"[Benchmark] {name}: {elapsed:0.00}ms");
+                Debug.Log($"[Benchmark] {name}: {elapsed:0.00}ms");
 #endif
+            }
+            finally
+            {
+                // restore stack trace settings
+                Application.SetStackTraceLogType(LogType.Log, stackTraceLogType);
+            }
         }
     }
 }
