@@ -67,9 +67,9 @@ namespace Medicine
                 Profiler.EndSample();
 #endif
 #if UNITY_EDITOR
-                Debug.Log($"<b>[Benchmark] <i>{name}</i></b>: {elapsed:0.00}ms");
+                UnityEngine.Debug.Log($"<b>[Benchmark] <i>{name}</i></b>: {elapsed:0.00}ms");
 #else
-                Debug.Log($"[Benchmark] {name}: {elapsed:0.00}ms");
+                UnityEngine.Debug.Log($"[Benchmark] {name}: {elapsed:0.00}ms");
 #endif
             }
             finally
