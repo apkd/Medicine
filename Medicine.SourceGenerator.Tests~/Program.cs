@@ -75,6 +75,7 @@ DiagnosticTest[] cases =
     UnmanagedAccessSourceGeneratorTest.Case,
     UnmanagedAccessSourceGeneratorTest.RangeIndexerCase,
     UnmanagedAccessSourceGeneratorTest.ProjectionCase,
+    UnmanagedAccessSourceGeneratorTest.ManagedValueTypeProjectionCase,
     UnmanagedAccessSourceGeneratorTest.CacheEnabledStateInheritanceCase,
     UnmanagedAccessSourceGeneratorTest.DirectIInstanceIndexCase,
     UnmanagedAccessSourceGeneratorTest.ImplicitIInstanceIndexCase,

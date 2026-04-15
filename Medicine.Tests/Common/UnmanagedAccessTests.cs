@@ -158,6 +158,19 @@ public partial class UnmanagedAccessTests
         public BasicFields[] Others = Array.Empty<BasicFields>();
     }
 
+    public struct ManagedValueTypeData
+    {
+        public string Name;
+        public BasicFields Other;
+        public int Count;
+    }
+
+    [UnmanagedAccess]
+    public partial class ManagedValueTypeFields
+    {
+        public ManagedValueTypeData Data;
+    }
+
     [Test]
     public void UnmanagedAccess_AccessedArrayFields_ProjectAccessArray()
     {
@@ -197,6 +210,36 @@ public partial class UnmanagedAccessTests
             sum += other.IntField;
 
         Assert.That(sum, Is.EqualTo(6));
+    }
+
+    [Test]
+    public void UnmanagedAccess_ManagedValueTypeFields_ProjectRefs()
+    {
+        var other = new BasicFields { IntField = 12 };
+        var obj = new ManagedValueTypeFields
+        {
+            Data = new()
+            {
+                Name = "fuel",
+                Other = other,
+                Count = 3,
+            },
+        };
+
+        UnmanagedRef<ManagedValueTypeFields> unmanagedRef = obj;
+        var access = unmanagedRef.AccessRW();
+
+        Assert.That(access.Data.Name, Is.EqualTo("fuel"));
+        Assert.That(access.Data.Other.IntField, Is.EqualTo(12));
+        Assert.That(access.Data.Count, Is.EqualTo(3));
+
+        access.Data.Name = "battery";
+        access.Data.Other = new BasicFields { IntField = 27 };
+        access.Data.Count = 8;
+
+        Assert.That(obj.Data.Name, Is.EqualTo("battery"));
+        Assert.That(obj.Data.Other.IntField, Is.EqualTo(27));
+        Assert.That(obj.Data.Count, Is.EqualTo(8));
     }
 
     [UnmanagedAccess]

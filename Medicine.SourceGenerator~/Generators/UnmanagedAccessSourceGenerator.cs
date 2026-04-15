@@ -58,6 +58,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         ArrayElementIsUnmanagedType = 1 << 06,
         ArrayElementHasUnmanagedAccess = 1 << 07,
         IsPrivateInBaseType = 1 << 08,
+        IsManagedValueType = 1 << 09,
     }
 
     record struct AttributeSettings(
@@ -125,9 +126,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             return default;
 
         var knownSymbols = context.SemanticModel.Compilation.GetKnownSymbols();
-        var unmanagedAccessAttribute = context.Attributes.First(x => x.AttributeClass.Is(knownSymbols.UnmanagedAccessAttribute));
 
-        var settings = unmanagedAccessAttribute
+        var settings = context.Attributes
+            .First(x => x.AttributeClass.Is(knownSymbols.UnmanagedAccessAttribute))
             .GetAttributeConstructorArguments(ct)
             .Select(x => new AttributeSettings(
                     SafetyChecks: x.Get("safetyChecks", true),
@@ -185,6 +186,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 if (member is not IFieldSymbol { IsStatic: false } field)
                     return;
 
+                // this is special-case handling for source-generated wrapper structs generated for [Union] structs
+                // a bit of a hack, but seems harmless enough? usually shouldn't match any real type
                 static bool IsWrapperErrorType(ITypeSymbol type)
                     => type is IErrorTypeSymbol
                     {
@@ -198,6 +201,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 bool isManagedArrayType = arrayType is { Rank: 1, IsSZArray: true };
                 var arrayElementType = isManagedArrayType ? arrayType!.ElementType : null;
                 bool arrayElementTreatAsUnmanagedWrapper = arrayElementType is not null && IsWrapperErrorType(arrayElementType);
+                bool isManagedValueType = field.Type is { IsValueType: true, IsUnmanagedType: false } && !treatAsUnmanagedWrapper;
 
                 var fieldFlags
                     = 0
@@ -205,6 +209,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                       | (field.IsReadOnly ? FieldFlags.IsReadOnly : 0)
                       | (field.Type.IsUnmanagedType || treatAsUnmanagedWrapper ? FieldFlags.IsUnmanagedType : 0)
                       | (field.Type.IsReferenceType && !treatAsUnmanagedWrapper ? FieldFlags.IsReferenceType : 0)
+                      | (isManagedValueType ? FieldFlags.IsManagedValueType : 0)
                       | (isManagedArrayType ? FieldFlags.IsManagedArrayType : 0)
                       | (field.Type.GetAttribute(knownSymbols.UnmanagedAccessAttribute) is not null ? FieldFlags.TypeHasUnmanagedAccess : 0)
                       | (arrayElementType?.IsUnmanagedType is true || arrayElementTreatAsUnmanagedWrapper ? FieldFlags.ArrayElementIsUnmanagedType : 0)
@@ -787,7 +792,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     string GetProjectedType(in FieldInfo field)
                     {
-                        if (field.Flags.Has(FieldFlags.IsUnmanagedType))
+                        if (field.Flags.Has(FieldFlags.IsUnmanagedType) || field.Flags.Has(FieldFlags.IsManagedValueType))
                             return $"{(isReadOnly || field.Flags.Has(FieldFlags.IsReadOnly) ? "ref readonly" : "ref")} {field.TypeFQN}";
 
                         if (field.EmitsDirectAccess)
@@ -811,6 +816,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         if (field.Flags.Has(FieldFlags.IsUnmanagedType))
                             return $"ref Ref.Read<{field.TypeFQN}>(layoutInfo->{field.Name});";
 
+                        if (field.Flags.Has(FieldFlags.IsManagedValueType))
+                            return $"ref {m}UU.AsRef<{field.TypeFQN}>((void*)(Ref.Ptr + layoutInfo->{field.Name}));";
+
                         if (field.EmitsDirectAccess)
                             return $"new {field.TypeFQN}.Unmanaged.{(isReadOnly ? "AccessRO" : "AccessRW")}(Ref.Read<Medicine.UnmanagedRef<{field.TypeFQN}>>(layoutInfo->{field.Name}));";
 
@@ -830,7 +838,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     foreach (var x in fields)
                     {
-                        if (x.Flags.Has(FieldFlags.IsUnmanagedType) || x.Flags.Has(FieldFlags.IsReferenceType))
+                        if (x.Flags.Has(FieldFlags.IsUnmanagedType)
+                            || x.Flags.Has(FieldFlags.IsReferenceType)
+                            || x.Flags.Has(FieldFlags.IsManagedValueType))
                         {
                             EmitDoc($"/// <inheritdoc cref=\"{m}Self.{x.Name}\" />");
 

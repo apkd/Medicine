@@ -23,6 +23,9 @@ static class UnmanagedAccessSourceGeneratorTest
     public static readonly DiagnosticTest ProjectionCase =
         new("UnmanagedAccess generator projects nested access types and arrays", RunProjectionContract);
 
+    public static readonly DiagnosticTest ManagedValueTypeProjectionCase =
+        new("UnmanagedAccess generator projects managed value types as refs", RunManagedValueTypeProjectionContract);
+
     static void Run()
         => SourceGeneratorTester.AssertGeneratesMoreSourcesThanBaseline(
             baselineSource: """
@@ -303,6 +306,80 @@ partial class Outer
                 return;
 
             ThrowMissingAny(first, second);
+        }
+    }
+
+    static void RunManagedValueTypeProjectionContract()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using System;
+using Medicine;
+
+public struct ManagedPayload
+{
+    public object Target;
+    public int Count;
+}
+
+[UnmanagedAccess]
+partial class ManagedValueTypeOuter
+{
+    public ManagedPayload Payload;
+}
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new UnmanagedAccessSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "managed value-type projection should not throw in generator"
+        );
+
+        var generatedText = string.Join(
+            Environment.NewLine,
+            run.Results
+                .SelectMany(static x => x.GeneratedSources)
+                .Select(static x => x.SourceText.ToString())
+        );
+
+        AssertContains("public ref global::ManagedPayload Payload");
+        AssertContains("ᵐUU.AsRef<global::ManagedPayload>");
+        AssertContains("layoutInfo->Payload");
+        AssertContains("public ref readonly global::ManagedPayload Payload");
+        AssertDoesNotContain("Medicine.UnmanagedRef<global::ManagedPayload>");
+
+        static void ThrowMissing(string expected)
+            => throw new InvalidOperationException($"Expected generated source to contain: {expected}");
+
+        static void ThrowUnexpected(string unexpected)
+            => throw new InvalidOperationException($"Expected generated source to not contain: {unexpected}");
+
+        void AssertContains(string expected)
+        {
+            if (generatedText.Contains(expected, StringComparison.Ordinal))
+                return;
+
+            ThrowMissing(expected);
+        }
+
+        void AssertDoesNotContain(string unexpected)
+        {
+            if (!generatedText.Contains(unexpected, StringComparison.Ordinal))
+                return;
+
+            ThrowUnexpected(unexpected);
         }
     }
 
