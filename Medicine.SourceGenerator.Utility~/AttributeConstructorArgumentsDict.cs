@@ -1,10 +1,17 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
+/// <summary>
+/// Reads explicitly supplied attribute constructor arguments into a name-indexed lookup.
+/// </summary>
 public readonly struct AttributeConstructorArgumentsDict
 {
     readonly Dictionary<string, object> values = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Creates a lookup for the constructor arguments supplied to an attribute application.
+    /// </summary>
+    /// <param name="attributeData">Attribute instance to inspect.</param>
     public AttributeConstructorArgumentsDict(AttributeData? attributeData, CancellationToken ct = default)
     {
         try
@@ -168,6 +175,13 @@ public readonly struct AttributeConstructorArgumentsDict
         return fallback;
     }
 
+    /// <summary>
+    /// Returns a constructor argument by name.
+    /// </summary>
+    /// <typeparam name="T">Expected argument type.</typeparam>
+    /// <param name="name">Constructor parameter name.</param>
+    /// <param name="defaultValue">Value returned when the argument is missing or null.</param>
+    /// <returns>The stored argument value, or <paramref name="defaultValue"/> when unavailable.</returns>
     public T? Get<T>(string name, T? defaultValue)
     {
         if (values.TryGetValue(name, out var value))
@@ -177,6 +191,13 @@ public readonly struct AttributeConstructorArgumentsDict
         return defaultValue;
     }
 
+    /// <summary>
+    /// Returns a value-type constructor argument by name.
+    /// </summary>
+    /// <typeparam name="T">Expected value type.</typeparam>
+    /// <param name="name">Constructor parameter name.</param>
+    /// <param name="defaultValue">Value returned when the argument is missing or cannot be cast to <typeparamref name="T"/>.</param>
+    /// <returns>The stored argument value, or <paramref name="defaultValue"/> when unavailable.</returns>
     public T? Get<T>(string name, T? defaultValue) where T : struct
     {
         if (values.TryGetValue(name, out var value))
@@ -194,6 +215,13 @@ public readonly struct AttributeConstructorArgumentsDict
         return defaultValue;
     }
 
+    /// <summary>
+    /// Projects this lookup into another value.
+    /// Useful for compact method chaining.
+    /// </summary>
+    /// <typeparam name="T">Projection result type.</typeparam>
+    /// <param name="selector">Projection to apply.</param>
+    /// <returns>The value produced by <paramref name="selector"/>.</returns>
     public T Select<T>(Func<AttributeConstructorArgumentsDict, T> selector)
         => selector(this);
 }
@@ -201,8 +229,10 @@ public readonly struct AttributeConstructorArgumentsDict
 public static partial class ExtensionMethods
 {
     /// <summary>
-    /// Retrieves a structure representing the constructor arguments of the given attribute.
+    /// Returns the supplied constructor arguments for an attribute.
     /// </summary>
+    /// <param name="attributeData">Attribute instance to inspect.</param>
+    /// <returns>A lookup keyed by the constructor parameter name.</returns>
     public static AttributeConstructorArgumentsDict GetAttributeConstructorArguments(this AttributeData? attributeData, CancellationToken ct = default)
         => new(attributeData, ct);
 }

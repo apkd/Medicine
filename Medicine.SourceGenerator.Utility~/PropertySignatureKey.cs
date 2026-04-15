@@ -1,8 +1,14 @@
 using Microsoft.CodeAnalysis;
 using static System.StringComparison;
 
+/// <summary>
+/// Wraps a property symbol for signature-based hash set and dictionary lookups.
+/// </summary>
 public readonly struct PropertySignatureKey(IPropertySymbol symbol)
 {
+    /// <summary>
+    /// Property symbol represented by this key.
+    /// </summary>
     public readonly IPropertySymbol Symbol = symbol;
 }
 
@@ -36,5 +42,4 @@ sealed class PropertySignatureComparer : IEqualityComparer<PropertySignatureKey>
         }
     }
 }
-
 

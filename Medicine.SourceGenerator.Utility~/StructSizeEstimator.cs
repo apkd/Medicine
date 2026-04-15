@@ -1,6 +1,9 @@
 using Microsoft.CodeAnalysis;
 using static System.StringComparison;
 
+/// <summary>
+/// Estimates the runtime memory size of structs.
+/// </summary>
 public static class StructSizeEstimator
 {
     const string StructLayoutAttributeFQN = "global::System.Runtime.InteropServices.StructLayoutAttribute";
@@ -17,6 +20,11 @@ public static class StructSizeEstimator
 
     readonly record struct SizeResult(int Size, int Alignment);
 
+    /// <summary>
+    /// Estimates the size of a type in bytes using field layout rules.
+    /// </summary>
+    /// <param name="type">Type to evaluate.</param>
+    /// <returns>The estimated size in bytes, or <c>-1</c> when the size cannot be determined.</returns>
     public static int EstimateTypeSizeInBytes(ITypeSymbol type)
         => TryEstimateTypeSize(type, new(StringComparer.Ordinal), new(StringComparer.Ordinal), out var size)
             ? size

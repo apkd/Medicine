@@ -17,18 +17,44 @@ public static class SourceGeneratorExtensions
 {
     extension<TSource>(IncrementalValueProvider<TSource> source)
     {
+        /// <summary>
+        /// Projects each input into zero or more outputs with exception handling and metric reporting.
+        /// </summary>
+        /// <typeparam name="TResult">Output item type.</typeparam>
+        /// <param name="selector">Projection function.</param>
+        /// <returns>A provider that emits the projected outputs.</returns>
         public IncrementalValuesProvider<TResult> SelectManyEx<TResult>(Func<TSource, CancellationToken, ImmutableArray<TResult>> selector)
             where TResult : ISourceGeneratorPassData, new()
             => source.SelectMany((input, ct) => TrySelectMany(input, ct, selector));
 
+        /// <summary>
+        /// Projects each input into zero or more outputs with exception handling and metric reporting.
+        /// </summary>
+        /// <typeparam name="TResult">Output item type.</typeparam>
+        /// <param name="selector">Projection function.</param>
+        /// <returns>A provider that emits the projected outputs.</returns>
         public IncrementalValuesProvider<TResult> SelectManyEx<TResult>(Func<TSource, CancellationToken, IEnumerable<TResult>> selector)
             where TResult : ISourceGeneratorPassData, new()
             => source.SelectMany((input, ct) => TrySelectMany(input, ct, (x, y) => selector(x, y).ToImmutableArray()));
 
+        /// <summary>
+        /// Projects each input into a single output with exception handling and metric reporting.
+        /// </summary>
+        /// <typeparam name="TResult">Output item type.</typeparam>
+        /// <param name="selector">Projection function.</param>
+        /// <returns>A provider that emits the projected output.</returns>
         public IncrementalValueProvider<TResult> SelectEx<TResult>(Func<TSource, CancellationToken, TResult> selector)
             where TResult : ISourceGeneratorPassData, new()
             => source.Select((input, ct) => TrySelect(input, ct, selector));
 
+        /// <summary>
+        /// Combines three incremental providers into a single tuple provider.
+        /// </summary>
+        /// <typeparam name="T2">Second provider value type.</typeparam>
+        /// <typeparam name="T3">Third provider value type.</typeparam>
+        /// <param name="provider2">Second provider.</param>
+        /// <param name="provider3">Third provider.</param>
+        /// <returns>A provider that yields values from all three inputs.</returns>
         public IncrementalValueProvider<(TSource First, T2 Second, T3 Third)> Combine<T2, T3>(IncrementalValueProvider<T2> provider2, IncrementalValueProvider<T3> provider3)
             => source
                 .Combine(provider2)
@@ -38,18 +64,44 @@ public static class SourceGeneratorExtensions
 
     extension<TSource>(IncrementalValuesProvider<TSource> source)
     {
+        /// <summary>
+        /// Projects each input into zero or more outputs with exception handling and metric reporting.
+        /// </summary>
+        /// <typeparam name="TResult">Output item type.</typeparam>
+        /// <param name="selector">Projection function.</param>
+        /// <returns>A provider that emits the projected outputs.</returns>
         public IncrementalValuesProvider<TResult> SelectManyEx<TResult>(Func<TSource, CancellationToken, ImmutableArray<TResult>> selector)
             where TResult : ISourceGeneratorPassData, new()
             => source.SelectMany((input, ct) => TrySelectMany(input, ct, selector));
 
+        /// <summary>
+        /// Projects each input into zero or more outputs with exception handling and metric reporting.
+        /// </summary>
+        /// <typeparam name="TResult">Output item type.</typeparam>
+        /// <param name="selector">Projection function.</param>
+        /// <returns>A provider that emits the projected outputs.</returns>
         public IncrementalValuesProvider<TResult> SelectManyEx<TResult>(Func<TSource, CancellationToken, IEnumerable<TResult>> selector)
             where TResult : ISourceGeneratorPassData, new()
             => source.SelectMany((input, ct) => TrySelectMany(input, ct, (x, y) => selector(x, y).ToImmutableArray()));
 
+        /// <summary>
+        /// Projects each input into a single output with exception handling and metric reporting.
+        /// </summary>
+        /// <typeparam name="TResult">Output item type.</typeparam>
+        /// <param name="selector">Projection function.</param>
+        /// <returns>A provider that emits the projected output.</returns>
         public IncrementalValuesProvider<TResult> SelectEx<TResult>(Func<TSource, CancellationToken, TResult> selector)
             where TResult : ISourceGeneratorPassData, new()
             => source.Select((input, ct) => TrySelect(input, ct, selector));
 
+        /// <summary>
+        /// Combines an incremental sequence with two additional providers into a tuple sequence.
+        /// </summary>
+        /// <typeparam name="T2">Second provider value type.</typeparam>
+        /// <typeparam name="T3">Third provider value type.</typeparam>
+        /// <param name="provider2">Second provider.</param>
+        /// <param name="provider3">Third provider.</param>
+        /// <returns>A provider that yields values from all three inputs.</returns>
         public IncrementalValuesProvider<(TSource First, T2 Second, T3 Third)> Combine<T2, T3>(IncrementalValueProvider<T2> provider2, IncrementalValueProvider<T3> provider3)
             => source
                 .Combine(provider2)
@@ -61,7 +113,12 @@ public static class SourceGeneratorExtensions
 
     extension(IncrementalGeneratorInitializationContext init)
     {
-
+        /// <summary>
+        /// Registers source generation for a single-value provider using the wrapped error-handling pipeline.
+        /// </summary>
+        /// <typeparam name="TInput">Input item type.</typeparam>
+        /// <param name="source">Source provider to consume.</param>
+        /// <param name="action">Generation callback that writes into a <see cref="SourceWriter"/>.</param>
         public void RegisterSourceOutputEx<TInput>(
             IncrementalValueProvider<TInput> source,
             Action<SourceProductionContext, SourceWriter, TInput> action
@@ -71,6 +128,12 @@ public static class SourceGeneratorExtensions
                 action: (context, input) => GenerateSource(context, input, action)
             );
 
+        /// <summary>
+        /// Registers source generation for a multi-value provider using the wrapped error-handling pipeline.
+        /// </summary>
+        /// <typeparam name="TInput">Input item type.</typeparam>
+        /// <param name="source">Source provider to consume.</param>
+        /// <param name="action">Generation callback that writes into a <see cref="SourceWriter"/>.</param>
         public void RegisterSourceOutputEx<TInput>(
             IncrementalValuesProvider<TInput> source,
             Action<SourceProductionContext, SourceWriter, TInput> action
@@ -80,6 +143,12 @@ public static class SourceGeneratorExtensions
                 action: (context, input) => GenerateSource(context, input, action)
             );
 
+        /// <summary>
+        /// Registers implementation-only source generation for a single-value provider.
+        /// </summary>
+        /// <typeparam name="TInput">Input item type.</typeparam>
+        /// <param name="source">Source provider to consume.</param>
+        /// <param name="action">Generation callback that writes into a <see cref="SourceWriter"/>.</param>
         public void RegisterImplementationSourceOutputEx<TInput>(
             IncrementalValueProvider<TInput> source,
             Action<SourceProductionContext, SourceWriter, TInput> action
@@ -89,6 +158,12 @@ public static class SourceGeneratorExtensions
                 action: (context, input) => GenerateSource(context, input, action)
             );
 
+        /// <summary>
+        /// Registers implementation-only source generation for a multi-value provider.
+        /// </summary>
+        /// <typeparam name="TInput">Input item type.</typeparam>
+        /// <param name="source">Source provider to consume.</param>
+        /// <param name="action">Generation callback that writes into a <see cref="SourceWriter"/>.</param>
         public void RegisterImplementationSourceOutputEx<TInput>(
             IncrementalValuesProvider<TInput> source,
             Action<SourceProductionContext, SourceWriter, TInput> action
@@ -101,6 +176,15 @@ public static class SourceGeneratorExtensions
 
     extension(SyntaxValueProvider provider)
     {
+        /// <summary>
+        /// Wraps <see cref="SyntaxValueProvider.ForAttributeWithMetadataName{T}(string, Func{SyntaxNode, CancellationToken, bool}, Func{GeneratorAttributeSyntaxContext, CancellationToken, T})"/>
+        /// with exception handling and metric reporting.
+        /// </summary>
+        /// <typeparam name="TResult">Output item type.</typeparam>
+        /// <param name="fullyQualifiedMetadataName">Attribute metadata name to match.</param>
+        /// <param name="predicate">Syntax predicate used to prefilter nodes.</param>
+        /// <param name="transform">Transform applied to each matching attribute context.</param>
+        /// <returns>A provider that emits transformed outputs.</returns>
         public IncrementalValuesProvider<TResult> ForAttributeWithMetadataNameEx<TResult>(
             string fullyQualifiedMetadataName,
             Func<SyntaxNode, CancellationToken, bool> predicate,

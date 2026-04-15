@@ -13,6 +13,11 @@ public enum ActivePreprocessorSymbolNames
 
 public static partial class ExtensionMethods
 {
+    /// <summary>
+    /// Returns the known active preprocessor symbols for the parse options.
+    /// </summary>
+    /// <param name="parseOptions">Parse options to inspect.</param>
+    /// <returns>The resulting symbol flags.</returns>
     public static ActivePreprocessorSymbolNames GetActivePreprocessorSymbols(this ParseOptions parseOptions)
     {
         var result = default(ActivePreprocessorSymbolNames);
@@ -30,15 +35,21 @@ public static partial class ExtensionMethods
         return result;
     }
 
+    /// <inheritdoc cref="GetActivePreprocessorSymbols(ParseOptions)"/>
+    /// <param name="forceDebugValue">
+    /// <c>1</c> forces <see cref="ActivePreprocessorSymbolNames.DEBUG"/>, <c>2</c> removes it, and any other value leaves it unchanged.
+    /// </param>
     public static ActivePreprocessorSymbolNames GetActivePreprocessorSymbols(this ParseOptions parseOptions, int forceDebugValue)
     {
         var symbol = parseOptions.GetActivePreprocessorSymbols();
+
         symbol = forceDebugValue switch
         {
             1 => symbol | DEBUG,
             2 => symbol & ~DEBUG,
             _ => symbol,
         };
+
         return symbol;
     }
 

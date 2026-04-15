@@ -3,8 +3,14 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Editing;
 
+/// <summary>
+/// Shared helpers for source-generator and analyzer code.
+/// </summary>
 public static class Utility
 {
+    /// <summary>
+    /// Diagnostic used when wrapper helpers surface an exception to the compilation.
+    /// </summary>
     public static readonly DiagnosticDescriptor ExceptionDiagnosticDescriptor = new(
         id: "MED911",
         title: "Exception",
@@ -14,6 +20,12 @@ public static class Utility
         isEnabledByDefault: true
     );
 
+    /// <summary>
+    /// Returns a deterministic hint name for an error output file.
+    /// </summary>
+    /// <param name="location">Source location associated with the error, when available.</param>
+    /// <param name="error">Error text to include in the hash.</param>
+    /// <returns>A generated hint name for fallback error output.</returns>
     public static string GetErrorOutputFilename(LocationInfo? location, string error)
     {
         string filename = Path.GetFileNameWithoutExtension(location?.FileLineSpan.Path ?? "");
@@ -39,6 +51,17 @@ public static class Utility
         }
     }
 
+    /// <summary>
+    /// Returns a deterministic generated hint name for a source output.
+    /// </summary>
+    /// <param name="filePath">Path of the source file that triggered generation.</param>
+    /// <param name="targetNodeName">Target syntax or symbol name that distinguishes this output.</param>
+    /// <param name="label">Optional prefix added to the generated hint name.</param>
+    /// <param name="additionalNameForHash">Additional text that participates in the hash without appearing in the filename.</param>
+    /// <param name="includeFilename">
+    /// Whether to include the source file name when it differs from <paramref name="targetNodeName"/>.
+    /// </param>
+    /// <returns>A stable generated hint name ending in <c>.g.cs</c>.</returns>
     public static string GetOutputFilename(string filePath, string targetNodeName, string label = "", string additionalNameForHash = "", bool includeFilename = true)
     {
         string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(filePath);
@@ -85,6 +108,11 @@ public static class Utility
         }
     }
 
+    /// <summary>
+    /// Returns the C# modifier text for a Roslyn <see cref="RefKind"/>.
+    /// </summary>
+    /// <param name="refKind">Reference kind to format.</param>
+    /// <returns><c>ref </c>, <c>out </c>, <c>in </c>, or an empty string.</returns>
     public static string AsRefString(this RefKind refKind)
         => refKind switch
         {
@@ -95,6 +123,11 @@ public static class Utility
             _            => "??? ",
         };
 
+    /// <summary>
+    /// Adds a using directive when the document does not already import the namespace.
+    /// </summary>
+    /// <param name="editor">Document editor to update.</param>
+    /// <param name="namespaceName">Namespace to import.</param>
     public static void EnsureNamespaceIsImported(this DocumentEditor editor, string namespaceName)
     {
         if (!editor.OriginalDocument.TryGetSyntaxRoot(out var root))
@@ -112,8 +145,12 @@ public static class Utility
         editor.InsertAfter(usings.Last(), usingDirective);
     }
 
-    /// <summary> Sanitizes an input string for use as a C# identifier. </summary>
-    /// <param name="prependAt">If true, prepend '@' to the identifier to make it a verbatim identifier.</param>
+    /// <summary>
+    /// Rewrites a string into a valid C# identifier.
+    /// </summary>
+    /// <param name="name">Name to sanitize.</param>
+    /// <param name="prepend">Optional character to insert before the identifier.</param>
+    /// <returns>A sanitized identifier, or <c>???</c> when <paramref name="name"/> is blank.</returns>
     public static string Sanitize(this string name, char prepend = '\0')
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -150,8 +187,13 @@ public static class Utility
     }
 
     /// <summary>
-    /// Deconstructs a type declaration and retrieves its namespace and parent type hierarchy.
+    /// Returns the namespace and containing type declarations needed to recreate a type's declaration hierarchy.
     /// </summary>
+    /// <param name="memberDeclarationSyntax">Type declaration whose containing hierarchy should be emitted.</param>
+    /// <param name="extraInterfaces">
+    /// Optional interface clause appended to the first emitted type declaration.
+    /// </param>
+    /// <returns>Declaration lines ordered from outermost container to innermost type.</returns>
     public static EquatableArray<string> DeconstructTypeDeclaration(
         MemberDeclarationSyntax memberDeclarationSyntax,
         string? extraInterfaces = null

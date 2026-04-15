@@ -1,8 +1,14 @@
 using Microsoft.CodeAnalysis;
 using static System.StringComparison;
 
+/// <summary>
+/// Wraps a method symbol for signature-based hash set and dictionary lookups.
+/// </summary>
 public readonly struct MethodSignatureKey(IMethodSymbol symbol)
 {
+    /// <summary>
+    /// Method symbol represented by this key.
+    /// </summary>
     public readonly IMethodSymbol Symbol = symbol;
 }
 
@@ -61,5 +67,4 @@ sealed class MethodSignatureComparer : IEqualityComparer<MethodSignatureKey>
         }
     }
 }
-
 

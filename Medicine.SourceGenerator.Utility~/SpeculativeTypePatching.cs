@@ -10,7 +10,9 @@ using static Microsoft.CodeAnalysis.SymbolDisplayFormat;
 /// </summary>
 public static class SpeculativeTypePatching
 {
-
+    /// <summary>
+    /// Controls how speculative rebinding passes are executed.
+    /// </summary>
     /// <param name="BindPosition">
     /// Syntax position used for <see cref="SemanticModel.GetSpeculativeTypeInfo(int, ExpressionSyntax, SpeculativeBindingOption)"/>.
     /// </param>

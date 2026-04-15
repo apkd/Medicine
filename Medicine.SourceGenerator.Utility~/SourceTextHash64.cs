@@ -2,6 +2,9 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis.Text;
 
+/// <summary>
+/// Computes stable 64-bit checksums for Roslyn <see cref="SourceText"/>.
+/// </summary>
 public static class SourceTextHash64
 {
     static readonly Vector<ulong> mix = new(0x9E3779B185EBCA87UL);
@@ -17,6 +20,11 @@ public static class SourceTextHash64
         return charsBuffer = new char[minimumLength];
     }
 
+    /// <summary>
+    /// Calculates a 64-bit checksum for the text contents.
+    /// </summary>
+    /// <param name="text">Source text to hash.</param>
+    /// <returns>A stable checksum for <paramref name="text"/>.</returns>
     public static ulong CalculateChecksum64(this SourceText text)
     {
         int length = text.Length;

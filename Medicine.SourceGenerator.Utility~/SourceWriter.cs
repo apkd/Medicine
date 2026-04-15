@@ -20,14 +20,27 @@ public sealed class SourceWriter : IDisposable
     int initialLength;
     int indent;
 
+    /// <summary>
+    /// Controls whether the <see cref="Doc"/> property can be used to emit documentation.
+    /// </summary>
     public bool ShouldEmitDocs { get; set; }
 
+    /// <summary>
+    /// Creates a writer preloaded with the standard generated-file header.
+    /// </summary>
     public SourceWriter()
         => initialLength = stringBuilder.Length;
 
+    /// <summary>
+    /// Returns whether text has been written beyond the initial generated-file header.
+    /// </summary>
     public bool IsDirty
         => stringBuilder.Length != initialLength;
 
+    /// <summary>
+    /// Starts a new line and returns the <see cref="SourceWriter"/> when documentation emission is enabled; otherwise returns <c>null</c>.
+    /// Combined with null conditional operators, allows for compact documentation emission statements.
+    /// </summary>
     public SourceWriter? Doc
         => ShouldEmitDocs ? Line : null;
 
@@ -157,35 +170,70 @@ public sealed class SourceWriter : IDisposable
     void IDisposable.Dispose()
         => StringBuilderPool.Return(stringBuilder);
 
+    /// <summary>
+    /// Disposable scope that increases indentation for its lifetime.
+    /// </summary>
     [StructLayout((short)0, Size = 128)]
     public readonly ref struct IndentScope
     {
         readonly SourceWriter writer;
 
+        /// <summary>
+        /// Begins an indentation scope on the specified writer.
+        /// </summary>
+        /// <param name="writer">Writer whose indentation should increase.</param>
         public IndentScope(SourceWriter writer)
             => (this.writer = writer).IncreaseIndent();
 
+        /// <summary>
+        /// Ends the indentation scope.
+        /// </summary>
         public void Dispose()
             => writer.DecreaseIndent();
     }
 
+    /// <summary>
+    /// Disposable scope that writes braces and indents the enclosed output.
+    /// </summary>
     public readonly ref struct BracesScope
     {
         readonly SourceWriter writer;
 
+        /// <summary>
+        /// Begins a braces scope on the specified writer.
+        /// </summary>
+        /// <param name="writer">Writer to update.</param>
         public BracesScope(SourceWriter writer)
             => (this.writer = writer).OpenBrace();
 
+        /// <summary>
+        /// Ends the braces scope.
+        /// </summary>
         public void Dispose()
             => writer.CloseBrace();
     }
 
+    /// <summary>
+    /// Interpolated string handler that writes formatted content directly into a <see cref="SourceWriter"/>.
+    /// </summary>
+    /// <param name="literalLength">Compiler-supplied total literal length.</param>
+    /// <param name="formattedCount">Compiler-supplied number of formatted holes.</param>
+    /// <param name="writer">Target writer.</param>
     [InterpolatedStringHandler]
     public readonly struct Interpolation(int literalLength, int formattedCount, SourceWriter writer)
     {
+        /// <summary>
+        /// Appends a literal segment.
+        /// </summary>
+        /// <param name="value">Literal text to append.</param>
         public void AppendLiteral(string value)
             => writer.stringBuilder.Append(value);
 
+        /// <summary>
+        /// Appends a formatted string value, honoring supported custom formats.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
+        /// <param name="format">Optional format hint understood by the handler.</param>
         public void AppendFormatted(string? value, string format)
         {
             switch (format)
@@ -198,36 +246,84 @@ public sealed class SourceWriter : IDisposable
             writer.stringBuilder.Append(value);
         }
 
+        /// <summary>
+        /// Appends a formatted string value.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
         public void AppendFormatted(string? value)
             => writer.stringBuilder.Append(value);
 
+        /// <summary>
+        /// Appends a formatted <see cref="int"/>.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
         public void AppendFormatted(int value)
             => writer.stringBuilder.Append(value);
 
+        /// <summary>
+        /// Appends a formatted <see cref="int"/> using the supplied format string.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
+        /// <param name="format">Numeric format string.</param>
         public void AppendFormatted(int value, string format)
             => writer.stringBuilder.Append(value.ToString(format));
 
+        /// <summary>
+        /// Appends a formatted <see cref="long"/>.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
         public void AppendFormatted(long value)
             => writer.stringBuilder.Append(value);
 
+        /// <summary>
+        /// Appends a formatted <see cref="long"/> using the supplied format string.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
+        /// <param name="format">Numeric format string.</param>
         public void AppendFormatted(long value, string format)
             => writer.stringBuilder.Append(value.ToString(format));
 
+        /// <summary>
+        /// Appends a formatted <see cref="float"/>.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
         public void AppendFormatted(float value)
             => writer.stringBuilder.Append(value);
 
+        /// <summary>
+        /// Appends a formatted <see cref="float"/> using the supplied format string.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
+        /// <param name="format">Numeric format string.</param>
         public void AppendFormatted(float value, string format)
             => writer.stringBuilder.Append(value.ToString(format));
 
+        /// <summary>
+        /// Appends a formatted <see cref="double"/>.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
         public void AppendFormatted(double value)
             => writer.stringBuilder.Append(value);
 
+        /// <summary>
+        /// Appends a formatted <see cref="double"/> using the supplied format string.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
+        /// <param name="format">Numeric format string.</param>
         public void AppendFormatted(double value, string format)
             => writer.stringBuilder.Append(value.ToString(format));
 
+        /// <summary>
+        /// Appends a formatted <see cref="char"/>.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
         public void AppendFormatted(char value)
             => writer.stringBuilder.Append(value);
 
+        /// <summary>
+        /// Appends a formatted <see cref="bool"/>.
+        /// </summary>
+        /// <param name="value">Value to append.</param>
         public void AppendFormatted(bool value)
             => writer.stringBuilder.Append(value);
 
