@@ -619,7 +619,8 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
                 TryAddCustomStorage(interfaceType);
 
-                if (interfaceType.OriginalDefinition.Is(knownSymbols.TrackInstanceIDsInterface))
+                if (interfaceType.OriginalDefinition.Is(knownSymbols.TrackInstanceIDsInterface)
+                    || interfaceType.OriginalDefinition.Is(knownSymbols.TrackEntityIDsInterface))
                     foreach (var inheritedInterface in interfaceType.AllInterfaces)
                         TryAddCustomStorage(inheritedInterface);
             }
@@ -1669,7 +1670,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         src.Doc?.Write($"/// <item> MonoBehaviours and ScriptableObjects marked with the <see cref=\"TrackAttribute\"/> will automatically register/unregister themselves");
         src.Doc?.Write($"/// in the active instance list in OnEnable/OnDisable. </item>");
         src.Doc?.Write($"/// <item> When there are no active instances, the returned enumerable is empty. </item>");
-        src.Doc?.Write($"/// <item> In edit mode, to provide better compatibility with editor tooling, <see cref=\"Object.FindObjectsByType(System.Type,UnityEngine.FindObjectsSortMode)\"/>");
+        src.Doc?.Write($"/// <item> In edit mode, to provide better compatibility with editor tooling, <see cref=\"Object.FindObjectsByType(System.Type)\"/>");
         src.Doc?.Write($"/// is used internally to find object instances (cached for one editor update). </item>");
         src.Doc?.Write($"/// <item> You can use <c>foreach</c> to iterate over the instances. </item>");
         src.Doc?.Write($"/// <item> If you're enabling/disabling instances while enumerating, you need to use <c>{input.TypeDisplayName}.Instances.WithCopy</c>. </item>");

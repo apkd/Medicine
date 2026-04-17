@@ -9,6 +9,7 @@ public enum ActivePreprocessorSymbolNames
 {
     UNITY_EDITOR = 1 << 0,
     DEBUG = 1 << 1,
+    UNITY_6000_4_OR_NEWER = 1 << 2,
 }
 
 public static partial class ExtensionMethods
@@ -28,6 +29,7 @@ public static partial class ExtensionMethods
             {
                 nameof(DEBUG) => DEBUG,
                 nameof(UNITY_EDITOR) => UNITY_EDITOR,
+                nameof(UNITY_6000_4_OR_NEWER) => UNITY_6000_4_OR_NEWER,
                 _ => 0,
             };
         }

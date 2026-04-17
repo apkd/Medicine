@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Editing;
+using static ActivePreprocessorSymbolNames;
 
 [ExportCodeFixProvider(LanguageNames.CSharp), Shared]
 sealed class FindObjectsFixProvider : CodeFixProvider
@@ -180,6 +181,8 @@ sealed class FindObjectsFixProvider : CodeFixProvider
 
         ArgumentSyntax? includeArg = null;
         ArgumentSyntax? sortArg = null;
+        bool supportsSortModeArgument
+            = !semanticModel.SyntaxTree.Options.GetActivePreprocessorSymbols().Has(UNITY_6000_4_OR_NEWER);
 
         foreach (var a in oldCall.ArgumentList.Arguments)
         {
@@ -196,6 +199,9 @@ sealed class FindObjectsFixProvider : CodeFixProvider
 
             if (IsSort(argumentType))
             {
+                if (!supportsSortModeArgument)
+                    continue;
+
                 if (semanticModel.GetConstantValue(a.Expression) is { HasValue: true, Value: 0 })
                     continue;
 

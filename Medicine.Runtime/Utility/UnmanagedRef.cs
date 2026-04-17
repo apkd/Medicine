@@ -108,61 +108,78 @@ namespace Medicine
         internal static void SetNativeObjectPtr<TClass>(this UnmanagedRef<TClass> classRef, nint value) where TClass : UnityEngine.Object
             => *(nint*)(classRef.Ptr + sizeof(nint) * 2) = value;
 
+#if UNITY_6000_4_OR_NEWER
+        /// <summary>
+        /// Equivalent of the <see cref="UnityEngine.Object.GetEntityId"/> method.
+        /// Assumes that the referenced object is not null or destroyed.
+        /// </summary>
+        /// <remarks>
+        /// The entity ID acts like a handle to the in-memory instance.
+        /// It changes between sessions and is not suitable for persistence.
+        /// </remarks>
+        [MethodImpl(AggressiveInlining)]
+        public static UnityEngine.EntityId GetEntityID<TClass>(this UnmanagedRef<TClass> classRef) where TClass : UnityEngine.Object
+#if UNITY_EDITOR
+            => ReadManagedObjectId<TClass, UnityEngine.EntityId>(classRef);
+#else
+            => ReadNativeObjectId<TClass, UnityEngine.EntityId>(classRef);
+#endif
+#else
         /// <summary>
         /// Equivalent of the <see cref="UnityEngine.Object.GetInstanceID"/> method.
         /// Assumes that the referenced object is not null or destroyed.
         /// </summary>
         /// <remarks>
-        /// The instance ID of an object acts like a handle to the in-memory instance.
-        /// It is always unique and never has the value 0.
-        /// Objects loaded from a file will be assigned a positive Instance ID.
-        /// <br/></br>
-        /// Newly created objects will have a negative Instance ID and retain that
-        /// negative value even if the object is later saved to file.
-        /// Therefore, the sign of the InstanceID value is not a safe indicator for
-        /// whether the object is persistent.
-        /// <br/></br>
-        /// The ID changes between sessions of the player runtime and Editor.
-        /// As such, the ID is not reliable for performing actions that could span between sessions, for example,
-        /// loading an object state from a file.
+        /// The instance ID acts like a handle to the in-memory instance.
+        /// It changes between sessions and is not suitable for persistence.
         /// </remarks>
         [MethodImpl(AggressiveInlining)]
         public static int GetInstanceID<TClass>(this UnmanagedRef<TClass> classRef) where TClass : UnityEngine.Object
-        {
 #if UNITY_EDITOR
-            // we can use this fast path in the editor
-            return *(int*)(classRef.Ptr + sizeof(nint) * 3);
-#elif MODULE_BURST
-            // in player builds, the instance ID is not stored in the managed object;
-            // we need to grab it from the actual native object
-            return *(int*)(*(nint*)(classRef.Ptr + sizeof(nint) * 2) + offsetOfInstanceIDInCPlusPlusObject.Data);
+            => ReadManagedObjectId<TClass, int>(classRef);
 #else
-            // i can't really see why anyone would want to use UnmanagedRef<T> without
-            // Burst Compiler installed, but it doesn't cost us much to support it, so here we go
-            return *(int*)(*(nint*)(classRef.Ptr + sizeof(nint) * 2) + offsetOfInstanceIDInCPlusPlusObject);
+            => ReadNativeObjectId<TClass, int>(classRef);
 #endif
-        }
+#endif
+
+        [MethodImpl(AggressiveInlining)]
+        static TObjectID ReadManagedObjectId<TClass, TObjectID>(UnmanagedRef<TClass> classRef)
+            where TClass : UnityEngine.Object
+            where TObjectID : unmanaged
+            => classRef.Read<TObjectID>(sizeof(nint) * 3);
 
 #if !UNITY_EDITOR
         const System.Reflection.BindingFlags PrivateStatic
             = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
-#if MODULE_BURST
-        enum OffsetOfInstanceIDTypeKey { }
 
-        static readonly Unity.Burst.SharedStatic<nint> offsetOfInstanceIDInCPlusPlusObject
-            = Unity.Burst.SharedStatic<nint>.GetOrCreate<nint, OffsetOfInstanceIDTypeKey>();
+        [MethodImpl(AggressiveInlining)]
+        static TObjectID ReadNativeObjectId<TClass, TObjectID>(UnmanagedRef<TClass> classRef)
+            where TClass : UnityEngine.Object
+            where TObjectID : unmanaged
+#if MODULE_BURST
+            => *(TObjectID*)(*(nint*)(classRef.Ptr + sizeof(nint) * 2) + offsetOfNativeObjectIdInCPlusPlusObject.Data);
+#else
+            => *(TObjectID*)(*(nint*)(classRef.Ptr + sizeof(nint) * 2) + offsetOfNativeObjectIdInCPlusPlusObject);
+#endif
+
+        [MethodImpl(AggressiveInlining)]
+        static nint GetOffsetOfNativeObjectIdInCPlusPlusObject()
+            => (int)(
+                typeof(UnityEngine.Object).GetMethod("GetOffsetOfInstanceIDInCPlusPlusObject", PrivateStatic)
+                ?? throw new MissingMethodException(typeof(UnityEngine.Object).FullName, "GetOffsetOfInstanceIDInCPlusPlusObject")
+            ).Invoke(null, Array.Empty<object>())!;
+
+#if MODULE_BURST
+        enum OffsetOfNativeObjectIdTypeKey { }
+
+        static readonly Unity.Burst.SharedStatic<nint> offsetOfNativeObjectIdInCPlusPlusObject
+            = Unity.Burst.SharedStatic<nint>.GetOrCreate<nint, OffsetOfNativeObjectIdTypeKey>();
 
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.BeforeSceneLoad)]
-        static void InitializeOffsetOfInstanceID()
-            => offsetOfInstanceIDInCPlusPlusObject.Data
-                = (int)typeof(UnityEngine.Object)
-                    .GetMethod("GetOffsetOfInstanceIDInCPlusPlusObject", PrivateStatic)
-                    .Invoke(null, Array.Empty<object>());
+        static void InitializeOffsetOfNativeObjectId()
+            => offsetOfNativeObjectIdInCPlusPlusObject.Data = GetOffsetOfNativeObjectIdInCPlusPlusObject();
 #else
-        static readonly nint offsetOfInstanceIDInCPlusPlusObject
-            = (int)typeof(UnityEngine.Object)
-                .GetMethod("GetOffsetOfInstanceIDInCPlusPlusObject", PrivateStatic)
-                .Invoke(null, Array.Empty<object>());
+        static readonly nint offsetOfNativeObjectIdInCPlusPlusObject = GetOffsetOfNativeObjectIdInCPlusPlusObject();
 #endif
 #endif
     }

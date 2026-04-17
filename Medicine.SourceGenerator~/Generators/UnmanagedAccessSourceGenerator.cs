@@ -17,6 +17,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public string ClassName;
         public string ClassFQN;
         public bool IsUnityObject;
+        public bool UsesEntityId;
         public bool IsTracked;
         public GeneratorEnvironment GeneratorEnvironment;
         public AttributeSettings AttributeSettings;
@@ -100,7 +101,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             )
             .Combine(generatorEnvironment)
             .SelectEx((x, ct) => TransformSyntaxContext(x.Left.Context.Value, x.Right, ct)
-            );
+        );
 
         context.RegisterSourceOutputEx(
             source: inputProvider,
@@ -149,6 +150,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             ClassName = typeSymbol.Name,
             ClassFQN = typeSymbol.FQN,
             IsUnityObject = typeSymbol.InheritsFrom(knownSymbols.UnityObject),
+            UsesEntityId = generatorEnvironment.IsUnity64OrNewer,
             IsTracked = trackAttribute is not null,
             SourceGeneratorLocation = new(typeDecl.Identifier.GetLocation()),
             HasCachedEnableBuilderDeferred = new(() =>
@@ -785,9 +787,18 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         using (src.Indent)
                             src.Line.Write($"=> Medicine.UnmanagedRefExtensions.IsInvalid(Ref);");
 
-                        EmitDoc($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.GetInstanceID\" />");
-                        src.Line.Write($"public int InstanceID");
-                        PropertyWithSafetyChecks($"Medicine.UnmanagedRefExtensions.GetInstanceID(Ref);");
+                        if (input.UsesEntityId)
+                        {
+                            EmitDoc($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.GetEntityID\" />");
+                            src.Line.Write($"public global::UnityEngine.EntityId EntityID");
+                            PropertyWithSafetyChecks($"Medicine.UnmanagedRefExtensions.GetEntityID(Ref);");
+                        }
+                        else
+                        {
+                            EmitDoc($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.GetInstanceID\" />");
+                            src.Line.Write($"public int InstanceID");
+                            PropertyWithSafetyChecks($"Medicine.UnmanagedRefExtensions.GetInstanceID(Ref);");
+                        }
                     }
 
                     string GetProjectedType(in FieldInfo field)

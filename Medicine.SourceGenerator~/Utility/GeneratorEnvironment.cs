@@ -9,4 +9,5 @@ public readonly record struct GeneratorEnvironment(ActivePreprocessorSymbolNames
 
     public bool ShouldEmitDocs => PreprocessorSymbols.Has(ActivePreprocessorSymbolNames.DEBUG);
     public bool IsEditor => PreprocessorSymbols.Has(ActivePreprocessorSymbolNames.UNITY_EDITOR);
+    public bool IsUnity64OrNewer => PreprocessorSymbols.Has(ActivePreprocessorSymbolNames.UNITY_6000_4_OR_NEWER);
 }

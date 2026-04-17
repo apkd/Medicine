@@ -6,8 +6,17 @@ static class Stubs
 
           namespace UnityEngine
           {
+              public readonly struct EntityId : IEquatable<EntityId>
+              {
+                  public bool Equals(EntityId other)
+                      => true;
+              }
+
               public class Object
               {
+                  public EntityId GetEntityId()
+                      => default;
+
                   public static T[] FindObjectsOfType<T>() where T : Object
                       => Array.Empty<T>();
 
@@ -164,6 +173,16 @@ static class Stubs
               }
 
               public interface ITrackInstanceIDs : ICustomStorage<ITrackInstanceIDs.Storage>
+              {
+                  void ICustomStorage<Storage>.InitializeStorage(ref Storage storage) { }
+                  void ICustomStorage<Storage>.DisposeStorage(ref Storage storage) { }
+                  void ICustomStorage<Storage>.RegisterInstance(ref Storage storage) { }
+                  void ICustomStorage<Storage>.UnregisterInstance(ref Storage storage, int instanceIndex) { }
+
+                  public sealed class Storage { }
+              }
+
+              public interface ITrackEntityIDs : ICustomStorage<ITrackEntityIDs.Storage>
               {
                   void ICustomStorage<Storage>.InitializeStorage(ref Storage storage) { }
                   void ICustomStorage<Storage>.DisposeStorage(ref Storage storage) { }

@@ -183,6 +183,9 @@ static class RoslynHarness
     static readonly MetadataReference[] defaultReferences = BuildDefaultReferences();
 
     public static CSharpCompilation CreateCompilation(params string[] sourceFiles)
+        => CreateCompilation(parseOptions, sourceFiles);
+
+    public static CSharpCompilation CreateCompilation(CSharpParseOptions parseOptions, params string[] sourceFiles)
         => CSharpCompilation.Create(
             assemblyName: $"Medicine.SourceGenerator.ContractTests.{Guid.NewGuid():N}",
             syntaxTrees: sourceFiles

@@ -3,6 +3,13 @@ using ZLinq;
 #else
 using System.Linq;
 #endif
+#if UNITY_6000_4_OR_NEWER
+using UnityObjectID = UnityEngine.EntityId;
+using TrackObjectIDs = Medicine.ITrackEntityIDs;
+#else
+using UnityObjectID = System.Int32;
+using TrackObjectIDs = Medicine.ITrackInstanceIDs;
+#endif
 using System;
 using System.Collections.Generic;
 using Medicine;
@@ -18,7 +25,14 @@ public partial class TrackAttributePlayModeTests
     public void Cleanup()
         => TestUtility.DestroyAllGameObjects();
 
-    static void RemoveAtSwapBack(List<int> list, int index)
+    static UnityObjectID GetUnityObjectID(UnityEngine.Object obj)
+#if UNITY_6000_4_OR_NEWER
+        => obj.GetEntityId();
+#else
+        => obj.GetInstanceID();
+#endif
+
+    static void RemoveAtSwapBack<T>(List<T> list, int index)
     {
         int last = list.Count - 1;
         list[index] = list[last];
@@ -161,20 +175,20 @@ public partial class TrackAttributePlayModeTests
 
     struct InterfaceFeatureData
     {
-        public int Value;
+        public UnityObjectID Value;
     }
 
     [Track(transformAccessArray: true, initialCapacity: 16)]
-    partial interface ITrackByInterfaceFeatures : IFindByID<int>, IUnmanagedData<InterfaceFeatureData> { }
+    partial interface ITrackByInterfaceFeatures : IFindByID<UnityObjectID>, IUnmanagedData<InterfaceFeatureData> { }
 
     [Track]
     sealed partial class MBTrackByInterfaceFeatures : MonoBehaviour, ITrackByInterfaceFeatures
     {
-        int IFindByID<int>.ID
-            => GetInstanceID();
+        UnityObjectID IFindByID<UnityObjectID>.ID
+            => GetUnityObjectID(this);
 
         void IUnmanagedData<InterfaceFeatureData>.Initialize(out InterfaceFeatureData data)
-            => data = new() { Value = GetInstanceID() };
+            => data = new() { Value = GetUnityObjectID(this) };
     }
 
     [Test]
@@ -194,12 +208,13 @@ public partial class TrackAttributePlayModeTests
             {
                 var component = (MBTrackByInterfaceFeatures)list[i];
                 var byInterface = (ITrackByInterfaceFeatures)component;
+                var objectId = GetUnityObjectID(component);
 
                 Assert.That(((IInstanceIndex<ITrackByInterfaceFeatures>)byInterface).InstanceIndex, Is.EqualTo(i));
                 Assert.That(ITrackByInterfaceFeatures.Track.TransformAccessArray[i], Is.EqualTo(component.transform));
-                Assert.That(ITrackByInterfaceFeatures.Track.Unmanaged.InterfaceFeatureDataArray[i].Value, Is.EqualTo(component.GetInstanceID()));
-                Assert.That(ITrackByInterfaceFeatures.Track.FindByID(component.GetInstanceID()), Is.EqualTo(byInterface));
-                Assert.That(ITrackByInterfaceFeatures.Track.TryFindByID(component.GetInstanceID(), out var found), Is.True);
+                Assert.That(ITrackByInterfaceFeatures.Track.Unmanaged.InterfaceFeatureDataArray[i].Value, Is.EqualTo(objectId));
+                Assert.That(ITrackByInterfaceFeatures.Track.FindByID(objectId), Is.EqualTo(byInterface));
+                Assert.That(ITrackByInterfaceFeatures.Track.TryFindByID(objectId, out var found), Is.True);
                 Assert.That(found, Is.EqualTo(byInterface));
             }
         }
@@ -242,7 +257,7 @@ public partial class TrackAttributePlayModeTests
 
     sealed class CustomStoragePayload
     {
-        public readonly List<int> InstanceIDs = new(capacity: 8);
+        public readonly List<UnityObjectID> EntityIDs = new(capacity: 8);
     }
 
     static class CustomStorageProbe
@@ -262,7 +277,7 @@ public partial class TrackAttributePlayModeTests
     }
 
     [Track]
-    sealed partial class MBTrackCustomStorage : MonoBehaviour, ICustomStorage<CustomStoragePayload>, ITrackInstanceIDs
+    sealed partial class MBTrackCustomStorage : MonoBehaviour, ICustomStorage<CustomStoragePayload>, TrackObjectIDs
     {
         void ICustomStorage<CustomStoragePayload>.InitializeStorage(ref CustomStoragePayload storage)
         {
@@ -279,14 +294,14 @@ public partial class TrackAttributePlayModeTests
         void ICustomStorage<CustomStoragePayload>.RegisterInstance(ref CustomStoragePayload storage)
         {
             CustomStorageProbe.RegisterCalls++;
-            storage.InstanceIDs.Add(GetInstanceID());
+            storage.EntityIDs.Add(GetUnityObjectID(this));
         }
 
         void ICustomStorage<CustomStoragePayload>.UnregisterInstance(ref CustomStoragePayload storage, int instanceIndex)
         {
             CustomStorageProbe.UnregisterCalls++;
-            Assert.That(storage.InstanceIDs[instanceIndex], Is.EqualTo(GetInstanceID()));
-            RemoveAtSwapBack(storage.InstanceIDs, instanceIndex);
+            Assert.That(storage.EntityIDs[instanceIndex], Is.EqualTo(GetUnityObjectID(this)));
+            RemoveAtSwapBack(storage.EntityIDs, instanceIndex);
         }
     }
 
@@ -314,7 +329,11 @@ public partial class TrackAttributePlayModeTests
         c.enabled = false;
         Assert.That(CustomStorageProbe.UnregisterCalls, Is.EqualTo(3));
         Assert.That(CustomStorageProbe.DisposeCalls, Is.EqualTo(1));
+#if UNITY_6000_4_OR_NEWER
+        Assert.That(MBTrackCustomStorage.EntityIDStorage, Is.Null);
+#else
         Assert.That(MBTrackCustomStorage.InstanceIDStorage, Is.Null);
+#endif
 
         a.enabled = true;
         Assert.That(CustomStorageProbe.InitializeCalls, Is.EqualTo(2));
@@ -330,17 +349,21 @@ public partial class TrackAttributePlayModeTests
         {
             using (MBTrackCustomStorage.Instances.ToPooledList(out var list))
             {
-                var payloadIds = MBTrackCustomStorage.CustomStoragePayloadStorage.InstanceIDs;
+                var payloadIds = MBTrackCustomStorage.CustomStoragePayloadStorage.EntityIDs;
+#if UNITY_6000_4_OR_NEWER
+                var trackedIds = MBTrackCustomStorage.EntityIDStorage.EntityIDs.AsArray();
+#else
                 var trackedIds = MBTrackCustomStorage.InstanceIDStorage.InstanceIDs.AsArray();
+#endif
 
                 Assert.That(payloadIds.Count, Is.EqualTo(list.Count));
                 Assert.That(trackedIds.Length, Is.EqualTo(list.Count));
 
                 for (int i = 0; i < list.Count; i++)
                 {
-                    int instanceId = list[i].GetInstanceID();
-                    Assert.That(payloadIds[i], Is.EqualTo(instanceId));
-                    Assert.That(trackedIds[i], Is.EqualTo(instanceId));
+                    var entityId = GetUnityObjectID(list[i]);
+                    Assert.That(payloadIds[i], Is.EqualTo(entityId));
+                    Assert.That(trackedIds[i], Is.EqualTo(entityId));
                 }
             }
         }
@@ -348,7 +371,7 @@ public partial class TrackAttributePlayModeTests
 
     sealed class InterfaceCustomStoragePayload
     {
-        public readonly List<int> InstanceIDs = new(capacity: 8);
+        public readonly List<UnityObjectID> EntityIDs = new(capacity: 8);
     }
 
     static class InterfaceCustomStorageProbe
@@ -368,7 +391,7 @@ public partial class TrackAttributePlayModeTests
     }
 
     [Track]
-    partial interface ITrackByInterfaceCustomStorage : ICustomStorage<InterfaceCustomStoragePayload>, ITrackInstanceIDs
+    partial interface ITrackByInterfaceCustomStorage : ICustomStorage<InterfaceCustomStoragePayload>, TrackObjectIDs
     {
         void ICustomStorage<InterfaceCustomStoragePayload>.InitializeStorage(ref InterfaceCustomStoragePayload storage)
         {
@@ -385,14 +408,14 @@ public partial class TrackAttributePlayModeTests
         void ICustomStorage<InterfaceCustomStoragePayload>.RegisterInstance(ref InterfaceCustomStoragePayload storage)
         {
             InterfaceCustomStorageProbe.RegisterCalls++;
-            storage.InstanceIDs.Add(((UnityEngine.Object)this).GetInstanceID());
+            storage.EntityIDs.Add(GetUnityObjectID((UnityEngine.Object)this));
         }
 
         void ICustomStorage<InterfaceCustomStoragePayload>.UnregisterInstance(ref InterfaceCustomStoragePayload storage, int instanceIndex)
         {
             InterfaceCustomStorageProbe.UnregisterCalls++;
-            Assert.That(storage.InstanceIDs[instanceIndex], Is.EqualTo(((UnityEngine.Object)this).GetInstanceID()));
-            RemoveAtSwapBack(storage.InstanceIDs, instanceIndex);
+            Assert.That(storage.EntityIDs[instanceIndex], Is.EqualTo(GetUnityObjectID((UnityEngine.Object)this)));
+            RemoveAtSwapBack(storage.EntityIDs, instanceIndex);
         }
     }
 
@@ -423,23 +446,31 @@ public partial class TrackAttributePlayModeTests
         c.enabled = false;
         Assert.That(InterfaceCustomStorageProbe.UnregisterCalls, Is.EqualTo(3));
         Assert.That(InterfaceCustomStorageProbe.DisposeCalls, Is.EqualTo(1));
+#if UNITY_6000_4_OR_NEWER
+        Assert.That(ITrackByInterfaceCustomStorage.Track.EntityIDStorage, Is.Null);
+#else
         Assert.That(ITrackByInterfaceCustomStorage.Track.InstanceIDStorage, Is.Null);
+#endif
 
         void AssertByInterfaceCustomStorageAligned()
         {
             using (ITrackByInterfaceCustomStorage.Track.Instances.ToPooledList(out var list))
             {
-                var payloadIds = ITrackByInterfaceCustomStorage.Track.InterfaceCustomStoragePayloadStorage.InstanceIDs;
+                var payloadIds = ITrackByInterfaceCustomStorage.Track.InterfaceCustomStoragePayloadStorage.EntityIDs;
+#if UNITY_6000_4_OR_NEWER
+                var trackedIds = ITrackByInterfaceCustomStorage.Track.EntityIDStorage.EntityIDs.AsArray();
+#else
                 var trackedIds = ITrackByInterfaceCustomStorage.Track.InstanceIDStorage.InstanceIDs.AsArray();
+#endif
 
                 Assert.That(payloadIds.Count, Is.EqualTo(list.Count));
                 Assert.That(trackedIds.Length, Is.EqualTo(list.Count));
 
                 for (int i = 0; i < list.Count; i++)
                 {
-                    int instanceId = ((UnityEngine.Object)list[i]).GetInstanceID();
-                    Assert.That(payloadIds[i], Is.EqualTo(instanceId));
-                    Assert.That(trackedIds[i], Is.EqualTo(instanceId));
+                    var entityId = GetUnityObjectID((UnityEngine.Object)list[i]);
+                    Assert.That(payloadIds[i], Is.EqualTo(entityId));
+                    Assert.That(trackedIds[i], Is.EqualTo(entityId));
                 }
             }
         }

@@ -285,8 +285,13 @@ public partial class UnmanagedAccessTests
         UnmanagedRef<UnityObjectAccess> unmanagedRef = component;
         var access = unmanagedRef.AccessRW();
 
+#if UNITY_6000_4_OR_NEWER
+        Assert.That(unmanagedRef.GetEntityID(), Is.EqualTo(component.GetEntityId()));
+        Assert.That(access.EntityID, Is.EqualTo(component.GetEntityId()));
+#else
         Assert.That(unmanagedRef.GetInstanceID(), Is.EqualTo(component.GetInstanceID()));
         Assert.That(access.InstanceID, Is.EqualTo(component.GetInstanceID()));
+#endif
 
         Assert.That(unmanagedRef.IsInvalid(), Is.False);
         Assert.That(unmanagedRef.IsValid(), Is.True);

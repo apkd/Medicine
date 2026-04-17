@@ -364,7 +364,7 @@ LazyRef<GameObject> myPrefab // for reference types
     = Lazy.From(() => Resources.Load<GameObject>("MyPrefab"));
 
 LazyVal<int> numActive // for value types
-    = Lazy.From(() => GameObject.FindObjectsOfType<GameObject>().Length);
+    = Lazy.From(() => GameObject.FindObjectsByType<GameObject>().Length);
 ```
 
 ## APIs for finding objects by type

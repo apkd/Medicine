@@ -29,7 +29,7 @@ namespace Medicine
         /// <list type="bullet">
         /// <item> MonoBehaviours and ScriptableObjects decorated with [<see cref="SingletonAttribute"/>] will automatically register/unregister themselves
         /// as the active singleton instance in OnEnable/OnDisable. </item>
-        /// <item> In edit mode, to provide better compatibility with editor tooling, <see cref="UnityEngine.Object.FindObjectsByType(System.Type,FindObjectsSortMode)"/>
+        /// <item> In edit mode, to provide better compatibility with editor tooling, <see cref="UnityEngine.Object.FindObjectsByType(System.Type)"/>
         /// is used internally to attempt to locate the object (cached for one editor update). </item>
         /// </list>
         /// </remarks>
@@ -71,7 +71,7 @@ namespace Medicine
         /// <item> MonoBehaviours and ScriptableObjects marked with the <see cref="TrackAttribute"/> will automatically register/unregister themselves
         /// in the active instance list in OnEnable/OnDisable. </item>
         /// <item> When there are no active instances, the returned enumerable is empty. </item>
-        /// <item> In edit mode, to provide better compatibility with editor tooling, <see cref="Object.FindObjectsByType(System.Type,UnityEngine.FindObjectsSortMode)"/>
+        /// <item> In edit mode, to provide better compatibility with editor tooling, <see cref="Object.FindObjectsByType(System.Type)"/>
         /// is used internally to find object instances (cached for one editor update). </item>
         /// <item> You can use <c>foreach</c> to iterate over the instances. </item>
         /// <item> If you're enabling/disabling instances while enumerating, use <c>Find.Instances&lt;T&gt;().WithCopy</c>. </item>
@@ -120,17 +120,13 @@ namespace Medicine
             => new(scene, includeInactive);
 
         /// <summary>
-        /// Equivalent to <see cref="Object.FindObjectsByType{T}(FindObjectsInactive,FindObjectsSortMode)"/>.
+        /// Equivalent to <see cref="Object.FindObjectsByType{T}(FindObjectsInactive)"/>.
         /// Slightly faster because this implementation avoids an unnecessary array copy.
         /// <p>Retrieves a list of all loaded objects of type <typeparamref name="T"/>.</p>
         /// </summary>
         /// <param name="includeInactive">
         /// Whether to include components attached to inactive GameObjects.
         /// If you don't specify this parameter, this function doesn't include inactive objects in the results.
-        /// </param>
-        /// <param name="sortMode">
-        /// Whether to sort the returned array by <see cref="Object.m_InstanceID"/>.
-        /// Not sorting the array makes this function run significantly faster.
         /// </param>
         /// <returns>
         /// <p>The array of objects found matching the type specified.</p>
@@ -141,7 +137,11 @@ namespace Medicine
         /// <p>Consider using <see cref="Instances{T}"/> instead when possible.</p>
         /// </remarks>
         [MethodImpl(AggressiveInlining)]
+#if UNITY_6000_4_OR_NEWER
+        public static T[] ObjectsByType<T>(bool includeInactive = false)
+#else
         public static T[] ObjectsByType<T>(bool includeInactive = false, FindObjectsSortMode sortMode = 0)
+#endif
             where T : class
         {
             if (Utility.TypeInfo<T>.IsInterface)
@@ -152,8 +152,10 @@ namespace Medicine
 
                 var temp = Object.FindObjectsByType(
                     type: typeof(Object),
-                    includeInactive ? Include : Exclude,
-                    sortMode
+                    includeInactive ? Include : Exclude
+#if !UNITY_6000_4_OR_NEWER
+                    , sortMode
+#endif
                 );
 
                 int count = 0;
@@ -174,8 +176,10 @@ namespace Medicine
 
             var array = Object.FindObjectsByType(
                 type: typeof(T),
-                includeInactive ? Include : Exclude,
-                sortMode
+                includeInactive ? Include : Exclude
+#if !UNITY_6000_4_OR_NEWER
+                , sortMode
+#endif
             );
 
             // the array type returned by the API is actually already T[]; it turns out that in the generic
@@ -231,7 +235,7 @@ namespace Medicine
         /// prefabs, materials, meshes, textures, etc. It will also list internal objects, therefore,
         /// be careful with the way you handle the returned objects.
         /// </p>
-        /// <p> Contrary to <see cref="Object.FindObjectsByType{T}(FindObjectsInactive,FindObjectsSortMode)"/>, this function will always list disabled objects.</p>
+        /// <p> Contrary to <see cref="Object.FindObjectsByType{T}(FindObjectsInactive)"/>, this function will always list disabled objects.</p>
         /// </summary>
         /// <typeparam name="T"> Type of object to find. </typeparam>
         /// <returns>

@@ -26,6 +26,9 @@ static class UnmanagedAccessSourceGeneratorTest
     public static readonly DiagnosticTest ManagedValueTypeProjectionCase =
         new("UnmanagedAccess generator projects managed value types as refs", RunManagedValueTypeProjectionContract);
 
+    public static readonly DiagnosticTest UnityObjectIdentityCase =
+        new("UnmanagedAccess generator emits EntityID for UnityEngine.Object types when GetEntityId is available", RunUnityObjectIdentityContract);
+
     static void Run()
         => SourceGeneratorTester.AssertGeneratesMoreSourcesThanBaseline(
             baselineSource: """
@@ -107,7 +110,7 @@ partial class UnmanagedAccessImplicitInstanceIndexComponent : MonoBehaviour
             generators: [new UnmanagedAccessSourceGenerator().AsSourceGenerator()],
             parseOptions: CSharpParseOptions.Default
                 .WithLanguageVersion(LanguageVersion.Preview)
-                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB", "UNITY_6000_4_OR_NEWER")
         );
 
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
@@ -171,7 +174,7 @@ sealed partial class UnmanagedAccessRangeContractComponent : MonoBehaviour
             generators: [new UnmanagedAccessSourceGenerator().AsSourceGenerator()],
             parseOptions: CSharpParseOptions.Default
                 .WithLanguageVersion(LanguageVersion.Preview)
-                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB", "UNITY_6000_4_OR_NEWER")
         );
 
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
@@ -306,6 +309,81 @@ partial class Outer
                 return;
 
             ThrowMissingAny(first, second);
+        }
+    }
+
+    static void RunUnityObjectIdentityContract()
+    {
+        var parseOptions = CSharpParseOptions.Default
+            .WithLanguageVersion(LanguageVersion.Preview)
+            .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB", "UNITY_6000_4_OR_NEWER");
+
+        var compilation = RoslynHarness.CreateCompilation(
+            parseOptions,
+            Stubs.Core,
+            """
+using Medicine;
+using UnityEngine;
+
+[UnmanagedAccess]
+sealed partial class UnmanagedAccessUnityObjectIdentityComponent : MonoBehaviour
+{
+    int counter;
+}
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new UnmanagedAccessSourceGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "UnityEngine.Object identity accessor generation should not throw"
+        );
+
+        int entityIdPropertyCount = 0;
+        int instanceIdPropertyCount = 0;
+        foreach (var result in run.Results)
+        foreach (var generatedSource in result.GeneratedSources)
+        {
+            var text = generatedSource.SourceText.ToString();
+            entityIdPropertyCount += CountOccurrences(text, "public global::UnityEngine.EntityId EntityID");
+            instanceIdPropertyCount += CountOccurrences(text, "public int InstanceID");
+        }
+
+        if (entityIdPropertyCount is not 2)
+            throw new InvalidOperationException(
+                "Expected unmanaged-access generation to emit the UnityEngine.EntityId-based EntityID accessor once for AccessRW and once for AccessRO." + Environment.NewLine +
+                $"Actual EntityID count: {entityIdPropertyCount}."
+            );
+
+        if (instanceIdPropertyCount is 0)
+            return;
+
+        throw new InvalidOperationException(
+            "Expected EntityId-based unmanaged access generation to omit the legacy InstanceID accessor." + Environment.NewLine +
+            $"Actual InstanceID count: {instanceIdPropertyCount}."
+        );
+
+        static int CountOccurrences(string source, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while (true)
+            {
+                index = source.IndexOf(value, index, StringComparison.Ordinal);
+                if (index < 0)
+                    return count;
+
+                count++;
+                index += value.Length;
+            }
         }
     }
 

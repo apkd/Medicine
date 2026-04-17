@@ -16,6 +16,7 @@ public readonly record struct KnownSymbols
     public INamedTypeSymbol UnmanagedDataInterface { get; }
     public INamedTypeSymbol CustomStorageInterface { get; }
     public INamedTypeSymbol TrackInstanceIDsInterface { get; }
+    public INamedTypeSymbol TrackEntityIDsInterface { get; }
     public INamedTypeSymbol TrackingIdInterface { get; }
     public INamedTypeSymbol TrackedInstances { get; }
     public INamedTypeSymbol LazyRef { get; }
@@ -72,6 +73,9 @@ public readonly record struct KnownSymbols
 
         TrackInstanceIDsInterface
             = Get(Constants.TrackInstanceIDsInterfaceMetadataName);
+
+        TrackEntityIDsInterface
+            = Get(Constants.TrackEntityIDsInterfaceMetadataName);
 
         TrackingIdInterface
             = Get($"{Constants.TrackingIdInterfaceMetadataName}`1");

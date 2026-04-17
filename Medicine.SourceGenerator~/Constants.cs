@@ -57,6 +57,10 @@ static class Constants
     public const string TrackInstanceIDsInterfaceMetadataName = $"{Namespace}.{TrackInstanceIDsInterfaceName}";
     public const string TrackInstanceIDsInterfaceFQN = $"{NamespaceWithGlobal}.{TrackInstanceIDsInterfaceName}";
 
+    public const string TrackEntityIDsInterfaceName = "ITrackEntityIDs";
+    public const string TrackEntityIDsInterfaceMetadataName = $"{Namespace}.{TrackEntityIDsInterfaceName}";
+    public const string TrackEntityIDsInterfaceFQN = $"{NamespaceWithGlobal}.{TrackEntityIDsInterfaceName}";
+
     public const string TrackingIdInterfaceName = "IFindByID";
     public const string TrackingIdInterfaceMetadataName = $"{Namespace}.{TrackingIdInterfaceName}";
     public const string TrackingIdInterfaceFQN = $"{NamespaceWithGlobal}.{TrackingIdInterfaceName}";

@@ -106,9 +106,31 @@ namespace Medicine
     }
 
     /// <summary>
-    /// Provides a <see cref="TrackAttribute"/>-marked class with a list of tracked instance IDs.
+    /// Provides a <see cref="TrackAttribute"/>-marked class with a list of tracked object IDs.
     /// </summary>
     [SuppressMessage("ReSharper", "SuspiciousTypeConversion.Global")]
+#if UNITY_6000_4_OR_NEWER
+    public interface ITrackEntityIDs : ICustomStorage<ITrackEntityIDs.EntityIDStorage>
+    {
+        void ICustomStorage<EntityIDStorage>.InitializeStorage(ref EntityIDStorage storage)
+            => storage = new();
+
+        void ICustomStorage<EntityIDStorage>.DisposeStorage(ref EntityIDStorage storage)
+            => storage.EntityIDs.Dispose();
+
+        void ICustomStorage<EntityIDStorage>.RegisterInstance(ref EntityIDStorage storage)
+            => storage.EntityIDs.Add(((UnityEngine.Object)this).GetEntityId());
+
+        void ICustomStorage<EntityIDStorage>.UnregisterInstance(ref EntityIDStorage storage, int instanceIndex)
+            => storage.EntityIDs.RemoveAtSwapBack(instanceIndex);
+
+        public sealed class EntityIDStorage
+        {
+            public Unity.Collections.NativeList<UnityEngine.EntityId> EntityIDs
+                = new(initialCapacity: 8, Unity.Collections.Allocator.Persistent);
+        }
+    }
+#else
     public interface ITrackInstanceIDs : ICustomStorage<ITrackInstanceIDs.InstanceIDStorage>
     {
         void ICustomStorage<InstanceIDStorage>.InitializeStorage(ref InstanceIDStorage storage)
@@ -129,6 +151,7 @@ namespace Medicine
                 = new(initialCapacity: 8, Unity.Collections.Allocator.Persistent);
         }
     }
+#endif
 
     /// <summary>
     /// Provides a <see cref="TrackAttribute"/>-marked class with an array of unmanaged structs,

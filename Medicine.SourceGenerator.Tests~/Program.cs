@@ -73,6 +73,7 @@ DiagnosticTest[] cases =
     UnionNestedSourceGeneratorTest.Case,
     UnionNestedSourceGeneratorTest.HeaderFieldForwardingCase,
     UnmanagedAccessSourceGeneratorTest.Case,
+    UnmanagedAccessSourceGeneratorTest.UnityObjectIdentityCase,
     UnmanagedAccessSourceGeneratorTest.RangeIndexerCase,
     UnmanagedAccessSourceGeneratorTest.ProjectionCase,
     UnmanagedAccessSourceGeneratorTest.ManagedValueTypeProjectionCase,

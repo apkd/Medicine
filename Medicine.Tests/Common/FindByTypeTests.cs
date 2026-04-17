@@ -24,17 +24,27 @@ public partial class FindByTypeTests
     public void Cleanup()
         => TestUtility.DestroyAllGameObjects();
 
+#if UNITY_6000_4_OR_NEWER
+    [TestCase(false)]
+    [TestCase(true)]
+    public void ObjectsByType_IsUsable(bool includeInactive)
+#else
     [TestCase(false, FindObjectsSortMode.None)]
     [TestCase(true, FindObjectsSortMode.None)]
     [TestCase(true, FindObjectsSortMode.InstanceID)]
     public void ObjectsByType_IsUsable(bool includeInactive, FindObjectsSortMode sortMode)
+#endif
     {
         try
         {
             CreateWithComponent<TestComponentA>("Test.Active", active: true);
             CreateWithComponent<TestComponentA>("Test.Inactive", active: false);
 
+#if UNITY_6000_4_OR_NEWER
+            var results = Find.ObjectsByType<TestComponentA>(includeInactive);
+#else
             var results = Find.ObjectsByType<TestComponentA>(includeInactive, sortMode);
+#endif
 
             Assert.That(results, Is.Not.Null);
             Assert.That(results.GetType(), Is.EqualTo(typeof(TestComponentA[])));
