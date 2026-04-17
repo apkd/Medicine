@@ -55,17 +55,17 @@ jobs:
       matrix:
         UNITY_VERSION: [
           # 6.5
-          6000.5.0a9,
+          6000.5.0b4,
           # 6.4
-          6000.4.0f1,
+          6000.4.3f1,
           # 6.3
-          6000.3.12f1,
+          6000.3.13f1,
           # 6.2
           6000.2.15f1,
           # 6.1
           6000.1.17f1,
           # 6.0
-          6000.0.71f1,
+          6000.0.73f1,
           # 2023.2
           2023.2.0f1, 2023.2.22f1,
           # 2022.3 -- AFAIK 12f is the earliest version with functioning incremental source generators
