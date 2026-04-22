@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -14,6 +15,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public string Name { get; init; }
         public string ReturnTypeFQN { get; init; }
         public EquatableArray<string> Parameters { get; init; }
+        public EquatableArray<string> ParameterTypeFQNs { get; init; }
         public EquatableArray<byte> ParameterRefKinds { get; init; }
         public bool IsProperty { get; init; }
         public bool CanGet { get; init; }
@@ -36,7 +38,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
         public byte AssignedId { get; init; }
         public int EstimatedSizeInBytes { get; init; }
         public bool HasDirectHeader { get; init; }
-        public EquatableArray<string> PubliclyImplementedMembers { get; init; }
+        public EquatableArray<string> PublicMethodSignatures { get; init; }
+        public EquatableArray<string> PublicGettableProperties { get; init; }
+        public EquatableArray<string> PublicSettableProperties { get; init; }
         public EquatableArray<string> MemberNames { get; init; }
         public EquatableArray<string> ConstructorMemberInitializers { get; init; }
         public bool HasParameterlessConstructor { get; init; }
@@ -44,7 +48,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
     record struct DerivedDeferredInput
     {
-        public EquatableArray<string> PublicMembers { get; init; }
+        public EquatableArray<string> PublicMethodSignatures { get; init; }
+        public EquatableArray<string> PublicGettableProperties { get; init; }
+        public EquatableArray<string> PublicSettableProperties { get; init; }
         public EquatableArray<string> MemberNames { get; init; }
         public EquatableArray<string> ConstructorMemberInitializers { get; init; }
         public bool HasParameterlessConstructor { get; init; }
@@ -311,13 +317,16 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
 
                     int parameterCount = method.Parameters.Length;
                     var parameterRefKinds = new byte[parameterCount];
+                    string[] parameterTypeFQNs = new string[parameterCount];
                     string[] parameters = new string[parameterCount];
 
                     for (int i = 0; i < parameterCount; i++)
                     {
                         var parameter = method.Parameters[i];
+                        string parameterTypeFQN = parameter.Type.FQN;
                         parameterRefKinds[i] = (byte)parameter.RefKind;
-                        parameters[i] = $"{parameter.Type.FQN} {parameter.Name}";
+                        parameters[i] = $"{parameterTypeFQN} {parameter.Name}";
+                        parameterTypeFQNs[i] = parameterTypeFQN;
                     }
 
                     members.Add(
@@ -326,6 +335,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                             Name = method.Name,
                             ReturnTypeFQN = method.ReturnType.FQN,
                             Parameters = parameters,
+                            ParameterTypeFQNs = parameterTypeFQNs,
                             ParameterRefKinds = parameterRefKinds,
                             IsProperty = false,
                         }
@@ -494,13 +504,34 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
     }
 
     static DerivedDeferredInput BuildDerivedDeferredInput(INamedTypeSymbol symbol)
-        => new()
+    {
+        using var r1 = Scratch.RentA<HashSet<string>>(out var publicMethodSignatures);
+        using var r2 = Scratch.RentA<HashSet<string>>(out var publicGettableProperties);
+        using var r3 = Scratch.RentA<HashSet<string>>(out var publicSettableProperties);
+
+        foreach (var member in symbol.GetMembers())
         {
-            PublicMembers = symbol.GetMembers()
-                .Where(x => x is { DeclaredAccessibility: Public } and not IMethodSymbol { MethodKind: not MethodKind.Ordinary })
-                .Select(x => x.Name)
-                .Distinct()
-                .ToArray(),
+            switch (member)
+            {
+                case IMethodSymbol { DeclaredAccessibility: Public, MethodKind: MethodKind.Ordinary, IsStatic: false } method:
+                    publicMethodSignatures.Add(BuildMethodDispatchKey(method));
+                    break;
+                case IPropertySymbol { IsIndexer: false, IsStatic: false } property:
+                    if (property.GetMethod is { DeclaredAccessibility: Public, IsStatic: false })
+                        publicGettableProperties.Add(BuildPropertyDispatchKey(property.Name, property.Type.FQN));
+
+                    if (property.SetMethod is { DeclaredAccessibility: Public, IsStatic: false })
+                        publicSettableProperties.Add(BuildPropertyDispatchKey(property.Name, property.Type.FQN));
+
+                    break;
+            }
+        }
+
+        return new()
+        {
+            PublicMethodSignatures = ToSortedArray(publicMethodSignatures),
+            PublicGettableProperties = ToSortedArray(publicGettableProperties),
+            PublicSettableProperties = ToSortedArray(publicSettableProperties),
             MemberNames = symbol.GetMembers()
                 .Select(x => x.Name)
                 .Distinct()
@@ -508,6 +539,60 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
             ConstructorMemberInitializers = BuildConstructorMemberInitializers(symbol),
             HasParameterlessConstructor = symbol.InstanceConstructors.Any(x => x is { Parameters.Length: 0, IsImplicitlyDeclared: false }),
         };
+    }
+
+    static string BuildMethodDispatchKey(IMethodSymbol method)
+    {
+        using var r1 = Scratch.RentA<List<string>>(out var parts);
+        parts.Add(method.Name);
+        parts.Add(method.ReturnType.FQN);
+
+        foreach (var parameter in method.Parameters)
+        {
+            parts.Add(((byte)parameter.RefKind).ToString(CultureInfo.InvariantCulture));
+            parts.Add(parameter.Type.FQN);
+        }
+
+        return parts.Join("|");
+    }
+
+    static string BuildMethodDispatchKey(in InterfaceMemberInput member)
+    {
+        using var r1 = Scratch.RentA<List<string>>(out var parts);
+        parts.Add(member.Name);
+        parts.Add(member.ReturnTypeFQN);
+
+        var parameterRefKinds = member.ParameterRefKinds.AsArray();
+        var parameterTypeFQNs = member.ParameterTypeFQNs.AsArray();
+        for (int i = 0; i < parameterTypeFQNs.Length; i++)
+        {
+            parts.Add(parameterRefKinds[i].ToString(CultureInfo.InvariantCulture));
+            parts.Add(parameterTypeFQNs[i]);
+        }
+
+        return parts.Join("|");
+    }
+
+    static string BuildPropertyDispatchKey(string name, string typeFQN)
+        => $"{name}|{typeFQN}";
+
+    static bool CanUseDirectGetterFastPath(in DerivedInput derived, in InterfaceMemberInput member)
+        => member.IsProperty
+            ? HasDispatchKey(derived.PublicGettableProperties, BuildPropertyDispatchKey(member.Name, member.ReturnTypeFQN))
+            : HasDispatchKey(derived.PublicMethodSignatures, BuildMethodDispatchKey(in member));
+
+    static bool CanUseDirectSetterFastPath(in DerivedInput derived, in InterfaceMemberInput member)
+        => HasDispatchKey(derived.PublicSettableProperties, BuildPropertyDispatchKey(member.Name, member.ReturnTypeFQN));
+
+    static bool HasDispatchKey(EquatableArray<string> values, string key)
+        => Array.BinarySearch(values.AsArray(), key, StringComparer.Ordinal) >= 0;
+
+    static string[] ToSortedArray(HashSet<string> values)
+    {
+        var result = values.ToArray();
+        Array.Sort(result, StringComparer.Ordinal);
+        return result;
+    }
 
     static string[] BuildConstructorMemberInitializers(INamedTypeSymbol symbol)
     {
@@ -652,7 +737,9 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     AssignedId = assigned.AssignedId,
                     EstimatedSizeInBytes = candidate.EstimatedSizeInBytesDeferred?.Value ?? -1,
                     HasDirectHeader = candidateFacts.DirectHeaderFQN.Equals(headerFQN, Ordinal),
-                    PubliclyImplementedMembers = deferredInput.PublicMembers,
+                    PublicMethodSignatures = deferredInput.PublicMethodSignatures,
+                    PublicGettableProperties = deferredInput.PublicGettableProperties,
+                    PublicSettableProperties = deferredInput.PublicSettableProperties,
                     MemberNames = deferredInput.MemberNames,
                     ConstructorMemberInitializers = deferredInput.ConstructorMemberInitializers,
                     HasParameterlessConstructor = deferredInput.HasParameterlessConstructor,
@@ -1165,7 +1252,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                                             ? ", "
                                             : "";
 
-                                        if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
+                                        if (CanUseDirectGetterFastPath(in derived, in member))
                                         {
                                             src.Line.Write($"{m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke}; return;");
                                         }
@@ -1213,7 +1300,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                                             ? ", "
                                             : "";
 
-                                        if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
+                                        if (CanUseDirectGetterFastPath(in derived, in member))
                                         {
                                             src.Line.Write($"=> {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name}{callParametersWithInvoke},");
                                         }
@@ -1275,7 +1362,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                             src.Line.Write($"case {input.TypeIDEnumFQN}.{derived.Name}:");
                             using (src.Indent)
                             {
-                                if (derived.PubliclyImplementedMembers.AsArray().Contains(member.Name))
+                                if (CanUseDirectSetterFastPath(in derived, in member))
                                     src.Line.Write($"{m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self).{member.Name} = value; return;");
                                 else
                                     src.Line.Write($"{setterGenericInvokeName}(ref {m}UnsafeUtility.As<{input.BaseTypeFQN}, {derived.FQN}>(ref self), value); return;");

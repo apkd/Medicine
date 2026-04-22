@@ -16,6 +16,9 @@ static class UnionSourceGeneratorTest
     public static readonly DiagnosticTest HeaderPropertyAccessorForwardingCase =
         new("Union generator forwards only accessible header property accessors", RunHeaderPropertyAccessorForwarding);
 
+    public static readonly DiagnosticTest SignatureAwareDispatchCase =
+        new("Union generator only uses direct dispatch for exact method and property signatures", RunSignatureAwareDispatch);
+
     public static readonly DiagnosticTest WrapperCase =
         new("Union generator emits Wrapper for non-generic headers", RunWrapper);
 
@@ -274,6 +277,94 @@ static class UsageNegative
         throw new InvalidOperationException(
             "Expected inaccessible accessors to be omitted from forwarded properties." + Environment.NewLine +
             $"Actual diagnostics:{Environment.NewLine}{RoslynHarness.FormatDiagnostics(expectedInaccessibleAccessorErrors)}"
+        );
+    }
+
+    static void RunSignatureAwareDispatch()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+
+public struct RawExecutionContext
+{
+    public int Value;
+}
+
+public struct ExecutionContext<TState>
+{
+    public RawExecutionContext Raw;
+    public TState State;
+}
+
+[UnionHeader]
+public partial struct DispatchUnion
+{
+    public interface Interface
+    {
+        void Execute(ref RawExecutionContext context)
+        {
+            var typedContext = new ExecutionContext<int>
+            {
+                Raw = context,
+                State = context.Value,
+            };
+
+            Execute(ref typedContext);
+            context = typedContext.Raw;
+        }
+
+        void Execute(ref ExecutionContext<int> context);
+
+        int Count { get; set; }
+    }
+
+    public TypeIDs TypeID;
+}
+
+[Union(1)]
+public partial struct DispatchUnionA : DispatchUnion.Interface
+{
+    public DispatchUnion Header;
+    public string Count { get; set; }
+
+    public void Execute(ref ExecutionContext<int> context)
+        => context.Raw.Value = context.State + 1;
+
+    int DispatchUnion.Interface.Count
+    {
+        get => Count.Length;
+        set => Count = new string('x', value);
+    }
+}
+"""
+        );
+
+        var run = RoslynHarness.RunGenerators(
+            compilation,
+            [new UnionStructSourceGenerator()],
+            []
+        );
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.GeneratorDiagnostics,
+            id: "MED911",
+            because: "signature-aware direct dispatch should not throw in generator"
+        );
+
+        var signatureDispatchErrors = run.CompilationDiagnostics
+            .Where(x => x.Severity == DiagnosticSeverity.Error)
+            .Where(x => x.Location.GetLineSpan().Path.Contains("DispatchUnion", StringComparison.Ordinal))
+            .Where(x => x.Id is "CS1503" or "CS0029" or "CS0266")
+            .ToArray();
+
+        if (signatureDispatchErrors.Length == 0)
+            return;
+
+        throw new InvalidOperationException(
+            "Expected same-name but incompatible public members to fall back to interface dispatch helpers." + Environment.NewLine +
+            $"Actual diagnostics:{Environment.NewLine}{RoslynHarness.FormatDiagnostics(signatureDispatchErrors)}"
         );
     }
 
