@@ -1105,15 +1105,15 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 src.Doc?.Write("/// </summary>");
 
                 src.Line.Write(Alias.Inline);
-                src.Line.Write($"public static {m}Self.Unmanaged.AccessRW AccessRW(this ref UnmanagedRef<{m}Self> classRef)");
+                src.Line.Write($"public static {m}Self.Unmanaged.AccessRW AccessRW(this in UnmanagedRef<{m}Self> classRef)");
                 using (src.Indent)
                     src.Line.Write("=> new(classRef);");
 
                 src.Linebreak();
 
-                src.Doc?.Write($"/// <inheritdoc cref=\"AccessRW(ref UnmanagedRef{{T}})\" />");
+                src.Doc?.Write($"/// <inheritdoc cref=\"AccessRW(in UnmanagedRef{{T}})\" />");
                 src.Line.Write(Alias.Inline);
-                src.Line.Write($"public static {m}Self.Unmanaged.AccessRW AccessRW(this ref UnmanagedRef<{m}Self> classRef, ref {m}Self.Unmanaged.Layout layout)");
+                src.Line.Write($"public static {m}Self.Unmanaged.AccessRW AccessRW(this in UnmanagedRef<{m}Self> classRef, ref {m}Self.Unmanaged.Layout layout)");
                 using (src.Indent)
                     src.Line.Write("=> new(classRef, ref layout);");
 
