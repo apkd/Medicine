@@ -26,8 +26,8 @@ namespace Medicine.Internal
     [UsedImplicitly, StructLayout(LayoutKind.Sequential)]
     sealed class ArrayView<T>
     {
+        public nint Bounds;
         public long Length;
-        public long Bounds;
         public T Elements = default!;
     }
 
@@ -111,6 +111,126 @@ namespace Medicine.Internal
         public static UnsafeList<T> AsUnsafeList<T>(T[]? array)
             where T : unmanaged
             => AsUnsafeList<T, T>(array);
+
+        [MethodImpl(AggressiveInlining)]
+        public static unsafe NativeArray<TTo> AsNativeArray<TFrom, TTo>(TFrom[]? array)
+            where TTo : unmanaged
+        {
+            if (array is not { Length: > 0 })
+                return default;
+
+            var arrayData = UnsafeUtility.As<TFrom[], ArrayView<TTo>>(ref array);
+            var nativeArray = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<TTo>(
+                dataPointer: UnsafeUtility.AddressOf(ref arrayData.Elements),
+                length: array.Length,
+                allocator: Allocator.None
+            );
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref nativeArray, AtomicSafetyHandle.GetTempMemoryHandle());
+#endif
+            return nativeArray;
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public static NativeArray<TTo>.ReadOnly AsNativeArrayRO<TFrom, TTo>(TFrom[]? array)
+            where TTo : unmanaged
+        {
+            var nativeArray = AsNativeArray<TFrom, TTo>(array);
+            return nativeArray.AsReadOnly();
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public static int GetArrayLength<T>(UnmanagedRef<T[]> arrayRef, int arrayLengthOffset)
+            => arrayRef.Ptr is 0 ? 0 : (int)arrayRef.Read<long>(arrayLengthOffset);
+
+        public static unsafe ushort GetArrayLengthOffset<T>()
+        {
+            var array = new T[1];
+            var arrayRef = new UnmanagedRef<T[]>(array);
+            var view = UnsafeUtility.As<T[], ArrayView<T>>(ref array);
+            return (ushort)((nint)UnsafeUtility.AddressOf(ref view.Length) - arrayRef.Ptr);
+        }
+
+        public static unsafe ushort GetArrayDataOffset<TFrom, TTo>()
+            where TTo : unmanaged
+        {
+            var array = new TFrom[1];
+            var arrayRef = new UnmanagedRef<TFrom[]>(array);
+            var view = UnsafeUtility.As<TFrom[], ArrayView<TTo>>(ref array);
+            return (ushort)((nint)UnsafeUtility.AddressOf(ref view.Elements) - arrayRef.Ptr);
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public static unsafe NativeArray<TTo> AsNativeArray<TFrom, TTo>(
+            UnmanagedRef<TFrom[]> arrayRef,
+            int length,
+            int arrayDataOffset
+        ) where TTo : unmanaged
+        {
+            if (arrayRef.Ptr is 0 || length <= 0)
+                return default;
+
+            var nativeArray = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<TTo>(
+                dataPointer: (void*)(arrayRef.Ptr + arrayDataOffset),
+                length: length,
+                allocator: Allocator.None
+            );
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref nativeArray, AtomicSafetyHandle.GetTempMemoryHandle());
+#endif
+            return nativeArray;
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public static NativeArray<TTo>.ReadOnly AsNativeArrayRO<TFrom, TTo>(
+            UnmanagedRef<TFrom[]> arrayRef,
+            int length,
+            int arrayDataOffset
+        ) where TTo : unmanaged
+        {
+            var nativeArray = AsNativeArray<TFrom, TTo>(arrayRef, length, arrayDataOffset);
+            return nativeArray.AsReadOnly();
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public static NativeArray<TTo> AsNativeArray<TFrom, TTo>(
+            UnmanagedRef<List<TFrom>> listRef,
+            int itemsOffset,
+            int countOffset,
+            int arrayDataOffset
+        ) where TTo : unmanaged
+        {
+            if (listRef.Ptr is 0)
+                return default;
+
+            var arrayRef = listRef.Read<UnmanagedRef<TFrom[]>>(itemsOffset);
+            return AsNativeArray<TFrom, TTo>(arrayRef, listRef.Read<int>(countOffset), arrayDataOffset);
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public static unsafe NativeArray<TTo> AsNativeArray<TFrom, TTo>(List<TFrom>? list)
+            where TTo : unmanaged
+        {
+            if (list is not { Count: > 0 })
+                return default;
+
+            var view = list.AsInternalsView();
+            var array = view.Array;
+
+            if (array is not { Length: > 0 })
+                return default;
+
+            var arrayData = UnsafeUtility.As<TFrom[], ArrayView<TTo>>(ref array);
+            var nativeArray = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<TTo>(
+                dataPointer: UnsafeUtility.AddressOf(ref arrayData.Elements),
+                length: view.Count,
+                allocator: Allocator.None
+            );
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref nativeArray, AtomicSafetyHandle.GetTempMemoryHandle());
+#endif
+            return nativeArray;
+        }
 
         [MethodImpl(AggressiveInlining)]
         internal static Span<T> AsSpanUnsafe<T>(this T[]? array, int start = 0, int length = int.MinValue)

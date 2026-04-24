@@ -23,6 +23,7 @@ public readonly record struct KnownSymbols
     public INamedTypeSymbol LazyVal { get; }
     public INamedTypeSymbol SystemIDisposable { get; }
     public INamedTypeSymbol SystemFunc1 { get; }
+    public INamedTypeSymbol SystemList1 { get; }
 
     public KnownSymbols(Compilation compilation)
     {
@@ -94,6 +95,9 @@ public readonly record struct KnownSymbols
 
         SystemFunc1
             = Get("System.Func`1");
+
+        SystemList1
+            = Get("System.Collections.Generic.List`1");
     }
 }
 

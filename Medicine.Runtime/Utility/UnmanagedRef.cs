@@ -1,6 +1,9 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 
@@ -62,6 +65,122 @@ namespace Medicine
         [MethodImpl(AggressiveInlining)]
         public bool Equals(UnmanagedRef<TClass> other)
             => Ptr == other.Ptr;
+    }
+
+    public readonly struct ListAccess<T>
+        : IEnumerable<T>
+        where T : unmanaged
+    {
+        readonly ListAccess<T, T> impl;
+
+        [MethodImpl(AggressiveInlining)]
+        public ListAccess(
+            UnmanagedRef<List<T>> listRef,
+            int itemsOffset,
+            int countOffset,
+            int arrayLengthOffset,
+            int arrayDataOffset
+        )
+            => impl = new(listRef, itemsOffset, countOffset, arrayLengthOffset, arrayDataOffset);
+
+        public int Count
+        {
+            [MethodImpl(AggressiveInlining)]
+            get => impl.Count;
+            [MethodImpl(AggressiveInlining)]
+            set => impl.Count = value;
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public NativeArray<T> AsNativeArray()
+            => impl.AsNativeArray();
+
+        [MethodImpl(AggressiveInlining)]
+        public NativeArray<T>.Enumerator GetEnumerator()
+            => impl.GetEnumerator();
+
+        [MethodImpl(AggressiveInlining)]
+        IEnumerator<T> IEnumerable<T>.GetEnumerator()
+            => GetEnumerator();
+
+        [MethodImpl(AggressiveInlining)]
+        IEnumerator IEnumerable.GetEnumerator()
+            => GetEnumerator();
+    }
+
+    public readonly struct ListAccess<TSource, TElement>
+        : IEnumerable<TElement>
+        where TElement : unmanaged
+    {
+        readonly UnmanagedRef<List<TSource>> listRef;
+        readonly int itemsOffset;
+        readonly int countOffset;
+        readonly int arrayLengthOffset;
+        readonly int arrayDataOffset;
+
+        [MethodImpl(AggressiveInlining)]
+        public ListAccess(
+            UnmanagedRef<List<TSource>> listRef,
+            int itemsOffset,
+            int countOffset,
+            int arrayLengthOffset,
+            int arrayDataOffset
+        )
+        {
+            this.listRef = listRef;
+            this.itemsOffset = itemsOffset;
+            this.countOffset = countOffset;
+            this.arrayLengthOffset = arrayLengthOffset;
+            this.arrayDataOffset = arrayDataOffset;
+        }
+
+        public int Count
+        {
+            [MethodImpl(AggressiveInlining)]
+            get => listRef.Ptr is 0 ? 0 : listRef.Read<int>(countOffset);
+            [MethodImpl(AggressiveInlining)]
+            set
+            {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                if (value < 0)
+                    throw new ArgumentOutOfRangeException(nameof(value));
+
+                if (listRef.Ptr is 0)
+                    throw new InvalidOperationException("Cannot set Count on a null List reference.");
+#endif
+
+                var arrayRef = listRef.Read<UnmanagedRef<TSource[]>>(itemsOffset);
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                if (value > Internal.Utility.GetArrayLength(arrayRef, arrayLengthOffset))
+                    throw new ArgumentOutOfRangeException(nameof(value), "Cannot set Count beyond the List capacity from unmanaged access.");
+#endif
+
+                listRef.Read<int>(countOffset) = value;
+            }
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public NativeArray<TElement> AsNativeArray()
+        {
+            if (listRef.Ptr is 0)
+                return default;
+
+            var arrayRef = listRef.Read<UnmanagedRef<TSource[]>>(itemsOffset);
+            return Internal.Utility.AsNativeArray<TSource, TElement>(arrayRef, listRef.Read<int>(countOffset), arrayDataOffset);
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        public NativeArray<TElement>.Enumerator GetEnumerator()
+            => AsNativeArray().GetEnumerator();
+
+        [MethodImpl(AggressiveInlining)]
+        IEnumerator<TElement> IEnumerable<TElement>.GetEnumerator()
+            => GetEnumerator();
+
+        [MethodImpl(AggressiveInlining)]
+        IEnumerator IEnumerable.GetEnumerator()
+            => GetEnumerator();
     }
 
     /// <summary>

@@ -273,21 +273,21 @@ partial class Outer
 
         AssertContains("public global::Inner.Unmanaged.AccessRW Child");
         AssertContains("public global::Unity.Collections.NativeArray<int> Values");
-        AssertContains("public global::Inner.Unmanaged.AccessArray Children");
+        AssertContains("public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::Inner>> Children");
         AssertContainsAny(
-            "public ref Medicine.UnmanagedRef<global::System.String[]> Names",
-            "public ref Medicine.UnmanagedRef<string[]> Names"
+            "public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::System.String>> Names",
+            "public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<string>> Names"
         );
         AssertContains("public global::Inner.Unmanaged.AccessRW AutoChild");
         AssertContains("public global::Unity.Collections.NativeArray<int> AutoValues");
-        AssertContains("public global::Inner.Unmanaged.AccessArray AutoChildren");
+        AssertContains("public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::Inner>> AutoChildren");
 
         AssertContains("public global::Inner.Unmanaged.AccessRO Child");
         AssertContains("public global::Unity.Collections.NativeArray<int>.ReadOnly Values");
-        AssertContains("public global::Inner.Unmanaged.AccessArray.ReadOnly Children");
+        AssertContains("public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::Inner>>.ReadOnly Children");
         AssertContains("public global::Inner.Unmanaged.AccessRO AutoChild");
         AssertContains("public global::Unity.Collections.NativeArray<int>.ReadOnly AutoValues");
-        AssertContains("public global::Inner.Unmanaged.AccessArray.ReadOnly AutoChildren");
+        AssertContains("public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::Inner>>.ReadOnly AutoChildren");
 
         static void ThrowMissing(string expected)
             => throw new InvalidOperationException($"Expected generated source to contain: {expected}");

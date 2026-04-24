@@ -3,6 +3,7 @@ using Medicine;
 using NUnit.Framework;
 using UnityEngine;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
@@ -158,6 +159,26 @@ public partial class UnmanagedAccessTests
         public BasicFields[] Others = Array.Empty<BasicFields>();
     }
 
+    public struct CollectionStruct
+    {
+        public int Value;
+    }
+
+    [UnmanagedAccess]
+    public partial class CollectionClass
+    {
+        public int Value;
+    }
+
+    [UnmanagedAccess]
+    public partial class CollectionFields
+    {
+        public CollectionClass[] ClassArray = Array.Empty<CollectionClass>();
+        public CollectionStruct[] StructArray = Array.Empty<CollectionStruct>();
+        public List<CollectionClass> ClassList = new();
+        public List<CollectionStruct> StructList = new();
+    }
+
     public struct ManagedValueTypeData
     {
         public string Name;
@@ -172,7 +193,7 @@ public partial class UnmanagedAccessTests
     }
 
     [Test]
-    public void UnmanagedAccess_AccessedArrayFields_ProjectAccessArray()
+    public void UnmanagedAccess_AccessedArrayFields_ProjectNativeArrayOfRefs()
     {
         var a = new BasicFields { IntField = 7 };
         var b = new BasicFields { IntField = 9 };
@@ -181,24 +202,28 @@ public partial class UnmanagedAccessTests
         var access = unmanagedRef.AccessRW();
 
         Assert.That(access.Others.Length, Is.EqualTo(2));
-        Assert.That(access.Others[0].IntField, Is.EqualTo(7));
-        Assert.That(access.Others[1].IntField, Is.EqualTo(9));
+        var first = access.Others[0];
+        var second = access.Others[1];
+        var firstAccess = first.AccessRW();
+        var secondAccess = second.AccessRW();
+        Assert.That(firstAccess.IntField, Is.EqualTo(7));
+        Assert.That(secondAccess.IntField, Is.EqualTo(9));
 
-        access.Others[1].IntField = 33;
+        secondAccess.IntField = 33;
 
         Assert.That(b.IntField, Is.EqualTo(33));
         Assert.That(obj.Others[1].IntField, Is.EqualTo(33));
     }
 
     [Test]
-    public void UnmanagedAccess_AccessedArrayFields_AccessRO_UsesReadOnlyAccessArray()
+    public void UnmanagedAccess_AccessedArrayFields_AccessRO_UsesReadOnlyNativeArrayOfRefs()
     {
         var property
             = typeof(AccessedArrayFields.Unmanaged.AccessRO)
                 .GetProperty(nameof(AccessedArrayFields.Others));
 
         Assert.That(property, Is.Not.Null);
-        Assert.That(property!.PropertyType, Is.EqualTo(typeof(BasicFields.Unmanaged.AccessArray.ReadOnly)));
+        Assert.That(property!.PropertyType, Is.EqualTo(typeof(NativeArray<UnmanagedRef<BasicFields>>.ReadOnly)));
 
         var a = new BasicFields { IntField = 2 };
         var b = new BasicFields { IntField = 4 };
@@ -207,9 +232,109 @@ public partial class UnmanagedAccessTests
 
         int sum = 0;
         foreach (var other in access.Others)
-            sum += other.IntField;
+            sum += other.AccessRO().IntField;
 
         Assert.That(sum, Is.EqualTo(6));
+    }
+
+    [Test]
+    public void UnmanagedAccess_CollectionFields_AccessRW_ProjectsArraysAndLists()
+    {
+        var a = new CollectionClass { Value = 3 };
+        var b = new CollectionClass { Value = 5 };
+        var obj = new CollectionFields
+        {
+            ClassArray = new[] { a, b },
+            StructArray = new[] { new CollectionStruct { Value = 7 }, new CollectionStruct { Value = 11 } },
+            ClassList = new() { a, b },
+            StructList = new() { new CollectionStruct { Value = 13 }, new CollectionStruct { Value = 17 } },
+        };
+
+        var propertyClassArray = typeof(CollectionFields.Unmanaged.AccessRW).GetProperty(nameof(CollectionFields.ClassArray));
+        var propertyStructArray = typeof(CollectionFields.Unmanaged.AccessRW).GetProperty(nameof(CollectionFields.StructArray));
+        var propertyClassList = typeof(CollectionFields.Unmanaged.AccessRW).GetProperty(nameof(CollectionFields.ClassList));
+        var propertyStructList = typeof(CollectionFields.Unmanaged.AccessRW).GetProperty(nameof(CollectionFields.StructList));
+
+        Assert.That(propertyClassArray!.PropertyType, Is.EqualTo(typeof(NativeArray<UnmanagedRef<CollectionClass>>)));
+        Assert.That(propertyStructArray!.PropertyType, Is.EqualTo(typeof(NativeArray<CollectionStruct>)));
+        Assert.That(propertyClassList!.PropertyType, Is.EqualTo(typeof(CollectionClass.Unmanaged.ListAccess)));
+        Assert.That(propertyStructList!.PropertyType, Is.EqualTo(typeof(ListAccess<CollectionStruct>)));
+
+        UnmanagedRef<CollectionFields> unmanagedRef = obj;
+        var access = unmanagedRef.AccessRW();
+
+        var classArray = access.ClassArray;
+        var classArrayElement = classArray[1];
+        var classArrayElementAccess = classArrayElement.AccessRW();
+        classArrayElementAccess.Value = 19;
+        Assert.That(b.Value, Is.EqualTo(19));
+
+        var structArray = access.StructArray;
+        structArray[0] = new() { Value = 23 };
+        Assert.That(obj.StructArray[0].Value, Is.EqualTo(23));
+
+        var classList = access.ClassList;
+        foreach (var classAccess in classList)
+        {
+            var writable = classAccess;
+            writable.Value += 2;
+        }
+
+        Assert.That(a.Value, Is.EqualTo(5));
+        Assert.That(b.Value, Is.EqualTo(21));
+
+        var classListRefs = classList.AsNativeArray();
+        var firstClassListRef = classListRefs[0];
+        Assert.That(firstClassListRef.AccessRW().Value, Is.EqualTo(5));
+
+        var structList = access.StructList;
+        var structListArray = structList.AsNativeArray();
+        structListArray[1] = new() { Value = 29 };
+        Assert.That(obj.StructList[1].Value, Is.EqualTo(29));
+
+        int structListSum = 0;
+        foreach (var item in structList)
+            structListSum += item.Value;
+
+        Assert.That(structListSum, Is.EqualTo(42));
+
+        Assert.That(classList.Count, Is.EqualTo(2));
+        classList.Count = 1;
+        Assert.That(obj.ClassList.Count, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void UnmanagedAccess_CollectionFields_AccessRO_ProjectsListsAsNativeArrays()
+    {
+        var a = new CollectionClass { Value = 31 };
+        var b = new CollectionClass { Value = 37 };
+        var obj = new CollectionFields
+        {
+            ClassArray = new[] { a, b },
+            StructArray = new[] { new CollectionStruct { Value = 41 }, new CollectionStruct { Value = 43 } },
+            ClassList = new() { a, b },
+            StructList = new() { new CollectionStruct { Value = 47 }, new CollectionStruct { Value = 53 } },
+        };
+
+        var propertyClassArray = typeof(CollectionFields.Unmanaged.AccessRO).GetProperty(nameof(CollectionFields.ClassArray));
+        var propertyStructArray = typeof(CollectionFields.Unmanaged.AccessRO).GetProperty(nameof(CollectionFields.StructArray));
+        var propertyClassList = typeof(CollectionFields.Unmanaged.AccessRO).GetProperty(nameof(CollectionFields.ClassList));
+        var propertyStructList = typeof(CollectionFields.Unmanaged.AccessRO).GetProperty(nameof(CollectionFields.StructList));
+
+        Assert.That(propertyClassArray!.PropertyType, Is.EqualTo(typeof(NativeArray<UnmanagedRef<CollectionClass>>.ReadOnly)));
+        Assert.That(propertyStructArray!.PropertyType, Is.EqualTo(typeof(NativeArray<CollectionStruct>.ReadOnly)));
+        Assert.That(propertyClassList!.PropertyType, Is.EqualTo(typeof(NativeArray<UnmanagedRef<CollectionClass>>)));
+        Assert.That(propertyStructList!.PropertyType, Is.EqualTo(typeof(NativeArray<CollectionStruct>)));
+
+        var access = ((UnmanagedRef<CollectionFields>)obj).AccessRO();
+
+        var classArrayElement = access.ClassArray[0];
+        Assert.That(classArrayElement.AccessRO().Value, Is.EqualTo(31));
+        Assert.That(access.StructArray[1].Value, Is.EqualTo(43));
+
+        var classListElement = access.ClassList[1];
+        Assert.That(classListElement.AccessRO().Value, Is.EqualTo(37));
+        Assert.That(access.StructList[0].Value, Is.EqualTo(47));
     }
 
     [Test]
@@ -520,14 +645,18 @@ public partial class UnmanagedAccessTests
         Assert.That(access.AutoInt, Is.EqualTo(5));
         Assert.That(access.AutoRef.IntField, Is.EqualTo(9));
         Assert.That(access.AutoValues[1], Is.EqualTo(9));
-        Assert.That(access.AutoRefs[0].IntField, Is.EqualTo(11));
-        Assert.That(access.AutoRefs[1].IntField, Is.EqualTo(13));
+        var firstAutoRef = access.AutoRefs[0];
+        var secondAutoRef = access.AutoRefs[1];
+        var firstAutoRefAccess = firstAutoRef.AccessRW();
+        var secondAutoRefAccess = secondAutoRef.AccessRW();
+        Assert.That(firstAutoRefAccess.IntField, Is.EqualTo(11));
+        Assert.That(secondAutoRefAccess.IntField, Is.EqualTo(13));
 
         access.AutoInt = 42;
         access.AutoRef.IntField = 99;
         var autoValues = access.AutoValues;
         autoValues[2] = 77;
-        access.AutoRefs[1].IntField = 21;
+        secondAutoRefAccess.IntField = 21;
 
         Assert.That(obj.AutoInt, Is.EqualTo(42));
         Assert.That(obj.AutoRef.IntField, Is.EqualTo(99));

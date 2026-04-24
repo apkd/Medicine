@@ -31,20 +31,21 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public string Name;
         public string MetadataName;
         public string TypeFQN;
-        public string ArrayElementTypeFQN;
+        public string ElementTypeFQN;
         public FieldFlags Flags;
 
         public readonly bool EmitsDirectAccess
             => Flags.Has(FieldFlags.TypeHasUnmanagedAccess) &&
-               !Flags.Has(FieldFlags.IsManagedArrayType);
+               !Flags.Has(FieldFlags.IsManagedArrayType) &&
+               !Flags.Has(FieldFlags.IsManagedListType);
 
-        public readonly bool EmitsUnmanagedArray
+        public readonly bool EmitsArrayNativeArray
             => Flags.Has(FieldFlags.IsManagedArrayType) &&
-               Flags.Has(FieldFlags.ArrayElementIsUnmanagedType);
+               (Flags.Has(FieldFlags.ElementIsUnmanagedType) || Flags.Has(FieldFlags.ElementIsReferenceType));
 
-        public readonly bool EmitsAccessArray
-            => Flags.Has(FieldFlags.IsManagedArrayType) &&
-               Flags.Has(FieldFlags.ArrayElementHasUnmanagedAccess);
+        public readonly bool EmitsListAccess
+            => Flags.Has(FieldFlags.IsManagedListType) &&
+               (Flags.Has(FieldFlags.ElementIsUnmanagedType) || Flags.Has(FieldFlags.ElementIsReferenceType));
     }
 
     [Flags]
@@ -56,10 +57,12 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         IsReferenceType = 1 << 03,
         IsManagedArrayType = 1 << 04,
         TypeHasUnmanagedAccess = 1 << 05,
-        ArrayElementIsUnmanagedType = 1 << 06,
-        ArrayElementHasUnmanagedAccess = 1 << 07,
+        ElementIsUnmanagedType = 1 << 06,
+        ElementHasUnmanagedAccess = 1 << 07,
         IsPrivateInBaseType = 1 << 08,
         IsManagedValueType = 1 << 09,
+        IsManagedListType = 1 << 10,
+        ElementIsReferenceType = 1 << 11,
     }
 
     record struct AttributeSettings(
@@ -201,8 +204,14 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 bool treatAsUnmanagedWrapper = IsWrapperErrorType(field.Type);
                 var arrayType = field.Type as IArrayTypeSymbol;
                 bool isManagedArrayType = arrayType is { Rank: 1, IsSZArray: true };
-                var arrayElementType = isManagedArrayType ? arrayType!.ElementType : null;
-                bool arrayElementTreatAsUnmanagedWrapper = arrayElementType is not null && IsWrapperErrorType(arrayElementType);
+                var listType = field.Type as INamedTypeSymbol;
+                bool isManagedListType = listType?.OriginalDefinition.Is(knownSymbols.SystemList1) is true;
+                var elementType = isManagedArrayType
+                    ? arrayType!.ElementType
+                    : isManagedListType
+                        ? listType!.TypeArguments.FirstOrDefault()
+                        : null;
+                bool elementTreatAsUnmanagedWrapper = elementType is not null && IsWrapperErrorType(elementType);
                 bool isManagedValueType = field.Type is { IsValueType: true, IsUnmanagedType: false } && !treatAsUnmanagedWrapper;
 
                 var fieldFlags
@@ -213,9 +222,11 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                       | (field.Type.IsReferenceType && !treatAsUnmanagedWrapper ? FieldFlags.IsReferenceType : 0)
                       | (isManagedValueType ? FieldFlags.IsManagedValueType : 0)
                       | (isManagedArrayType ? FieldFlags.IsManagedArrayType : 0)
+                      | (isManagedListType ? FieldFlags.IsManagedListType : 0)
                       | (field.Type.GetAttribute(knownSymbols.UnmanagedAccessAttribute) is not null ? FieldFlags.TypeHasUnmanagedAccess : 0)
-                      | (arrayElementType?.IsUnmanagedType is true || arrayElementTreatAsUnmanagedWrapper ? FieldFlags.ArrayElementIsUnmanagedType : 0)
-                      | (arrayElementType?.GetAttribute(knownSymbols.UnmanagedAccessAttribute) is not null ? FieldFlags.ArrayElementHasUnmanagedAccess : 0)
+                      | (elementType?.IsUnmanagedType is true || elementTreatAsUnmanagedWrapper ? FieldFlags.ElementIsUnmanagedType : 0)
+                      | (elementType?.IsReferenceType is true && !elementTreatAsUnmanagedWrapper ? FieldFlags.ElementIsReferenceType : 0)
+                      | (elementType?.GetAttribute(knownSymbols.UnmanagedAccessAttribute) is not null ? FieldFlags.ElementHasUnmanagedAccess : 0)
                       | (isFromBaseType && field.DeclaredAccessibility is Accessibility.Private ? FieldFlags.IsPrivateInBaseType : 0);
 
                 fields.Add(
@@ -226,7 +237,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                             ? field.Name[1..^16] // trim generated backing field name
                             : field.Name,
                         TypeFQN = field.Type.FQN,
-                        ArrayElementTypeFQN = arrayElementType?.FQN ?? string.Empty,
+                        ElementTypeFQN = elementType?.FQN ?? string.Empty,
                         Flags = fieldFlags,
                     }
                 );
@@ -285,12 +296,6 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         var symbols = input.GeneratorEnvironment.PreprocessorSymbols;
         var fields = input.Fields.AsArray();
 
-        void EmitDoc(params string[] lines)
-        {
-            foreach (var line in lines)
-                src.Doc?.Write(line);
-        }
-
         bool hasCachedEnable = input.HasCachedEnableBuilderDeferred?.Value ?? false;
         bool hasIInstanceIndex = input.HasIInstanceIndexBuilderDeferred?.Value ?? false;
 
@@ -337,6 +342,26 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             return;
         }
 
+        static string GetCollectionElementAccessType(in FieldInfo field)
+            => field.Flags.Has(FieldFlags.ElementIsReferenceType)
+                ? $"Medicine.UnmanagedRef<{field.ElementTypeFQN}>"
+                : field.ElementTypeFQN;
+
+        static string GetCollectionSourceElementType(in FieldInfo field)
+            => field.ElementTypeFQN;
+
+        static string ArrayLengthOffsetName(in FieldInfo field)
+            => $"{m}{field.Name}ArrayLength";
+
+        static string ArrayDataOffsetName(in FieldInfo field)
+            => $"{m}{field.Name}ArrayData";
+
+        static string ListItemsOffsetName(in FieldInfo field)
+            => $"{m}{field.Name}ListItems";
+
+        static string ListCountOffsetName(in FieldInfo field)
+            => $"{m}{field.Name}ListCount";
+
         src.Line.Write($"#pragma warning disable CS0108");
         src.Line.Write(Alias.UsingStorage);
         src.Line.Write(Alias.UsingInline);
@@ -353,11 +378,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             src.OpenBrace();
         }
 
-        EmitDoc(
-            "/// <summary>",
-            $"/// Provides generated unmanaged field access APIs for <see cref=\"{input.ClassFQN}\"/>.",
-            "/// </summary>"
-        );
+        src.Doc?.Write("/// <summary>");
+        src.Doc?.Write($"/// Provides generated unmanaged field access APIs for <see cref=\"{input.ClassFQN}\"/>.");
+        src.Doc?.Write("/// </summary>");
 
         src.Line.Write("public static partial class Unmanaged");
         using (src.Braces)
@@ -368,11 +391,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
             src.Linebreak();
 
-            EmitDoc(
-                "/// <summary>",
-                "/// Returns the cached unmanaged layout metadata for the generated access API.",
-                "/// </summary>"
-            );
+            src.Doc?.Write("/// <summary>");
+            src.Doc?.Write("/// Returns the cached unmanaged layout metadata for the generated access API.");
+            src.Doc?.Write("/// </summary>");
 
             src.Line.Write("public static ref Layout ClassLayout");
             using (src.Braces)
@@ -382,11 +403,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
             if (input.IsTracked)
             {
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Returns unmanaged access wrappers aligned with the currently tracked instances.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Returns unmanaged access wrappers aligned with the currently tracked instances.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write($"public static AccessArray Instances");
                 using (src.Braces)
@@ -418,24 +437,32 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             src.Write("\n#if UNITY_EDITOR");
             src.Line.Write("[global::System.Runtime.InteropServices.StructLayout((short)0, Size = 128)]");
             src.Write("\n#endif");
-            EmitDoc(
-                "/// <summary>",
-                "/// Stores byte offsets for generated field accessors.",
-                "/// </summary>"
-            );
+            src.Doc?.Write("/// <summary>");
+            src.Doc?.Write("/// Stores byte offsets for generated field accessors.");
+            src.Doc?.Write("/// </summary>");
 
             src.Line.Write("public readonly struct Layout");
             using (src.Braces)
             {
                 foreach (var x in fields)
                 {
-                    EmitDoc(
-                        "/// <summary>",
-                        $"/// Byte offset metadata for field <c>{x.Name}</c>.",
-                        "/// </summary>"
-                    );
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write($"/// Byte offset metadata for field <c>{x.Name}</c>.");
+                    src.Doc?.Write("/// </summary>");
 
                     src.Line.Write($"public ushort {x.Name} {{ get; init; }}");
+
+                    if (x.EmitsArrayNativeArray || x.EmitsListAccess)
+                    {
+                        src.Line.Write($"public ushort {ArrayLengthOffsetName(x)} {{ get; init; }}");
+                        src.Line.Write($"public ushort {ArrayDataOffsetName(x)} {{ get; init; }}");
+                    }
+
+                    if (x.EmitsListAccess)
+                    {
+                        src.Line.Write($"public ushort {ListItemsOffsetName(x)} {{ get; init; }}");
+                        src.Line.Write($"public ushort {ListCountOffsetName(x)} {{ get; init; }}");
+                    }
                 }
 
                 src.Linebreak();
@@ -451,18 +478,30 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 using (src.Indent)
                 using (src.Braces)
                     foreach (var x in fields)
+                    {
                         src.Line.Write($"{x.Name} = ᵐUtility.GetFieldOffset(typeof({m}Self), \"{x.MetadataName}\", ᵐBF.{ToBindingFlagsVisibility(x.Flags.Has(FieldFlags.IsPublic))} | ᵐBF.Instance),");
+
+                        if (x.EmitsArrayNativeArray || x.EmitsListAccess)
+                        {
+                            src.Line.Write($"{ArrayLengthOffsetName(x)} = ᵐUtility.GetArrayLengthOffset<{GetCollectionSourceElementType(x)}>(),");
+                            src.Line.Write($"{ArrayDataOffsetName(x)} = ᵐUtility.GetArrayDataOffset<{GetCollectionSourceElementType(x)}, {GetCollectionElementAccessType(x)}>(),");
+                        }
+
+                        if (x.EmitsListAccess)
+                        {
+                            src.Line.Write($"{ListItemsOffsetName(x)} = ᵐUtility.GetFieldOffset(typeof({x.TypeFQN}), \"_items\", ᵐBF.NonPublic | ᵐBF.Instance),");
+                            src.Line.Write($"{ListCountOffsetName(x)} = ᵐUtility.GetFieldOffset(typeof({x.TypeFQN}), \"_size\", ᵐBF.NonPublic | ᵐBF.Instance),");
+                        }
+                    }
 
                 src.Write(';');
             }
 
             src.Linebreak();
 
-            EmitDoc(
-                "/// <summary>",
-                "/// Mutable unmanaged access collection wrapper.",
-                "/// </summary>"
-            );
+            src.Doc?.Write("/// <summary>");
+            src.Doc?.Write("/// Mutable unmanaged access collection wrapper.");
+            src.Doc?.Write("/// </summary>");
 
             src.Line.Write("public partial struct AccessArray");
             using (src.Braces)
@@ -470,11 +509,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO> impl;");
                 src.Linebreak();
 
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Creates an access wrapper from an unmanaged reference list.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Creates an access wrapper from an unmanaged reference list.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write($"public AccessArray(global::Unity.Collections.LowLevel.Unsafe.UnsafeList<Medicine.UnmanagedRef<{m}Self>> classRefArray)");
                 using (src.Indent)
@@ -482,11 +519,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Creates an access wrapper from an array of managed instances.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Creates an access wrapper from an array of managed instances.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write($"public AccessArray({m}Self[]? classArray)");
                 using (src.Indent)
@@ -494,11 +529,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Rebinds this wrapper to a different unmanaged reference list.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Rebinds this wrapper to a different unmanaged reference list.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write($"public void UpdateBuffer(global::Unity.Collections.LowLevel.Unsafe.UnsafeList<Medicine.UnmanagedRef<{m}Self>> classRefArray)");
                 using (src.Indent)
@@ -506,11 +539,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Rebinds this wrapper to a different managed instance array.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Rebinds this wrapper to a different managed instance array.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write($"public void UpdateBuffer({m}Self[]? classArray)");
                 using (src.Indent)
@@ -518,11 +549,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Returns the number of available elements.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Returns the number of available elements.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write($"public int Length");
                 using (src.Indent)
@@ -530,11 +559,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Returns mutable unmanaged field access for the specified element index.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Returns mutable unmanaged field access for the specified element index.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write("public AccessRW this[int index]");
                 using (src.Braces)
@@ -542,11 +569,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Returns a sliced view of this access collection.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Returns a sliced view of this access collection.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write("public AccessArray this[global::System.Range range]");
                 using (src.Braces)
@@ -562,11 +587,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Converts this wrapper to a read-only view.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Converts this wrapper to a read-only view.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write(Alias.Inline);
                 src.Line.Write("public ReadOnly AsReadOnly()");
@@ -575,11 +598,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Returns an enumerator over mutable access elements.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Returns an enumerator over mutable access elements.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write(Alias.Inline);
                 src.Line.Write($"public Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.Enumerator GetEnumerator()");
@@ -591,11 +612,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Read-only view over an <see cref=\"AccessArray\"/>.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Read-only view over an <see cref=\"AccessArray\"/>.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write("public readonly partial struct ReadOnly");
                 using (src.Braces)
@@ -603,11 +622,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     src.Line.Write($"readonly Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.ReadOnly impl;");
                     src.Linebreak();
 
-                    EmitDoc(
-                        "/// <summary>",
-                        "/// Creates a read-only view from a mutable access wrapper.",
-                        "/// </summary>"
-                    );
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Creates a read-only view from a mutable access wrapper.");
+                    src.Doc?.Write("/// </summary>");
 
                     src.Line.Write($"public ReadOnly(Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO> accessArray)");
                     using (src.Indent)
@@ -615,11 +632,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Linebreak();
 
-                    EmitDoc(
-                        "/// <summary>",
-                        "/// Creates a read-only view from an existing read-only access wrapper.",
-                        "/// </summary>"
-                    );
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Creates a read-only view from an existing read-only access wrapper.");
+                    src.Doc?.Write("/// </summary>");
 
                     src.Line.Write($"public ReadOnly(Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.ReadOnly accessArray)");
                     using (src.Indent)
@@ -627,11 +642,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Linebreak();
 
-                    EmitDoc(
-                        "/// <summary>",
-                        "/// Returns the number of available elements.",
-                        "/// </summary>"
-                    );
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Returns the number of available elements.");
+                    src.Doc?.Write("/// </summary>");
 
                     src.Line.Write($"public int Length");
                     using (src.Indent)
@@ -639,11 +652,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Linebreak();
 
-                    EmitDoc(
-                        "/// <summary>",
-                        "/// Returns read-only unmanaged field access for the specified element index.",
-                        "/// </summary>"
-                    );
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Returns read-only unmanaged field access for the specified element index.");
+                    src.Doc?.Write("/// </summary>");
 
                     src.Line.Write("public AccessRO this[int index]");
                     using (src.Braces)
@@ -651,11 +662,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Linebreak();
 
-                    EmitDoc(
-                        "/// <summary>",
-                        "/// Returns a sliced read-only view of this access collection.",
-                        "/// </summary>"
-                    );
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Returns a sliced read-only view of this access collection.");
+                    src.Doc?.Write("/// </summary>");
 
                     src.Line.Write("public ReadOnly this[global::System.Range range]");
                     using (src.Indent)
@@ -663,16 +672,137 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Linebreak();
 
-                    EmitDoc(
-                        "/// <summary>",
-                        "/// Returns an enumerator over read-only access elements.",
-                        "/// </summary>"
-                    );
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Returns an enumerator over read-only access elements.");
+                    src.Doc?.Write("/// </summary>");
 
                     src.Line.Write(Alias.Inline);
                     src.Line.Write($"public Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.ReadOnly.Enumerator GetEnumerator()");
                     using (src.Indent)
                         src.Line.Write("=> impl.GetEnumerator();");
+                }
+            }
+
+            src.Linebreak();
+
+            src.Doc?.Write("/// <summary>");
+            src.Doc?.Write("/// Mutable unmanaged access wrapper over a managed list of this class.");
+            src.Doc?.Write("/// </summary>");
+
+            src.Line.Write("public readonly partial struct ListAccess : global::System.Collections.Generic.IEnumerable<AccessRW>");
+            using (src.Braces)
+            {
+                src.Line.Write($"readonly global::Medicine.ListAccess<{m}Self, Medicine.UnmanagedRef<{m}Self>> impl;");
+                src.Linebreak();
+
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Creates a list access wrapper from a managed list reference.");
+                src.Doc?.Write("/// </summary>");
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public ListAccess(");
+                src.Line.Write($"    Medicine.UnmanagedRef<global::System.Collections.Generic.List<{m}Self>> listRef,");
+                src.Line.Write($"    int itemsOffset,");
+                src.Line.Write($"    int countOffset,");
+                src.Line.Write($"    int arrayLengthOffset,");
+                src.Line.Write($"    int arrayDataOffset");
+                src.Line.Write($")");
+                using (src.Indent)
+                    src.Line.Write("=> impl = new(listRef, itemsOffset, countOffset, arrayLengthOffset, arrayDataOffset);");
+
+                src.Linebreak();
+
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Gets or sets the logical list element count.");
+                src.Doc?.Write("/// </summary>");
+
+                src.Line.Write("public int Count");
+                using (src.Braces)
+                {
+                    src.Line.Write($"{Alias.Inline} get => impl.Count;");
+                    src.Line.Write($"{Alias.Inline} set => impl.Count = value;");
+                }
+
+                src.Linebreak();
+
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Returns the list backing data as unmanaged references.");
+                src.Doc?.Write("/// </summary>");
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<{m}Self>> AsNativeArray()");
+                using (src.Indent)
+                    src.Line.Write("=> impl.AsNativeArray();");
+
+                src.Linebreak();
+
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Returns an enumerator over generated read-write accessors.");
+                src.Doc?.Write("/// </summary>");
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write("public Enumerator GetEnumerator()");
+                using (src.Indent)
+                    src.Line.Write("=> new(AsNativeArray().GetEnumerator());");
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write("global::System.Collections.Generic.IEnumerator<AccessRW> global::System.Collections.Generic.IEnumerable<AccessRW>.GetEnumerator()");
+                using (src.Indent)
+                    src.Line.Write("=> GetEnumerator();");
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write("global::System.Collections.IEnumerator global::System.Collections.IEnumerable.GetEnumerator()");
+                using (src.Indent)
+                    src.Line.Write("=> GetEnumerator();");
+
+                src.Linebreak();
+
+                src.Line.Write("public struct Enumerator : global::System.Collections.Generic.IEnumerator<AccessRW>");
+                using (src.Braces)
+                {
+                    src.Line.Write($"global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<{m}Self>>.Enumerator enumerator;");
+                    src.Linebreak();
+
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write($"public Enumerator(global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<{m}Self>>.Enumerator enumerator)");
+                    using (src.Indent)
+                        src.Line.Write("=> this.enumerator = enumerator;");
+
+                    src.Linebreak();
+
+                    src.Line.Write("public AccessRW Current");
+                    using (src.Indent)
+                        src.Line.Write("=> new(enumerator.Current);");
+
+                    src.Linebreak();
+
+                    src.Line.Write("object global::System.Collections.IEnumerator.Current");
+                    using (src.Indent)
+                        src.Line.Write("=> Current;");
+
+                    src.Linebreak();
+
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write("public bool MoveNext()");
+                    using (src.Indent)
+                        src.Line.Write("=> enumerator.MoveNext();");
+
+                    src.Linebreak();
+
+                    src.Line.Write("public void Reset()");
+                    using (src.Indent)
+                        src.Line.Write("=> ((global::System.Collections.IEnumerator)enumerator).Reset();");
+
+                    src.Linebreak();
+
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write("public void Dispose()");
+                    using (src.Indent)
+                        src.Line.Write("=> enumerator.Dispose();");
                 }
             }
 
@@ -687,32 +817,28 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     ? "CheckNullOrDestroyed"
                     : "CheckNull";
 
-                EmitDoc(
-                    "/// <summary>",
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write(
                     isReadOnly
                         ? "/// Read-only unmanaged field accessor for a single instance."
-                        : "/// Read-write unmanaged field accessor for a single instance.",
-                    "/// </summary>"
+                        : "/// Read-write unmanaged field accessor for a single instance."
                 );
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write($"public readonly unsafe partial struct {accessStructName}");
                 using (src.Braces)
                 {
-                    EmitDoc(
-                        "/// <summary>",
-                        "/// Underlying unmanaged reference.",
-                        "/// </summary>"
-                    );
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Underlying unmanaged reference.");
+                    src.Doc?.Write("/// </summary>");
 
                     src.Line.Write($"public readonly Medicine.UnmanagedRef<{m}Self> Ref;");
                     src.Line.Write("readonly Layout* layoutInfo;");
                     src.Linebreak();
 
-                    EmitDoc(
-                        "/// <summary>",
-                        "/// Layout metadata used for field offset lookup.",
-                        "/// </summary>"
-                    );
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Layout metadata used for field offset lookup.");
+                    src.Doc?.Write("/// </summary>");
 
                     src.Line.Write("public ref readonly Layout Layout");
                     using (src.Indent)
@@ -720,11 +846,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Linebreak();
 
-                    EmitDoc(
-                        "/// <summary>",
-                        "/// Initializes the accessor using the globally cached class layout.",
-                        "/// </summary>"
-                    );
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Initializes the accessor using the globally cached class layout.");
+                    src.Doc?.Write("/// </summary>");
 
                     src.Line.Write(Alias.Inline);
                     src.Line.Write($"public {accessStructName}(Medicine.UnmanagedRef<{m}Self> Ref)");
@@ -734,11 +858,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         src.Line.Write("layoutInfo = (Layout*)unmanagedLayoutStorage.UnsafeDataPointer;");
                     }
 
-                    EmitDoc(
-                        "/// <summary>",
-                        "/// Initializes the accessor using a caller-provided layout reference.",
-                        "/// </summary>"
-                    );
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Initializes the accessor using a caller-provided layout reference.");
+                    src.Doc?.Write("/// </summary>");
 
                     src.Line.Write(Alias.Inline);
                     src.Line.Write($"public {accessStructName}(Medicine.UnmanagedRef<{m}Self> Ref, ref Layout layout)");
@@ -777,23 +899,23 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     if (input.IsUnityObject)
                     {
-                        EmitDoc($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.IsValid\" />");
+                        src.Doc?.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.IsValid\" />");
                         src.Line.Write($"public bool IsValid");
                         using (src.Indent)
                             src.Line.Write($"=> Medicine.UnmanagedRefExtensions.IsValid(Ref);");
 
-                        EmitDoc($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.IsInvalid\" />");
+                        src.Doc?.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.IsInvalid\" />");
                         src.Line.Write($"public bool IsInvalid");
                         using (src.Indent)
                             src.Line.Write($"=> Medicine.UnmanagedRefExtensions.IsInvalid(Ref);");
 
                         if (input.UsesEntityId)
                         {
-                            EmitDoc($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.GetEntityID\" />");
+                            src.Doc?.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.GetEntityID\" />");
                             src.Line.Write($"public global::UnityEngine.EntityId EntityID");
                             PropertyWithSafetyChecks($"Medicine.UnmanagedRefExtensions.GetEntityID(Ref);");
 
-                            EmitDoc("/// <summary>Legacy Unity object identity API. Use <see cref=\"EntityID\"/> on Unity 6000.4 or newer.</summary>");
+                            src.Doc?.Write("/// <summary>Legacy Unity object identity API. Use <see cref=\"EntityID\"/> on Unity 6000.4 or newer.</summary>");
                             src.Line.Write($"[global::System.Obsolete(\"{InstanceIdMigrationMessage}\", true)]");
                             src.Line.Write("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
                             src.Line.Write($"public int InstanceID");
@@ -801,7 +923,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         }
                         else
                         {
-                            EmitDoc($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.GetInstanceID\" />");
+                            src.Doc?.Write($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.GetInstanceID\" />");
                             src.Line.Write($"public int InstanceID");
                             PropertyWithSafetyChecks($"Medicine.UnmanagedRefExtensions.GetInstanceID(Ref);");
                         }
@@ -827,17 +949,47 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         if (field.EmitsDirectAccess)
                             return $"{field.TypeFQN}.Unmanaged.{(isReadOnly ? "AccessRO" : "AccessRW")}";
 
-                        if (field.EmitsUnmanagedArray)
+                        if (field.EmitsArrayNativeArray)
                             return isReadOnly
-                                ? $"global::Unity.Collections.NativeArray<{field.ArrayElementTypeFQN}>.ReadOnly"
-                                : $"global::Unity.Collections.NativeArray<{field.ArrayElementTypeFQN}>";
+                                ? $"global::Unity.Collections.NativeArray<{GetCollectionElementAccessType(field)}>.ReadOnly"
+                                : $"global::Unity.Collections.NativeArray<{GetCollectionElementAccessType(field)}>";
 
-                        if (field.EmitsAccessArray)
-                            return isReadOnly
-                                ? $"{field.ArrayElementTypeFQN}.Unmanaged.AccessArray.ReadOnly"
-                                : $"{field.ArrayElementTypeFQN}.Unmanaged.AccessArray";
+                        if (field.EmitsListAccess)
+                        {
+                            if (isReadOnly)
+                                return $"global::Unity.Collections.NativeArray<{GetCollectionElementAccessType(field)}>";
+
+                            if (field.Flags.Has(FieldFlags.ElementHasUnmanagedAccess))
+                                return $"{field.ElementTypeFQN}.Unmanaged.ListAccess";
+
+                            if (field.Flags.Has(FieldFlags.ElementIsUnmanagedType))
+                                return $"global::Medicine.ListAccess<{field.ElementTypeFQN}>";
+
+                            return $"global::Medicine.ListAccess<{field.ElementTypeFQN}, {GetCollectionElementAccessType(field)}>";
+                        }
 
                         return $"{(isReadOnly || field.Flags.Has(FieldFlags.IsReadOnly) ? "ref readonly" : "ref")} Medicine.UnmanagedRef<{field.TypeFQN}>";
+                    }
+
+                    string GetProjectedListAccess(in FieldInfo field)
+                    {
+                        var listRef = $"Ref.Read<Medicine.UnmanagedRef<{field.TypeFQN}>>(layoutInfo->{field.Name})";
+                        var offsetArguments
+                            = $"layoutInfo->{ListItemsOffsetName(field)}, " +
+                              $"layoutInfo->{ListCountOffsetName(field)}, " +
+                              $"layoutInfo->{ArrayLengthOffsetName(field)}, " +
+                              $"layoutInfo->{ArrayDataOffsetName(field)}";
+
+                        if (isReadOnly)
+                            return $"ᵐUtility.AsNativeArray<{GetCollectionSourceElementType(field)}, {GetCollectionElementAccessType(field)}>({listRef}, layoutInfo->{ListItemsOffsetName(field)}, layoutInfo->{ListCountOffsetName(field)}, layoutInfo->{ArrayDataOffsetName(field)});";
+
+                        if (field.Flags.Has(FieldFlags.ElementHasUnmanagedAccess))
+                            return $"new {field.ElementTypeFQN}.Unmanaged.ListAccess({listRef}, {offsetArguments});";
+
+                        if (field.Flags.Has(FieldFlags.ElementIsUnmanagedType))
+                            return $"new global::Medicine.ListAccess<{GetCollectionSourceElementType(field)}>({listRef}, {offsetArguments});";
+
+                        return $"new global::Medicine.ListAccess<{GetCollectionSourceElementType(field)}, {GetCollectionElementAccessType(field)}>({listRef}, {offsetArguments});";
                     }
 
                     string GetProjectedAccess(in FieldInfo field)
@@ -851,16 +1003,14 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         if (field.EmitsDirectAccess)
                             return $"new {field.TypeFQN}.Unmanaged.{(isReadOnly ? "AccessRO" : "AccessRW")}(Ref.Read<Medicine.UnmanagedRef<{field.TypeFQN}>>(layoutInfo->{field.Name}));";
 
-                        if (field.EmitsUnmanagedArray)
-                            return $"ᵐUtility.AsNativeArray{(isReadOnly ? "RO" : string.Empty)}(Ref.Read<Medicine.UnmanagedRef<{field.TypeFQN}>>(layoutInfo->{field.Name}).Resolve());";
-
-                        if (field.EmitsAccessArray)
+                        if (field.EmitsArrayNativeArray)
                         {
-                            var accessArray = $"new {field.ArrayElementTypeFQN}.Unmanaged.AccessArray(Ref.Read<Medicine.UnmanagedRef<{field.TypeFQN}>>(layoutInfo->{field.Name}).Resolve())";
-                            return isReadOnly
-                                ? $"{accessArray}.AsReadOnly();"
-                                : $"{accessArray};";
+                            var arrayRef = $"Ref.Read<Medicine.UnmanagedRef<{field.TypeFQN}>>(layoutInfo->{field.Name})";
+                            return $"ᵐUtility.AsNativeArray{(isReadOnly ? "RO" : string.Empty)}<{GetCollectionSourceElementType(field)}, {GetCollectionElementAccessType(field)}>({arrayRef}, ᵐUtility.GetArrayLength({arrayRef}, layoutInfo->{ArrayLengthOffsetName(field)}), layoutInfo->{ArrayDataOffsetName(field)});";
                         }
+
+                        if (field.EmitsListAccess)
+                            return GetProjectedListAccess(field);
 
                         return $"ref Ref.Read<Medicine.UnmanagedRef<{field.TypeFQN}>>(layoutInfo->{field.Name});";
                     }
@@ -871,7 +1021,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                             || x.Flags.Has(FieldFlags.IsReferenceType)
                             || x.Flags.Has(FieldFlags.IsManagedValueType))
                         {
-                            EmitDoc($"/// <inheritdoc cref=\"{m}Self.{x.Name}\" />");
+                            src.Doc?.Write($"/// <inheritdoc cref=\"{m}Self.{x.Name}\" />");
 
                             // base-private fields aren't accessible from here, so we omit `DeclaredAt`
                             if (!x.Flags.Has(FieldFlags.IsPrivateInBaseType))
@@ -943,20 +1093,16 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         src.Line.Write("namespace Medicine");
         using (src.Braces)
         {
-            EmitDoc(
-                "/// <summary>",
-                $"/// Extension methods for <see cref=\"UnmanagedRef{{T}}\"/> when <c>T</c> is <see cref=\"{input.ClassFQN}\"/>.",
-                "/// </summary>"
-            );
+            src.Doc?.Write("/// <summary>");
+            src.Doc?.Write($"/// Extension methods for <see cref=\"UnmanagedRef{{T}}\"/> when <c>T</c> is <see cref=\"{input.ClassFQN}\"/>.");
+            src.Doc?.Write("/// </summary>");
 
             src.Line.Write("public static partial class UnmanagedAccessExtensions");
             using (src.Braces)
             {
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Returns a generated read-write unmanaged accessor.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Returns a generated read-write unmanaged accessor.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write(Alias.Inline);
                 src.Line.Write($"public static {m}Self.Unmanaged.AccessRW AccessRW(this ref UnmanagedRef<{m}Self> classRef)");
@@ -965,7 +1111,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                EmitDoc($"/// <inheritdoc cref=\"AccessRW(ref UnmanagedRef{{T}})\" />");
+                src.Doc?.Write($"/// <inheritdoc cref=\"AccessRW(ref UnmanagedRef{{T}})\" />");
                 src.Line.Write(Alias.Inline);
                 src.Line.Write($"public static {m}Self.Unmanaged.AccessRW AccessRW(this ref UnmanagedRef<{m}Self> classRef, ref {m}Self.Unmanaged.Layout layout)");
                 using (src.Indent)
@@ -973,11 +1119,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                EmitDoc(
-                    "/// <summary>",
-                    "/// Returns a generated read-only unmanaged accessor.",
-                    "/// </summary>"
-                );
+                src.Doc?.Write("/// <summary>");
+                src.Doc?.Write("/// Returns a generated read-only unmanaged accessor.");
+                src.Doc?.Write("/// </summary>");
 
                 src.Line.Write(Alias.Inline);
                 src.Line.Write($"public static {m}Self.Unmanaged.AccessRO AccessRO(this UnmanagedRef<{m}Self> classRef)");
@@ -987,7 +1131,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 src.Linebreak();
 
                 src.Linebreak();
-                EmitDoc($"/// <inheritdoc cref=\"AccessRO(UnmanagedRef{{T}})\" />");
+                src.Doc?.Write($"/// <inheritdoc cref=\"AccessRO(UnmanagedRef{{T}})\" />");
                 src.Line.Write(Alias.Inline);
                 src.Line.Write($"public static {m}Self.Unmanaged.AccessRO AccessRO(this UnmanagedRef<{m}Self> classRef, ref {m}Self.Unmanaged.Layout layout)");
                 using (src.Indent)
