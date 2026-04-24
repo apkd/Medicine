@@ -26,6 +26,9 @@ static class UnmanagedAccessSourceGeneratorTest
     public static readonly DiagnosticTest ManagedValueTypeProjectionCase =
         new("UnmanagedAccess generator projects managed value types as refs", RunManagedValueTypeProjectionContract);
 
+    public static readonly DiagnosticTest AccessROPartialCopyCase =
+        new("UnmanagedAccess generator copies user AccessRO members into generated AccessRW", RunAccessROPartialCopyContract);
+
     public static readonly DiagnosticTest UnityObjectIdentityCase =
         new("UnmanagedAccess generator emits EntityID for UnityEngine.Object types when GetEntityId is available", RunUnityObjectIdentityContract);
 
@@ -388,6 +391,132 @@ sealed partial class UnmanagedAccessUnityObjectIdentityComponent : MonoBehaviour
                 count++;
                 index += value.Length;
             }
+        }
+    }
+
+    static void RunAccessROPartialCopyContract()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using System;
+using Medicine;
+using UserNamespace;
+using HelperAlias = UserNamespace.LocalHelper;
+using ResultAlias = UserNamespace.LocalResult;
+
+namespace UserNamespace
+{
+    public sealed class MarkerAttribute : Attribute { }
+
+    public readonly struct LocalResult
+    {
+        public readonly int Value;
+
+        public LocalResult(int value)
+            => Value = value;
+    }
+
+    public static class LocalHelper
+    {
+        public static LocalResult Make(int value)
+            => new(value);
+    }
+}
+
+[UnmanagedAccess]
+partial class AccessROPartialCopyOwner
+{
+    public int Value;
+
+    public static partial class Unmanaged
+    {
+        public readonly unsafe partial struct AccessRO
+        {
+            public readonly int ShouldNotCopyField;
+
+            public ResultAlias Build()
+                => HelperAlias.Make(Value);
+
+            public ResultAlias BuildBlock()
+            {
+                ResultAlias result = HelperAlias.Make(Value);
+                return result;
+            }
+
+            [Marker]
+            public ResultAlias Result
+                => HelperAlias.Make(Value);
+
+            public ResultAlias Existing()
+                => HelperAlias.Make(Value);
+        }
+
+        public readonly unsafe partial struct AccessRW
+        {
+            public ResultAlias Existing()
+                => default;
+        }
+    }
+}
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new UnmanagedAccessSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "AccessRO partial copy codegen should not throw in generator"
+        );
+
+        var generatedText = string.Join(
+            Environment.NewLine,
+            run.Results
+                .SelectMany(static x => x.GeneratedSources)
+                .Select(static x => x.SourceText.ToString())
+        );
+
+        AssertContains("public global::UserNamespace.LocalResult Build()");
+        AssertContains("public global::UserNamespace.LocalResult BuildBlock()");
+        AssertContains("return result;");
+        AssertContains("global::UserNamespace.LocalHelper.Make");
+        AssertContains("[global::UserNamespace.MarkerAttribute]");
+        AssertContains("public global::UserNamespace.LocalResult Result");
+        AssertDoesNotContain("ResultAlias");
+        AssertDoesNotContain("HelperAlias");
+        AssertDoesNotContain("ShouldNotCopyField");
+        AssertDoesNotContain("return global::UserNamespace.LocalResult;");
+        AssertDoesNotContain("public global::UserNamespace.LocalResult Existing()");
+
+        static void ThrowMissing(string expected)
+            => throw new InvalidOperationException($"Expected generated source to contain: {expected}");
+
+        static void ThrowUnexpected(string unexpected)
+            => throw new InvalidOperationException($"Expected generated source to not contain: {unexpected}");
+
+        void AssertContains(string expected)
+        {
+            if (generatedText.Contains(expected, StringComparison.Ordinal))
+                return;
+
+            ThrowMissing(expected);
+        }
+
+        void AssertDoesNotContain(string unexpected)
+        {
+            if (!generatedText.Contains(unexpected, StringComparison.Ordinal))
+                return;
+
+            ThrowUnexpected(unexpected);
         }
     }
 

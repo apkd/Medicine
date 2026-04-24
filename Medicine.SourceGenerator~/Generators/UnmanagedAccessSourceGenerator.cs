@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 using static ActivePreprocessorSymbolNames;
@@ -24,6 +25,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public Defer<bool>? HasCachedEnableBuilderDeferred;
         public Defer<bool>? HasIInstanceIndexBuilderDeferred;
         public EquatableArray<FieldInfo> Fields;
+        public Defer<string[]>? AccessROMembersForAccessRWDeferred;
     }
 
     record struct FieldInfo
@@ -118,7 +120,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             Context = context,
             SourceGeneratorOutputFilename = GetOutputFilename(context),
             SourceGeneratorLocation = context.TargetNode.GetLocation(),
-            Checksum64ForCache = (context.TargetNode.Parent ?? context.TargetNode).GetNodeChecksum(ct),
+            Checksum64ForCache = GetInputChecksum(context, ct),
         };
 
     static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, GeneratorEnvironment generatorEnvironment, CancellationToken ct)
@@ -156,6 +158,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             UsesEntityId = generatorEnvironment.IsUnity64OrNewer,
             IsTracked = trackAttribute is not null,
             SourceGeneratorLocation = new(typeDecl.Identifier.GetLocation()),
+            AccessROMembersForAccessRWDeferred = new(() => CollectAccessROMembersForAccessRW(context.SemanticModel.Compilation, typeSymbol, ct)),
             HasCachedEnableBuilderDeferred = new(() =>
                 {
                     if (trackAttribute is null)
@@ -248,6 +251,263 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
         return output;
     }
+
+    static ulong GetInputChecksum(GeneratorAttributeSyntaxContext context, CancellationToken ct)
+    {
+        const ulong offsetBasis = 14695981039346656037UL;
+        const ulong prime = 1099511628211UL;
+
+        ulong hash = offsetBasis;
+        bool hasSyntaxReference = false;
+
+        foreach (var syntaxReference in context.TargetSymbol.DeclaringSyntaxReferences
+                     .OrderBy(x => x.SyntaxTree.FilePath, StringComparer.Ordinal)
+                     .ThenBy(x => x.Span.Start))
+        {
+            hasSyntaxReference = true;
+            hash = unchecked((hash ^ syntaxReference.SyntaxTree.GetText(ct).CalculateChecksum64()) * prime);
+            hash = unchecked((hash ^ (ulong)syntaxReference.Span.Start) * prime);
+        }
+
+        return hasSyntaxReference
+            ? hash
+            : (context.TargetNode.Parent ?? context.TargetNode).GetNodeChecksum(ct);
+    }
+
+    static string[] CollectAccessROMembersForAccessRW(Compilation compilation, ITypeSymbol typeSymbol, CancellationToken ct)
+    {
+        using var r1 = Scratch.RentA<List<string>>(out var copiedMembers);
+        using var r2 = Scratch.RentB<HashSet<string>>(out var accessRWMemberKeys);
+
+        foreach (var accessRWDeclaration in GetAccessStructDeclarations(typeSymbol, "AccessRW", ct))
+        {
+            var semanticModel = compilation.GetSemanticModel(accessRWDeclaration.SyntaxTree);
+
+            foreach (var member in accessRWDeclaration.Members)
+                if (TryGetCopyMemberKey(member, semanticModel, ct, out var key))
+                    accessRWMemberKeys.Add(key);
+        }
+
+        foreach (var accessRODeclaration in GetAccessStructDeclarations(typeSymbol, "AccessRO", ct))
+        {
+            var semanticModel = compilation.GetSemanticModel(accessRODeclaration.SyntaxTree);
+            var rewriter = new FullyQualifiedTypeReferenceRewriter(semanticModel, ct);
+
+            foreach (var member in accessRODeclaration.Members)
+            {
+                if (!TryGetCopyMemberKey(member, semanticModel, ct, out var key) || accessRWMemberKeys.Contains(key))
+                    continue;
+
+                var rewritten = (MemberDeclarationSyntax?)rewriter.Visit(member) ?? member;
+                copiedMembers.Add(rewritten.NormalizeWhitespace(eol: "\n").ToFullString().Trim());
+            }
+        }
+
+        return copiedMembers.ToArray();
+    }
+
+    static IEnumerable<TypeDeclarationSyntax> GetAccessStructDeclarations(ITypeSymbol typeSymbol, string accessStructName, CancellationToken ct)
+    {
+        foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
+        {
+            if (syntaxReference.GetSyntax(ct) is not TypeDeclarationSyntax classDeclaration)
+                continue;
+
+            foreach (var unmanagedDeclaration in classDeclaration.Members.OfType<TypeDeclarationSyntax>())
+            {
+                if (unmanagedDeclaration.Identifier.ValueText is not "Unmanaged")
+                    continue;
+
+                foreach (var accessDeclaration in unmanagedDeclaration.Members.OfType<TypeDeclarationSyntax>())
+                    if (accessDeclaration.Identifier.ValueText == accessStructName)
+                        yield return accessDeclaration;
+            }
+        }
+    }
+
+    static bool TryGetCopyMemberKey(
+        MemberDeclarationSyntax member,
+        SemanticModel semanticModel,
+        CancellationToken ct,
+        out string key
+    )
+    {
+        key = "";
+
+        if (!HasCopyableImplementation(member))
+            return false;
+
+        switch (semanticModel.GetDeclaredSymbol(member, ct))
+        {
+            case IMethodSymbol method:
+                key = BuildMethodKey(method);
+                return true;
+            case IPropertySymbol property:
+                key = BuildPropertyKey(property);
+                return true;
+            default:
+                return false;
+        }
+
+        static bool HasCopyableImplementation(MemberDeclarationSyntax member)
+            => member switch
+            {
+                MethodDeclarationSyntax method
+                    => !method.Modifiers.Any(SyntaxKind.PartialKeyword) &&
+                       (method.Body is not null || method.ExpressionBody is not null),
+                PropertyDeclarationSyntax property
+                    => property.ExpressionBody is not null || HasAccessorImplementation(property.AccessorList),
+                IndexerDeclarationSyntax indexer
+                    => indexer.ExpressionBody is not null || HasAccessorImplementation(indexer.AccessorList),
+                _ => false,
+            };
+
+        static bool HasAccessorImplementation(AccessorListSyntax? accessorList)
+            => accessorList?.Accessors.Any(x => x.Body is not null || x.ExpressionBody is not null) is true;
+
+        static string BuildMethodKey(IMethodSymbol method)
+            => $"M:{method.Name}`{method.Arity}({BuildParameterKey(method.Parameters)})";
+
+        static string BuildPropertyKey(IPropertySymbol property)
+            => $"P:{property.Name}({BuildParameterKey(property.Parameters)})";
+
+        static string BuildParameterKey(IEnumerable<IParameterSymbol> parameters)
+            => string.Join(
+                ",",
+                parameters.Select(static x => $"{x.RefKind}:{x.Type.FQN}")
+            );
+    }
+
+    sealed class FullyQualifiedTypeReferenceRewriter(SemanticModel semanticModel, CancellationToken ct) : CSharpSyntaxRewriter
+    {
+        public override SyntaxNode? VisitAttribute(AttributeSyntax node)
+        {
+            var rewritten = (AttributeSyntax?)base.VisitAttribute(node) ?? node;
+
+            if (semanticModel.GetSymbolInfo(node, ct).Symbol is not IMethodSymbol
+                {
+                    MethodKind: MethodKind.Constructor,
+                    ContainingType: { TypeKind: not TypeKind.Error } attributeType,
+                })
+                return rewritten;
+
+            return rewritten.WithName(
+                SyntaxFactory.ParseName(attributeType.FQN)
+                    .WithTriviaFrom(rewritten.Name)
+            );
+        }
+
+        public override SyntaxNode? VisitQualifiedName(QualifiedNameSyntax node)
+        {
+            if (TryGetQualifiedName(node, out var qualifiedName))
+                return qualifiedName.WithTriviaFrom(node);
+
+            return base.VisitQualifiedName(node);
+        }
+
+        public override SyntaxNode? VisitAliasQualifiedName(AliasQualifiedNameSyntax node)
+        {
+            if (TryGetQualifiedName(node, out var qualifiedName))
+                return qualifiedName.WithTriviaFrom(node);
+
+            return base.VisitAliasQualifiedName(node);
+        }
+
+        public override SyntaxNode? VisitGenericName(GenericNameSyntax node)
+        {
+            if (TryGetTypeSyntax(node, out var typeSyntax))
+                return typeSyntax.WithTriviaFrom(node);
+
+            return base.VisitGenericName(node);
+        }
+
+        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
+        {
+            if (node.Parent is QualifiedNameSyntax or AliasQualifiedNameSyntax)
+                return base.VisitIdentifierName(node);
+
+            if (node.Parent is MemberAccessExpressionSyntax memberAccess && memberAccess.Name == node)
+                return base.VisitIdentifierName(node);
+
+            if (TryGetTypeSyntax(node, out var typeSyntax))
+                return typeSyntax.WithTriviaFrom(node);
+
+            if (TryGetQualifiedName(node, out var qualifiedName))
+                return qualifiedName.WithTriviaFrom(node);
+
+            return base.VisitIdentifierName(node);
+        }
+
+        public override SyntaxNode? VisitMemberAccessExpression(MemberAccessExpressionSyntax node)
+        {
+            if (TryGetQualifiedExpression(node, out var expression))
+                return expression.WithTriviaFrom(node);
+
+            return base.VisitMemberAccessExpression(node);
+        }
+
+        bool TryGetQualifiedName(NameSyntax node, out NameSyntax qualifiedName)
+        {
+            if (semanticModel.GetAliasInfo(node, ct)?.Target is INamespaceOrTypeSymbol aliasTarget &&
+                TryCreateQualifiedName(aliasTarget, out qualifiedName))
+                return true;
+
+            if (semanticModel.GetSymbolInfo(node, ct).Symbol is INamespaceOrTypeSymbol symbol &&
+                TryCreateQualifiedName(symbol, out qualifiedName))
+                return true;
+
+            qualifiedName = node;
+            return false;
+        }
+
+        bool TryGetQualifiedExpression(ExpressionSyntax node, out ExpressionSyntax expression)
+        {
+            if (semanticModel.GetSymbolInfo(node, ct).Symbol is INamespaceOrTypeSymbol symbol &&
+                !IsErrorType(symbol))
+            {
+                expression = SyntaxFactory.ParseExpression(symbol.FQN);
+                return true;
+            }
+
+            expression = node;
+            return false;
+        }
+
+        bool TryGetTypeSyntax(NameSyntax node, out TypeSyntax typeSyntax)
+        {
+            if (semanticModel.GetAliasInfo(node, ct)?.Target is ITypeSymbol aliasTarget &&
+                !IsErrorType(aliasTarget))
+            {
+                typeSyntax = SyntaxFactory.ParseTypeName(aliasTarget.FQN);
+                return true;
+            }
+
+            if (semanticModel.GetSymbolInfo(node, ct).Symbol is ITypeSymbol type && !IsErrorType(type))
+            {
+                typeSyntax = SyntaxFactory.ParseTypeName(type.FQN);
+                return true;
+            }
+
+            typeSyntax = node;
+            return false;
+        }
+
+        static bool TryCreateQualifiedName(INamespaceOrTypeSymbol symbol, out NameSyntax qualifiedName)
+        {
+            if (IsErrorType(symbol))
+            {
+                qualifiedName = SyntaxFactory.IdentifierName(symbol.Name);
+                return false;
+            }
+
+            qualifiedName = SyntaxFactory.ParseName(symbol.FQN);
+            return true;
+        }
+    }
+
+    static bool IsErrorType(INamespaceOrTypeSymbol symbol)
+        => symbol is IErrorTypeSymbol ||
+           symbol is ITypeSymbol { TypeKind: TypeKind.Error };
 
     static string? GetOutputFilename(GeneratorAttributeSyntaxContext context)
     {
@@ -1030,6 +1290,17 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                         src.Line.Write($"public {GetProjectedType(x)} {x.Name}");
                         PropertyWithSafetyChecks(GetProjectedAccess(x));
+                    }
+
+                    if (!isReadOnly)
+                    {
+                        foreach (var member in input.AccessROMembersForAccessRWDeferred?.Value ?? [])
+                        {
+                            src.Linebreak();
+
+                            foreach (var line in member.Split('\n'))
+                                src.Line.Write(line.TrimEnd('\r'));
+                        }
                     }
 
                     if (input.AttributeSettings.SafetyChecks)
