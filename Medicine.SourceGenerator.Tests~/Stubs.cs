@@ -150,6 +150,17 @@ static class Stubs
                   ) { }
               }
 
+              [AttributeUsage(AttributeTargets.Method)]
+              public sealed class UnmanagedInvokeAttribute : Attribute { }
+
+              public readonly struct UnmanagedRef<T> where T : class
+              {
+                  public readonly nint Ptr;
+                  public UnmanagedRef(nint ptr) => Ptr = ptr;
+                  public UnmanagedRef(T value) => Ptr = default;
+                  public T Resolve() => default!;
+              }
+
               [AttributeUsage(AttributeTargets.Method | AttributeTargets.Property)]
               public sealed class WrapValueEnumerableAttribute : Attribute { }
 
@@ -252,6 +263,52 @@ static class Stubs
               {
                   public static TTo As<TFrom, TTo>(ref TFrom value)
                       => default!;
+              }
+          }
+
+          namespace UnityEngine
+          {
+              public enum RuntimeInitializeLoadType
+              {
+                  AfterAssembliesLoaded
+              }
+
+              [AttributeUsage(AttributeTargets.Method)]
+              public sealed class RuntimeInitializeOnLoadMethodAttribute : Attribute
+              {
+                  public RuntimeInitializeOnLoadMethodAttribute(RuntimeInitializeLoadType loadType) { }
+              }
+          }
+
+          namespace UnityEditor
+          {
+              [AttributeUsage(AttributeTargets.Method)]
+              public sealed class InitializeOnLoadMethodAttribute : Attribute { }
+          }
+
+          namespace Unity.Burst
+          {
+              public readonly struct FunctionPointer<T> where T : Delegate
+              {
+                  public FunctionPointer(IntPtr ptr) { }
+                  public T Invoke => default!;
+              }
+
+              public struct SharedStatic<T>
+              {
+                  public T Data;
+
+                  public static SharedStatic<T> GetOrCreate<TContext>()
+                      => default;
+              }
+          }
+
+          namespace AOT
+          {
+              [AttributeUsage(AttributeTargets.Method)]
+              public sealed class MonoPInvokeCallbackAttribute : Attribute
+              {
+                  public MonoPInvokeCallbackAttribute(Type type) { }
               }
           }
           """;

@@ -277,6 +277,13 @@ namespace Medicine
     }
 
     /// <summary>
+    /// Generates a Burst-compatible unmanaged invocation wrapper for a managed method.
+    /// </summary>
+    [MeansImplicitUse]
+    [AttributeUsage(Method)]
+    public sealed class UnmanagedInvokeAttribute : Attribute { }
+
+    /// <summary>
     /// Can be used to ensure that a mutable struct is not stored in a `readonly` field.
     /// This would prevent the struct's value from being updated.
     /// </summary>

@@ -1132,6 +1132,13 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Linebreak();
 
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write($"public static implicit operator Medicine.UnmanagedRef<{m}Self>({accessStructName} access)");
+                    using (src.Indent)
+                        src.Line.Write("=> access.Ref;");
+
+                    src.Linebreak();
+
                     void PropertyWithSafetyChecks(string call)
                     {
                         using (src.Braces)

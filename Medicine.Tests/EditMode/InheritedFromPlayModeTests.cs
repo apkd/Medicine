@@ -14,6 +14,8 @@ namespace InheritedFromPlayMode
 
     public sealed class UnmanagedAccessTests : global::UnmanagedAccessTests { }
 
+    public sealed class UnmanagedInvokeTests : global::UnmanagedInvokeTests { }
+
     public sealed class PooledListTests : global::PooledListTests { }
 
     public sealed class FindByTypeTests : global::FindByTypeTests { }

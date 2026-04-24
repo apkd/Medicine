@@ -12,6 +12,7 @@ public readonly record struct KnownSymbols
     public INamedTypeSymbol SingletonAttribute { get; }
     public INamedTypeSymbol TrackAttribute { get; }
     public INamedTypeSymbol UnmanagedAccessAttribute { get; }
+    public INamedTypeSymbol UnmanagedInvokeAttribute { get; }
     public INamedTypeSymbol IInstanceIndexInterface { get; }
     public INamedTypeSymbol UnmanagedDataInterface { get; }
     public INamedTypeSymbol CustomStorageInterface { get; }
@@ -21,6 +22,7 @@ public readonly record struct KnownSymbols
     public INamedTypeSymbol TrackedInstances { get; }
     public INamedTypeSymbol LazyRef { get; }
     public INamedTypeSymbol LazyVal { get; }
+    public INamedTypeSymbol UnmanagedRef1 { get; }
     public INamedTypeSymbol SystemIDisposable { get; }
     public INamedTypeSymbol SystemFunc1 { get; }
     public INamedTypeSymbol SystemList1 { get; }
@@ -63,6 +65,9 @@ public readonly record struct KnownSymbols
         UnmanagedAccessAttribute
             = Get(Constants.UnmanagedAccessAttributeMetadataName);
 
+        UnmanagedInvokeAttribute
+            = Get(Constants.UnmanagedInvokeAttributeMetadataName);
+
         IInstanceIndexInterface
             = Get(Constants.IInstanceIndexInterfaceMetadataName);
 
@@ -89,6 +94,9 @@ public readonly record struct KnownSymbols
 
         LazyVal
             = Get("Medicine.LazyVal`1");
+
+        UnmanagedRef1
+            = Get("Medicine.UnmanagedRef`1");
 
         SystemIDisposable
             = Get("System.IDisposable");

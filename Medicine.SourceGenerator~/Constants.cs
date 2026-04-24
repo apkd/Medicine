@@ -42,6 +42,11 @@ static class Constants
     public const string UnmanagedAccessAttributeMetadataName = $"{Namespace}.{UnmanagedAccessAttributeName}";
     public const string UnmanagedAccessAttributeFQN = $"{NamespaceWithGlobal}.{UnmanagedAccessAttributeName}";
 
+    public const string UnmanagedInvokeAttributeNameShort = "UnmanagedInvoke";
+    public const string UnmanagedInvokeAttributeName = $"{UnmanagedInvokeAttributeNameShort}Attribute";
+    public const string UnmanagedInvokeAttributeMetadataName = $"{Namespace}.{UnmanagedInvokeAttributeName}";
+    public const string UnmanagedInvokeAttributeFQN = $"{NamespaceWithGlobal}.{UnmanagedInvokeAttributeName}";
+
     public const string GenerateConstantsAttributeNameShort = "GenerateUnityConstants";
     public const string GenerateConstantsAttributeName = $"{GenerateConstantsAttributeNameShort}Attribute";
     public const string GenerateConstantsAttributeMetadataName = $"{Namespace}.{GenerateConstantsAttributeName}";
