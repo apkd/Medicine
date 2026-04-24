@@ -108,8 +108,8 @@ namespace Medicine
     /// <summary>
     /// Provides a <see cref="TrackAttribute"/>-marked class with a list of tracked object IDs.
     /// </summary>
-    [SuppressMessage("ReSharper", "SuspiciousTypeConversion.Global")]
 #if UNITY_6000_4_OR_NEWER
+    [SuppressMessage("ReSharper", "SuspiciousTypeConversion.Global")]
     public interface ITrackEntityIDs : ICustomStorage<ITrackEntityIDs.EntityIDStorage>
     {
         void ICustomStorage<EntityIDStorage>.InitializeStorage(ref EntityIDStorage storage)
@@ -130,7 +130,36 @@ namespace Medicine
                 = new(initialCapacity: 8, Unity.Collections.Allocator.Persistent);
         }
     }
+
+    /// <summary>
+    /// Legacy tracked object ID storage API. Use <see cref="ITrackEntityIDs"/> on Unity 6000.4 or newer.
+    /// </summary>
+    [Obsolete("InstanceID APIs are obsolete on Unity >=6.4. Use EntityId APIs instead.", true)]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public interface ITrackInstanceIDs : ICustomStorage<ITrackInstanceIDs.InstanceIDStorage>
+    {
+        void ICustomStorage<InstanceIDStorage>.InitializeStorage(ref InstanceIDStorage storage)
+            => storage = new();
+
+        void ICustomStorage<InstanceIDStorage>.DisposeStorage(ref InstanceIDStorage storage)
+            => storage.InstanceIDs.Dispose();
+
+        void ICustomStorage<InstanceIDStorage>.RegisterInstance(ref InstanceIDStorage storage)
+            => throw new NotSupportedException("InstanceID APIs are obsolete on Unity >=6.4. Use EntityId APIs instead.");
+
+        void ICustomStorage<InstanceIDStorage>.UnregisterInstance(ref InstanceIDStorage storage, int instanceIndex)
+            => throw new NotSupportedException("InstanceID APIs are obsolete on Unity >=6.4. Use EntityId APIs instead.");
+
+        [Obsolete("InstanceID APIs are obsolete on Unity >=6.4. Use EntityId APIs instead.", true)]
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public sealed class InstanceIDStorage
+        {
+            public Unity.Collections.NativeList<int> InstanceIDs
+                = new(initialCapacity: 8, Unity.Collections.Allocator.Persistent);
+        }
+    }
 #else
+    [SuppressMessage("ReSharper", "SuspiciousTypeConversion.Global")]
     public interface ITrackInstanceIDs : ICustomStorage<ITrackInstanceIDs.InstanceIDStorage>
     {
         void ICustomStorage<InstanceIDStorage>.InitializeStorage(ref InstanceIDStorage storage)

@@ -91,6 +91,9 @@ static class Constants
 
     public const string MedicineFindClassFQN = "global::Medicine.Find";
 
+    public const string InstanceIdMigrationMessage
+        = "InstanceID APIs are obsolete on Unity >=6.4. Use EntityId APIs instead.";
+
     public static class Alias
     {
         // cannot alias to any shortened name because Rider fails to recognize the attribute

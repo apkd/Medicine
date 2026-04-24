@@ -792,6 +792,12 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                             EmitDoc($"/// <inheritdoc cref=\"Medicine.UnmanagedRefExtensions.GetEntityID\" />");
                             src.Line.Write($"public global::UnityEngine.EntityId EntityID");
                             PropertyWithSafetyChecks($"Medicine.UnmanagedRefExtensions.GetEntityID(Ref);");
+
+                            EmitDoc("/// <summary>Legacy Unity object identity API. Use <see cref=\"EntityID\"/> on Unity 6000.4 or newer.</summary>");
+                            src.Line.Write($"[global::System.Obsolete(\"{InstanceIdMigrationMessage}\", true)]");
+                            src.Line.Write("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
+                            src.Line.Write($"public int InstanceID");
+                            ObsoleteInstanceIdProperty();
                         }
                         else
                         {
@@ -799,6 +805,18 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                             src.Line.Write($"public int InstanceID");
                             PropertyWithSafetyChecks($"Medicine.UnmanagedRefExtensions.GetInstanceID(Ref);");
                         }
+                    }
+
+                    void ObsoleteInstanceIdProperty()
+                    {
+                        using (src.Braces)
+                        {
+                            src.Line.Write($"{Alias.Inline} get");
+                            using (src.Braces)
+                                src.Line.Write($"throw new global::System.NotSupportedException(\"{InstanceIdMigrationMessage}\");");
+                        }
+
+                        src.Linebreak();
                     }
 
                     string GetProjectedType(in FieldInfo field)

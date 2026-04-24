@@ -124,6 +124,15 @@ namespace Medicine
 #else
             => ReadNativeObjectId<TClass, UnityEngine.EntityId>(classRef);
 #endif
+
+        /// <summary>
+        /// Legacy Unity object identity API. Use <see cref="GetEntityID{TClass}"/> on Unity 6000.4 or newer.
+        /// </summary>
+        [Obsolete("InstanceID APIs are obsolete on Unity >=6.4. Use EntityId APIs instead.", true)]
+        [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+        [MethodImpl(AggressiveInlining)]
+        public static int GetInstanceID<TClass>(this UnmanagedRef<TClass> classRef) where TClass : UnityEngine.Object
+            => throw new NotSupportedException("InstanceID APIs are obsolete on Unity >=6.4. Use EntityId APIs instead.");
 #else
         /// <summary>
         /// Equivalent of the <see cref="UnityEngine.Object.GetInstanceID"/> method.

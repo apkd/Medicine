@@ -349,12 +349,16 @@ sealed partial class UnmanagedAccessUnityObjectIdentityComponent : MonoBehaviour
 
         int entityIdPropertyCount = 0;
         int instanceIdPropertyCount = 0;
+        int obsoleteInstanceIdCount = 0;
+        int hiddenInstanceIdCount = 0;
         foreach (var result in run.Results)
         foreach (var generatedSource in result.GeneratedSources)
         {
             var text = generatedSource.SourceText.ToString();
             entityIdPropertyCount += CountOccurrences(text, "public global::UnityEngine.EntityId EntityID");
             instanceIdPropertyCount += CountOccurrences(text, "public int InstanceID");
+            obsoleteInstanceIdCount += CountOccurrences(text, "[global::System.Obsolete(\"InstanceID APIs are obsolete on Unity >=6.4. Use EntityId APIs instead.\", true)]");
+            hiddenInstanceIdCount += CountOccurrences(text, "[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
         }
 
         if (entityIdPropertyCount is not 2)
@@ -363,12 +367,12 @@ sealed partial class UnmanagedAccessUnityObjectIdentityComponent : MonoBehaviour
                 $"Actual EntityID count: {entityIdPropertyCount}."
             );
 
-        if (instanceIdPropertyCount is 0)
+        if (instanceIdPropertyCount is 2 && obsoleteInstanceIdCount is 2 && hiddenInstanceIdCount is 2)
             return;
 
         throw new InvalidOperationException(
-            "Expected EntityId-based unmanaged access generation to omit the legacy InstanceID accessor." + Environment.NewLine +
-            $"Actual InstanceID count: {instanceIdPropertyCount}."
+            "Expected EntityId-based unmanaged access generation to emit the legacy InstanceID accessor only as an obsolete erroring migration stub." + Environment.NewLine +
+            $"Actual InstanceID count: {instanceIdPropertyCount}. Actual obsolete marker count: {obsoleteInstanceIdCount}. Actual hidden marker count: {hiddenInstanceIdCount}."
         );
 
         static int CountOccurrences(string source, string value)

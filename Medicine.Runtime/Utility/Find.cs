@@ -139,10 +139,11 @@ namespace Medicine
         [MethodImpl(AggressiveInlining)]
 #if UNITY_6000_4_OR_NEWER
         public static T[] ObjectsByType<T>(bool includeInactive = false)
+            where T : class
 #else
         public static T[] ObjectsByType<T>(bool includeInactive = false, FindObjectsSortMode sortMode = 0)
-#endif
             where T : class
+#endif
         {
             if (Utility.TypeInfo<T>.IsInterface)
             {
@@ -186,6 +187,20 @@ namespace Medicine
             // version of the method, Unity seemingly copies the array around for no reason whatsoever
             return UnsafeUtility.As<Object[], T[]>(ref array);
         }
+
+#if UNITY_6000_4_OR_NEWER
+#pragma warning disable CS0618
+        /// <summary>
+        /// Legacy sorted find-object API. Use <see cref="ObjectsByType{T}(bool)"/> on Unity 6000.4 or newer.
+        /// </summary>
+        [Obsolete("Use Find.ObjectsByType<T>(bool)", true)]
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        [MethodImpl(AggressiveInlining)]
+        public static T[] ObjectsByType<T>(bool includeInactive, FindObjectsSortMode sortMode)
+            where T : class
+            => throw new NotSupportedException("Use Find.ObjectsByType<T>(bool)");
+#pragma warning restore CS0618
+#endif
 
         /// <summary>
         /// Returns any live object of type <typeparamref name="T"/>.<br/>
