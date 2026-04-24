@@ -71,6 +71,10 @@ namespace Medicine.Internal
         internal static ListView<T> AsInternalsView<T>(this List<T> list)
             => UnsafeUtility.As<List<T>, ListView<T>>(ref list);
 
+        [MethodImpl(AggressiveInlining)]
+        public static unsafe ref T AsRefUnchecked<T>(void* ptr)
+            => ref UnsafeUtility.As<byte, T>(ref UnsafeUtility.AsRef<byte>(ptr));
+
         internal static void Deconstruct<T>(this ListView<T> list, out T[]? array, out int count)
             => (array, count) = (list.Array, list.Count);
 

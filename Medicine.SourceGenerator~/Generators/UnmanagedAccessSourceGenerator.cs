@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -25,7 +26,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public Defer<bool>? HasCachedEnableBuilderDeferred;
         public Defer<bool>? HasIInstanceIndexBuilderDeferred;
         public EquatableArray<FieldInfo> Fields;
-        public Defer<string[]>? AccessROMembersForAccessRWDeferred;
+        public Defer<string[]>? AccessROForwardingMembersForAccessRWDeferred;
     }
 
     record struct FieldInfo
@@ -158,7 +159,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             UsesEntityId = generatorEnvironment.IsUnity64OrNewer,
             IsTracked = trackAttribute is not null,
             SourceGeneratorLocation = new(typeDecl.Identifier.GetLocation()),
-            AccessROMembersForAccessRWDeferred = new(() => CollectAccessROMembersForAccessRW(context.SemanticModel.Compilation, typeSymbol, ct)),
+            AccessROForwardingMembersForAccessRWDeferred = new(() => CollectAccessROForwardingMembersForAccessRW(context.SemanticModel.Compilation, typeSymbol, ct)),
             HasCachedEnableBuilderDeferred = new(() =>
                 {
                     if (trackAttribute is null)
@@ -214,20 +215,28 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     : isManagedListType
                         ? listType!.TypeArguments.FirstOrDefault()
                         : null;
+                bool isNullableValueType = IsNullableValueType(field.Type);
+                bool elementIsNullableValueType = elementType is not null && IsNullableValueType(elementType);
                 bool elementTreatAsUnmanagedWrapper = elementType is not null && IsWrapperErrorType(elementType);
-                bool isManagedValueType = field.Type is { IsValueType: true, IsUnmanagedType: false } && !treatAsUnmanagedWrapper;
+                bool isManagedValueType = field.Type is { IsValueType: true }
+                                          && (!field.Type.IsUnmanagedType || isNullableValueType)
+                                          && !treatAsUnmanagedWrapper;
 
                 var fieldFlags
                     = 0
                       | (field.DeclaredAccessibility is Accessibility.Public ? FieldFlags.IsPublic : 0)
                       | (field.IsReadOnly ? FieldFlags.IsReadOnly : 0)
-                      | (field.Type.IsUnmanagedType || treatAsUnmanagedWrapper ? FieldFlags.IsUnmanagedType : 0)
+                      | ((field.Type.IsUnmanagedType && !isNullableValueType) || treatAsUnmanagedWrapper
+                          ? FieldFlags.IsUnmanagedType
+                          : 0)
                       | (field.Type.IsReferenceType && !treatAsUnmanagedWrapper ? FieldFlags.IsReferenceType : 0)
                       | (isManagedValueType ? FieldFlags.IsManagedValueType : 0)
                       | (isManagedArrayType ? FieldFlags.IsManagedArrayType : 0)
                       | (isManagedListType ? FieldFlags.IsManagedListType : 0)
                       | (field.Type.GetAttribute(knownSymbols.UnmanagedAccessAttribute) is not null ? FieldFlags.TypeHasUnmanagedAccess : 0)
-                      | (elementType?.IsUnmanagedType is true || elementTreatAsUnmanagedWrapper ? FieldFlags.ElementIsUnmanagedType : 0)
+                      | (elementType?.IsUnmanagedType is true && !elementIsNullableValueType || elementTreatAsUnmanagedWrapper
+                          ? FieldFlags.ElementIsUnmanagedType
+                          : 0)
                       | (elementType?.IsReferenceType is true && !elementTreatAsUnmanagedWrapper ? FieldFlags.ElementIsReferenceType : 0)
                       | (elementType?.GetAttribute(knownSymbols.UnmanagedAccessAttribute) is not null ? FieldFlags.ElementHasUnmanagedAccess : 0)
                       | (isFromBaseType && field.DeclaredAccessibility is Accessibility.Private ? FieldFlags.IsPrivateInBaseType : 0);
@@ -250,6 +259,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         }
 
         return output;
+
+        static bool IsNullableValueType(ITypeSymbol type)
+            => type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T };
     }
 
     static ulong GetInputChecksum(GeneratorAttributeSyntaxContext context, CancellationToken ct)
@@ -274,9 +286,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             : (context.TargetNode.Parent ?? context.TargetNode).GetNodeChecksum(ct);
     }
 
-    static string[] CollectAccessROMembersForAccessRW(Compilation compilation, ITypeSymbol typeSymbol, CancellationToken ct)
+    static string[] CollectAccessROForwardingMembersForAccessRW(Compilation compilation, ITypeSymbol typeSymbol, CancellationToken ct)
     {
-        using var r1 = Scratch.RentA<List<string>>(out var copiedMembers);
+        using var r1 = Scratch.RentA<List<string>>(out var forwardingMembers);
         using var r2 = Scratch.RentB<HashSet<string>>(out var accessRWMemberKeys);
 
         foreach (var accessRWDeclaration in GetAccessStructDeclarations(typeSymbol, "AccessRW", ct))
@@ -284,26 +296,28 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             var semanticModel = compilation.GetSemanticModel(accessRWDeclaration.SyntaxTree);
 
             foreach (var member in accessRWDeclaration.Members)
-                if (TryGetCopyMemberKey(member, semanticModel, ct, out var key))
+                if (TryGetForwardableMemberKey(member, semanticModel, ct, out var key))
                     accessRWMemberKeys.Add(key);
         }
+
+        accessRWMemberKeys.Add("M:AsReadOnly`0()");
 
         foreach (var accessRODeclaration in GetAccessStructDeclarations(typeSymbol, "AccessRO", ct))
         {
             var semanticModel = compilation.GetSemanticModel(accessRODeclaration.SyntaxTree);
-            var rewriter = new FullyQualifiedTypeReferenceRewriter(semanticModel, ct);
 
             foreach (var member in accessRODeclaration.Members)
             {
-                if (!TryGetCopyMemberKey(member, semanticModel, ct, out var key) || accessRWMemberKeys.Contains(key))
+                if (!TryBuildAccessROForwardingMember(member, semanticModel, ct, out var key, out var source) ||
+                    accessRWMemberKeys.Contains(key))
                     continue;
 
-                var rewritten = (MemberDeclarationSyntax?)rewriter.Visit(member) ?? member;
-                copiedMembers.Add(rewritten.NormalizeWhitespace(eol: "\n").ToFullString().Trim());
+                accessRWMemberKeys.Add(key);
+                forwardingMembers.Add(source);
             }
         }
 
-        return copiedMembers.ToArray();
+        return forwardingMembers.ToArray();
     }
 
     static IEnumerable<TypeDeclarationSyntax> GetAccessStructDeclarations(ITypeSymbol typeSymbol, string accessStructName, CancellationToken ct)
@@ -325,7 +339,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         }
     }
 
-    static bool TryGetCopyMemberKey(
+    static bool TryGetForwardableMemberKey(
         MemberDeclarationSyntax member,
         SemanticModel semanticModel,
         CancellationToken ct,
@@ -334,180 +348,256 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
     {
         key = "";
 
-        if (!HasCopyableImplementation(member))
-            return false;
-
         switch (semanticModel.GetDeclaredSymbol(member, ct))
         {
-            case IMethodSymbol method:
+            case IMethodSymbol { MethodKind: MethodKind.Ordinary, IsStatic: false } method:
                 key = BuildMethodKey(method);
                 return true;
-            case IPropertySymbol property:
+            case IPropertySymbol { IsStatic: false } property:
                 key = BuildPropertyKey(property);
                 return true;
             default:
                 return false;
         }
-
-        static bool HasCopyableImplementation(MemberDeclarationSyntax member)
-            => member switch
-            {
-                MethodDeclarationSyntax method
-                    => !method.Modifiers.Any(SyntaxKind.PartialKeyword) &&
-                       (method.Body is not null || method.ExpressionBody is not null),
-                PropertyDeclarationSyntax property
-                    => property.ExpressionBody is not null || HasAccessorImplementation(property.AccessorList),
-                IndexerDeclarationSyntax indexer
-                    => indexer.ExpressionBody is not null || HasAccessorImplementation(indexer.AccessorList),
-                _ => false,
-            };
-
-        static bool HasAccessorImplementation(AccessorListSyntax? accessorList)
-            => accessorList?.Accessors.Any(x => x.Body is not null || x.ExpressionBody is not null) is true;
-
-        static string BuildMethodKey(IMethodSymbol method)
-            => $"M:{method.Name}`{method.Arity}({BuildParameterKey(method.Parameters)})";
-
-        static string BuildPropertyKey(IPropertySymbol property)
-            => $"P:{property.Name}({BuildParameterKey(property.Parameters)})";
-
-        static string BuildParameterKey(IEnumerable<IParameterSymbol> parameters)
-            => string.Join(
-                ",",
-                parameters.Select(static x => $"{x.RefKind}:{x.Type.FQN}")
-            );
     }
 
-    sealed class FullyQualifiedTypeReferenceRewriter(SemanticModel semanticModel, CancellationToken ct) : CSharpSyntaxRewriter
+    static bool TryBuildAccessROForwardingMember(
+        MemberDeclarationSyntax member,
+        SemanticModel semanticModel,
+        CancellationToken ct,
+        out string key,
+        out string source
+    )
     {
-        public override SyntaxNode? VisitAttribute(AttributeSyntax node)
+        key = "";
+        source = "";
+
+        switch (semanticModel.GetDeclaredSymbol(member, ct))
         {
-            var rewritten = (AttributeSyntax?)base.VisitAttribute(node) ?? node;
-
-            if (semanticModel.GetSymbolInfo(node, ct).Symbol is not IMethodSymbol
-                {
-                    MethodKind: MethodKind.Constructor,
-                    ContainingType: { TypeKind: not TypeKind.Error } attributeType,
-                })
-                return rewritten;
-
-            return rewritten.WithName(
-                SyntaxFactory.ParseName(attributeType.FQN)
-                    .WithTriviaFrom(rewritten.Name)
-            );
-        }
-
-        public override SyntaxNode? VisitQualifiedName(QualifiedNameSyntax node)
-        {
-            if (TryGetQualifiedName(node, out var qualifiedName))
-                return qualifiedName.WithTriviaFrom(node);
-
-            return base.VisitQualifiedName(node);
-        }
-
-        public override SyntaxNode? VisitAliasQualifiedName(AliasQualifiedNameSyntax node)
-        {
-            if (TryGetQualifiedName(node, out var qualifiedName))
-                return qualifiedName.WithTriviaFrom(node);
-
-            return base.VisitAliasQualifiedName(node);
-        }
-
-        public override SyntaxNode? VisitGenericName(GenericNameSyntax node)
-        {
-            if (TryGetTypeSyntax(node, out var typeSyntax))
-                return typeSyntax.WithTriviaFrom(node);
-
-            return base.VisitGenericName(node);
-        }
-
-        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
-        {
-            if (node.Parent is QualifiedNameSyntax or AliasQualifiedNameSyntax)
-                return base.VisitIdentifierName(node);
-
-            if (node.Parent is MemberAccessExpressionSyntax memberAccess && memberAccess.Name == node)
-                return base.VisitIdentifierName(node);
-
-            if (TryGetTypeSyntax(node, out var typeSyntax))
-                return typeSyntax.WithTriviaFrom(node);
-
-            if (TryGetQualifiedName(node, out var qualifiedName))
-                return qualifiedName.WithTriviaFrom(node);
-
-            return base.VisitIdentifierName(node);
-        }
-
-        public override SyntaxNode? VisitMemberAccessExpression(MemberAccessExpressionSyntax node)
-        {
-            if (TryGetQualifiedExpression(node, out var expression))
-                return expression.WithTriviaFrom(node);
-
-            return base.VisitMemberAccessExpression(node);
-        }
-
-        bool TryGetQualifiedName(NameSyntax node, out NameSyntax qualifiedName)
-        {
-            if (semanticModel.GetAliasInfo(node, ct)?.Target is INamespaceOrTypeSymbol aliasTarget &&
-                TryCreateQualifiedName(aliasTarget, out qualifiedName))
-                return true;
-
-            if (semanticModel.GetSymbolInfo(node, ct).Symbol is INamespaceOrTypeSymbol symbol &&
-                TryCreateQualifiedName(symbol, out qualifiedName))
-                return true;
-
-            qualifiedName = node;
-            return false;
-        }
-
-        bool TryGetQualifiedExpression(ExpressionSyntax node, out ExpressionSyntax expression)
-        {
-            if (semanticModel.GetSymbolInfo(node, ct).Symbol is INamespaceOrTypeSymbol symbol &&
-                !IsErrorType(symbol))
+            case IMethodSymbol { MethodKind: MethodKind.Ordinary, IsStatic: false } method
+                when HasMethodImplementation(member) && IsForwardingAccessibility(method.DeclaredAccessibility):
             {
-                expression = SyntaxFactory.ParseExpression(symbol.FQN);
+                key = BuildMethodKey(method);
+                source = BuildForwardingMethod(method);
                 return true;
             }
 
-            expression = node;
-            return false;
-        }
-
-        bool TryGetTypeSyntax(NameSyntax node, out TypeSyntax typeSyntax)
-        {
-            if (semanticModel.GetAliasInfo(node, ct)?.Target is ITypeSymbol aliasTarget &&
-                !IsErrorType(aliasTarget))
+            case IPropertySymbol { IsStatic: false, GetMethod: not null } property
+                when HasPropertyGetterImplementation(member) &&
+                     IsForwardingAccessibility(property.GetMethod.DeclaredAccessibility):
             {
-                typeSyntax = SyntaxFactory.ParseTypeName(aliasTarget.FQN);
+                key = BuildPropertyKey(property);
+                source = BuildForwardingProperty(property);
                 return true;
             }
 
-            if (semanticModel.GetSymbolInfo(node, ct).Symbol is ITypeSymbol type && !IsErrorType(type))
-            {
-                typeSyntax = SyntaxFactory.ParseTypeName(type.FQN);
-                return true;
-            }
-
-            typeSyntax = node;
-            return false;
-        }
-
-        static bool TryCreateQualifiedName(INamespaceOrTypeSymbol symbol, out NameSyntax qualifiedName)
-        {
-            if (IsErrorType(symbol))
-            {
-                qualifiedName = SyntaxFactory.IdentifierName(symbol.Name);
+            default:
                 return false;
-            }
-
-            qualifiedName = SyntaxFactory.ParseName(symbol.FQN);
-            return true;
         }
     }
 
-    static bool IsErrorType(INamespaceOrTypeSymbol symbol)
-        => symbol is IErrorTypeSymbol ||
-           symbol is ITypeSymbol { TypeKind: TypeKind.Error };
+    static bool HasMethodImplementation(MemberDeclarationSyntax member)
+        => member is MethodDeclarationSyntax { Body: not null } or
+           MethodDeclarationSyntax { ExpressionBody: not null };
+
+    static bool HasPropertyGetterImplementation(MemberDeclarationSyntax member)
+        => member switch
+        {
+            PropertyDeclarationSyntax { ExpressionBody: not null } => true,
+            IndexerDeclarationSyntax { ExpressionBody: not null } => true,
+            PropertyDeclarationSyntax { AccessorList: { } accessorList } => HasGetterImplementation(accessorList),
+            IndexerDeclarationSyntax { AccessorList: { } accessorList } => HasGetterImplementation(accessorList),
+            _ => false,
+        };
+
+    static bool HasGetterImplementation(AccessorListSyntax accessorList)
+        => accessorList.Accessors.Any(static x =>
+            x.Keyword.IsKind(SyntaxKind.GetKeyword) &&
+            (x.Body is not null || x.ExpressionBody is not null)
+        );
+
+    static bool IsForwardingAccessibility(Accessibility accessibility)
+        => accessibility is Accessibility.Public or Accessibility.Internal;
+
+    static string BuildForwardingMethod(IMethodSymbol method)
+    {
+        var typeParameters = BuildTypeParameterList(method.TypeParameters);
+        var parameters = BuildParameterDeclarations(method.Parameters, includeDefaultValues: true);
+        var callTypeParameters = BuildCallTypeParameterList(method.TypeParameters);
+        var arguments = BuildArgumentList(method.Parameters);
+        var constraints = BuildTypeParameterConstraints(method.TypeParameters);
+        var refReturn = method.ReturnsByRef || method.ReturnsByRefReadonly ? "ref " : "";
+
+        var src = new StringBuilder();
+        src.AppendLine(Alias.Inline);
+        src.AppendLine($"{GetAccessibility(method.DeclaredAccessibility)} {GetMethodReturnType(method)} {method.Name}{typeParameters}({parameters}){constraints}");
+        src.Append($"    => {refReturn}AsReadOnly().{method.Name}{callTypeParameters}({arguments});");
+        return src.ToString();
+    }
+
+    static string BuildForwardingProperty(IPropertySymbol property)
+    {
+        var accessibility = GetAccessibility(property.GetMethod!.DeclaredAccessibility);
+        var returnType = GetPropertyReturnType(property);
+        var refReturn = property.ReturnsByRef || property.ReturnsByRefReadonly ? "ref " : "";
+        var src = new StringBuilder();
+
+        if (property.IsIndexer)
+        {
+            var parameters = BuildParameterDeclarations(property.Parameters, includeDefaultValues: true);
+            var arguments = BuildArgumentList(property.Parameters);
+
+            src.AppendLine($"{accessibility} {returnType} this[{parameters}]");
+            src.AppendLine("{");
+            src.AppendLine($"    {Alias.Inline} get => {refReturn}AsReadOnly()[{arguments}];");
+            src.Append("}");
+            return src.ToString();
+        }
+
+        src.AppendLine($"{accessibility} {returnType} {property.Name}");
+        src.AppendLine("{");
+        src.AppendLine($"    {Alias.Inline} get => {refReturn}AsReadOnly().{property.Name};");
+        src.Append("}");
+        return src.ToString();
+    }
+
+    static string BuildMethodKey(IMethodSymbol method)
+        => $"M:{method.Name}`{method.Arity}({BuildParameterKey(method.Parameters)})";
+
+    static string BuildPropertyKey(IPropertySymbol property)
+        => $"P:{property.Name}({BuildParameterKey(property.Parameters)})";
+
+    static string BuildParameterKey(IEnumerable<IParameterSymbol> parameters)
+        => string.Join(
+            ",",
+            parameters.Select(static x => $"{x.RefKind}:{x.Type.FQN}")
+        );
+
+    static string GetMethodReturnType(IMethodSymbol method)
+    {
+        if (method.ReturnsVoid)
+            return "void";
+
+        if (method.ReturnsByRefReadonly)
+            return $"ref readonly {method.ReturnType.FQN}";
+
+        if (method.ReturnsByRef)
+            return $"ref {method.ReturnType.FQN}";
+
+        return method.ReturnType.FQN;
+    }
+
+    static string GetPropertyReturnType(IPropertySymbol property)
+    {
+        if (property.ReturnsByRefReadonly)
+            return $"ref readonly {property.Type.FQN}";
+
+        if (property.ReturnsByRef)
+            return $"ref {property.Type.FQN}";
+
+        return property.Type.FQN;
+    }
+
+    static string GetAccessibility(Accessibility accessibility)
+        => accessibility switch
+        {
+            Accessibility.Public             => "public",
+            Accessibility.Internal           => "internal",
+            Accessibility.Protected          => "protected",
+            Accessibility.ProtectedOrInternal => "protected internal",
+            Accessibility.ProtectedAndInternal => "private protected",
+            _                                => "private",
+        };
+
+    static string BuildTypeParameterList(ImmutableArray<ITypeParameterSymbol> typeParameters)
+        => typeParameters.Length is 0
+            ? ""
+            : $"<{string.Join(", ", typeParameters.Select(static x => EscapeIdentifier(x.Name)))}>";
+
+    static string BuildCallTypeParameterList(ImmutableArray<ITypeParameterSymbol> typeParameters)
+        => typeParameters.Length is 0
+            ? ""
+            : $"<{string.Join(", ", typeParameters.Select(static x => EscapeIdentifier(x.Name)))}>";
+
+    static string BuildTypeParameterConstraints(ImmutableArray<ITypeParameterSymbol> typeParameters)
+    {
+        var constraints = new List<string>();
+
+        foreach (var typeParameter in typeParameters)
+        {
+            var parts = new List<string>();
+
+            if (typeParameter.HasUnmanagedTypeConstraint)
+                parts.Add("unmanaged");
+            else if (typeParameter.HasValueTypeConstraint)
+                parts.Add("struct");
+            else if (typeParameter.HasReferenceTypeConstraint)
+                parts.Add("class");
+            else if (typeParameter.HasNotNullConstraint)
+                parts.Add("notnull");
+
+            foreach (var constraintType in typeParameter.ConstraintTypes)
+                parts.Add(constraintType.FQN);
+
+            if (typeParameter.HasConstructorConstraint && !typeParameter.HasValueTypeConstraint && !typeParameter.HasUnmanagedTypeConstraint)
+                parts.Add("new()");
+
+            if (parts.Count > 0)
+            {
+                var typeParameterName = EscapeIdentifier(typeParameter.Name);
+                constraints.Add($" where {typeParameterName} : {string.Join(", ", parts)}");
+            }
+        }
+
+        return string.Join("", constraints);
+    }
+
+    static string BuildParameterDeclarations(ImmutableArray<IParameterSymbol> parameters, bool includeDefaultValues)
+        => string.Join(
+            ", ",
+            parameters.Select(x =>
+                $"{(x.IsParams ? "params " : "")}{x.RefKind.AsRefString()}{x.Type.FQN} {EscapeIdentifier(x.Name)}{(includeDefaultValues ? FormatDefaultValue(x) : "")}"
+            )
+        );
+
+    static string BuildArgumentList(ImmutableArray<IParameterSymbol> parameters)
+        => string.Join(
+            ", ",
+            parameters.Select(static x => $"{x.RefKind.AsRefString()}{EscapeIdentifier(x.Name)}")
+        );
+
+    static string FormatDefaultValue(IParameterSymbol parameter)
+    {
+        if (!parameter.HasExplicitDefaultValue)
+            return "";
+
+        return $" = {FormatLiteral(parameter.ExplicitDefaultValue, parameter.Type)}";
+    }
+
+    static string FormatLiteral(object? value, ITypeSymbol type)
+    {
+        if (value is null)
+            return "null";
+
+        if (type.TypeKind is TypeKind.Enum)
+            return $"({type.FQN}){Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture)}";
+
+        return value switch
+        {
+            string s  => SymbolDisplay.FormatLiteral(s, quote: true),
+            char c    => SymbolDisplay.FormatLiteral(c, quote: true),
+            bool b    => b ? "true" : "false",
+            float f   => f.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "f",
+            double d  => d.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "d",
+            decimal m => m.ToString(System.Globalization.CultureInfo.InvariantCulture) + "m",
+            _         => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? "default",
+        };
+    }
+
+    static string EscapeIdentifier(string value)
+        => SyntaxFacts.GetKeywordKind(value) is SyntaxKind.None
+            ? value
+            : $"@{value}";
 
     static string? GetOutputFilename(GeneratorAttributeSyntaxContext context)
     {
@@ -1139,6 +1229,20 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Linebreak();
 
+                    if (!isReadOnly)
+                    {
+                        src.Doc?.Write("/// <summary>");
+                        src.Doc?.Write("/// Returns a read-only view over this unmanaged accessor.");
+                        src.Doc?.Write("/// </summary>");
+
+                        src.Line.Write(Alias.Inline);
+                        src.Line.Write("public AccessRO AsReadOnly()");
+                        using (src.Indent)
+                            src.Line.Write("=> new(Ref, ref *layoutInfo);");
+
+                        src.Linebreak();
+                    }
+
                     void PropertyWithSafetyChecks(string call)
                     {
                         using (src.Braces)
@@ -1265,7 +1369,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                             return $"ref Ref.Read<{field.TypeFQN}>(layoutInfo->{field.Name});";
 
                         if (field.Flags.Has(FieldFlags.IsManagedValueType))
-                            return $"ref {m}UU.AsRef<{field.TypeFQN}>((void*)(Ref.Ptr + layoutInfo->{field.Name}));";
+                            return $"ref {m}Utility.AsRefUnchecked<{field.TypeFQN}>((void*)(Ref.Ptr + layoutInfo->{field.Name}));";
 
                         if (field.EmitsDirectAccess)
                             return $"new {field.TypeFQN}.Unmanaged.{(isReadOnly ? "AccessRO" : "AccessRW")}(Ref.Read<Medicine.UnmanagedRef<{field.TypeFQN}>>(layoutInfo->{field.Name}));";
@@ -1301,7 +1405,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     if (!isReadOnly)
                     {
-                        foreach (var member in input.AccessROMembersForAccessRWDeferred?.Value ?? [])
+                        foreach (var member in input.AccessROForwardingMembersForAccessRWDeferred?.Value ?? [])
                         {
                             src.Linebreak();
 

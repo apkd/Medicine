@@ -192,6 +192,39 @@ public partial class UnmanagedAccessTests
         public ManagedValueTypeData Data;
     }
 
+    [UnmanagedAccess]
+    public partial class NullableValueTypeFields
+    {
+        public Vector3? CustomRangeForce;
+    }
+
+    [UnmanagedAccess]
+    public partial class AccessROPartialForwardingFields
+    {
+        public int Value = 10;
+
+        public static partial class Unmanaged
+        {
+            public readonly unsafe partial struct AccessRO
+            {
+                public int Doubled
+                    => Value * 2;
+
+                public int Add(int value)
+                    => Value + value;
+
+                public int Existing()
+                    => Value + 1;
+            }
+
+            public readonly unsafe partial struct AccessRW
+            {
+                public int Existing()
+                    => -1;
+            }
+        }
+    }
+
     [Test]
     public void UnmanagedAccess_AccessedArrayFields_ProjectNativeArrayOfRefs()
     {
@@ -365,6 +398,52 @@ public partial class UnmanagedAccessTests
         Assert.That(obj.Data.Name, Is.EqualTo("battery"));
         Assert.That(obj.Data.Other.IntField, Is.EqualTo(27));
         Assert.That(obj.Data.Count, Is.EqualTo(8));
+    }
+
+    [Test]
+    public void UnmanagedAccess_NullableValueTypeFields_ProjectRefs()
+    {
+        var obj = new NullableValueTypeFields
+        {
+            CustomRangeForce = new Vector3(1, 2, 3),
+        };
+
+        UnmanagedRef<NullableValueTypeFields> unmanagedRef = obj;
+        var accessRW = unmanagedRef.AccessRW();
+
+        Assert.That(accessRW.CustomRangeForce.HasValue, Is.True);
+        Assert.That(accessRW.CustomRangeForce.Value, Is.EqualTo(new Vector3(1, 2, 3)));
+
+        accessRW.CustomRangeForce = new Vector3(4, 5, 6);
+
+        Assert.That(obj.CustomRangeForce.HasValue, Is.True);
+        Assert.That(obj.CustomRangeForce.Value, Is.EqualTo(new Vector3(4, 5, 6)));
+
+        var accessRO = unmanagedRef.AccessRO();
+        Assert.That(accessRO.CustomRangeForce.HasValue, Is.True);
+        Assert.That(accessRO.CustomRangeForce.Value, Is.EqualTo(new Vector3(4, 5, 6)));
+
+        accessRW.CustomRangeForce = null;
+
+        Assert.That(obj.CustomRangeForce.HasValue, Is.False);
+        Assert.That(accessRO.CustomRangeForce.HasValue, Is.False);
+    }
+
+    [Test]
+    public void UnmanagedAccess_AccessRW_ForwardsUserAccessROMembers()
+    {
+        var obj = new AccessROPartialForwardingFields { Value = 9 };
+        var access = ((UnmanagedRef<AccessROPartialForwardingFields>)obj).AccessRW();
+
+        Assert.That(access.AsReadOnly().Value, Is.EqualTo(9));
+        Assert.That(access.Doubled, Is.EqualTo(18));
+        Assert.That(access.Add(4), Is.EqualTo(13));
+
+        access.Value = 11;
+
+        Assert.That(access.AsReadOnly().Value, Is.EqualTo(11));
+        Assert.That(access.Doubled, Is.EqualTo(22));
+        Assert.That(access.Existing(), Is.EqualTo(-1));
     }
 
     [UnmanagedAccess]
