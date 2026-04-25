@@ -270,7 +270,8 @@ static class Stubs
           {
               public enum RuntimeInitializeLoadType
               {
-                  AfterAssembliesLoaded
+                  AfterAssembliesLoaded,
+                  SubsystemRegistration
               }
 
               [AttributeUsage(AttributeTargets.Method)]

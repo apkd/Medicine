@@ -1,7 +1,10 @@
 #if MODULE_BURST
+using System;
 using Medicine;
 using NUnit.Framework;
+using Unity.Burst;
 
+[BurstCompile]
 public partial class UnmanagedInvokeTests
 {
     public sealed class Payload
@@ -65,6 +68,24 @@ public partial class UnmanagedInvokeTests
             value += payload.Value;
             return Value + value;
         }
+    }
+
+    [BurstCompile(CompileSynchronously = true)]
+    static int InvokeAbstractFromBurst(nint basePtr, nint derivedPtr, nint payloadPtr)
+    {
+        var payload = new UnmanagedRef<Payload>(payloadPtr);
+
+        var baseValue = 3;
+        var baseResult = new UnmanagedRef<AbstractInstanceHost>(basePtr)
+            .AccessRW()
+            .AddAbstractUnmanaged(payload, ref baseValue);
+
+        var derivedValue = 7;
+        var derivedResult = new UnmanagedRef<ConcreteInstanceHost>(derivedPtr)
+            .AccessRW()
+            .AddAbstractUnmanaged(payload, ref derivedValue);
+
+        return baseResult + baseValue * 100 + derivedResult * 10000 + derivedValue * 1000000;
     }
 
     [Test]
@@ -154,6 +175,22 @@ public partial class UnmanagedInvokeTests
 
         Assert.That(derivedValue, Is.EqualTo(12));
         Assert.That(derivedResult, Is.EqualTo(32));
+    }
+
+    [Test]
+    public void UnmanagedInvoke_AbstractInstanceMethod_InvokesFromBurstDirectCall()
+    {
+        var host = new ConcreteInstanceHost { Value = 20 };
+        var payload = new Payload { Value = 5 };
+        UnmanagedRef<AbstractInstanceHost> baseRef = host;
+        UnmanagedRef<ConcreteInstanceHost> derivedRef = host;
+        UnmanagedRef<Payload> payloadRef = payload;
+
+        var result = InvokeAbstractFromBurst(baseRef.Ptr, derivedRef.Ptr, payloadRef.Ptr);
+
+        Assert.That(result, Is.EqualTo(12320828));
+        GC.KeepAlive(host);
+        GC.KeepAlive(payload);
     }
 
     [Test]

@@ -180,7 +180,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         };
 
         void AddInvalid(string message, Location? location = null)
-            => diagnostics.Add(new(
+            => diagnostics.Add(
+                new(
                     DiagnosticKind.InvalidTarget,
                     message,
                     new(location ?? methodDecl.Identifier.GetLocation())
@@ -233,10 +234,12 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                     $"Parameter '{parameter.Name}' type '{parameter.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}' is not supported by [UnmanagedInvoke]: {parameterError}",
                     parameter.Locations.FirstOrDefault()
                 );
+
                 continue;
             }
 
-            parameters.Add(new(
+            parameters.Add(
+                new(
                     parameter.Name,
                     parameter.RefKind,
                     projection.SourceTypeFQN,
@@ -255,7 +258,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             string helperKey = BuildHelperKey(method.IsStatic, output.HelperName, output.Parameters.AsArray());
             if (HasProjectedHelperCollision(method, knownSymbols, helperKey, ct))
             {
-                diagnostics.Add(new(
+                diagnostics.Add(
+                    new(
                         DiagnosticKind.HelperCollision,
                         $"[UnmanagedInvoke] generated helper signature '{output.HelperName}' conflicts with another [UnmanagedInvoke] method after managed reference projection.",
                         new(methodDecl.Identifier.GetLocation())
@@ -340,7 +344,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                     continue;
 
                 var invoke = pair.Invoke;
-                forwarders.Add(new(
+                forwarders.Add(
+                    new(
                         BaseTypeName: GetTypeName(invoke.ContainingTypeFQN),
                         BaseTypeFQN: invoke.ContainingTypeFQN,
                         HelperName: invoke.HelperName,
@@ -435,7 +440,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         src.ShouldEmitDocs = input.GeneratorEnvironment.ShouldEmitDocs;
 
         foreach (var diagnostic in input.Diagnostics.AsArray())
-            context.ReportDiagnostic(Diagnostic.Create(
+            context.ReportDiagnostic(
+                Diagnostic.Create(
                     descriptor: diagnostic.Kind is DiagnosticKind.HelperCollision ? MED039 : MED038,
                     location: diagnostic.Location?.ToLocation() ?? input.SourceGeneratorLocation?.ToLocation() ?? Location.None,
                     messageArgs: diagnostic.Message
@@ -500,38 +506,43 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
             src.Linebreak();
 
-            src.Line.Write("static readonly UnmanagedDelegate ManagedDelegate = Managed;");
-            src.Linebreak();
-
-            src.Write("\n#if UNITY_EDITOR");
-            src.Line.Write("[global::UnityEditor.InitializeOnLoadMethodAttribute]");
-            src.Write("\n#endif");
-            src.Line.Write("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.AfterAssembliesLoaded)]");
-            src.Line.Write("static void Initialize()");
-            using (src.Indent)
-                src.Line.Write("=> SharedStaticFunctionPointer.Data = new global::Unity.Burst.FunctionPointer<UnmanagedDelegate>(global::System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(ManagedDelegate));");
-
-            src.Linebreak();
-
-            src.Line.Write("[global::AOT.MonoPInvokeCallbackAttribute(typeof(UnmanagedDelegate))]");
-            src.Line.Write($"static {input.ReturnType.ScaffoldTypeFQN} Managed(");
-            using (src.Indent)
-            {
-                if (!input.IsStatic)
-                    src.Line.Write($"nint self{(parameters.Length > 0 ? "," : "")}");
-
-                for (int i = 0; i < parameters.Length; i++)
-                {
-                    var parameter = parameters[i];
-                    src.Line.Write($"{GetParameterPrefix(parameter.RefKind)}{parameter.ScaffoldTypeFQN} {parameter.Name}{(i < parameters.Length - 1 ? "," : "")}");
-                }
-            }
-
-            src.Line.Write(")");
+            src.Line.Write("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
+            src.Line.Write("static class ManagedStorage");
             using (src.Braces)
             {
-                EmitManagedLocals(src, input);
-                EmitManagedInvoke(src, input);
+                src.Line.Write("static readonly UnmanagedDelegate ManagedDelegate = Managed;");
+                src.Linebreak();
+
+                src.Write("\n#if UNITY_EDITOR");
+                src.Line.Write("[global::UnityEditor.InitializeOnLoadMethodAttribute]");
+                src.Write("\n#endif");
+                src.Line.Write("[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
+                src.Line.Write("static void Initialize()");
+                using (src.Indent)
+                    src.Line.Write("=> SharedStaticFunctionPointer.Data = new global::Unity.Burst.FunctionPointer<UnmanagedDelegate>(global::System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(ManagedDelegate));");
+
+                src.Linebreak();
+
+                src.Line.Write("[global::AOT.MonoPInvokeCallbackAttribute(typeof(UnmanagedDelegate))]");
+                src.Line.Write($"static {input.ReturnType.ScaffoldTypeFQN} Managed(");
+                using (src.Indent)
+                {
+                    if (!input.IsStatic)
+                        src.Line.Write($"nint self{(parameters.Length > 0 ? "," : "")}");
+
+                    for (int i = 0; i < parameters.Length; i++)
+                    {
+                        var parameter = parameters[i];
+                        src.Line.Write($"{GetParameterPrefix(parameter.RefKind)}{parameter.ScaffoldTypeFQN} {parameter.Name}{(i < parameters.Length - 1 ? "," : "")}");
+                    }
+                }
+
+                src.Line.Write(")");
+                using (src.Braces)
+                {
+                    EmitManagedLocals(src, input);
+                    EmitManagedInvoke(src, input);
+                }
             }
 
             src.Linebreak();
@@ -708,13 +719,17 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         EmitHelperCopyBack(src, input);
 
         if (UsesPointerScaffold(input.ReturnType))
-            src.Line.Write(hasCopyBack
-                ? $"return new {input.ReturnType.ProjectedTypeFQN}(result);"
-                : $"return new {input.ReturnType.ProjectedTypeFQN}({invoke});");
+            src.Line.Write(
+                hasCopyBack
+                    ? $"return new {input.ReturnType.ProjectedTypeFQN}(result);"
+                    : $"return new {input.ReturnType.ProjectedTypeFQN}({invoke});"
+            );
         else
-            src.Line.Write(hasCopyBack
-                ? "return result;"
-                : $"return {invoke};");
+            src.Line.Write(
+                hasCopyBack
+                    ? "return result;"
+                    : $"return {invoke};"
+            );
     }
 
     static void EmitHelperCopyBack(SourceWriter src, GeneratorInput input)
@@ -944,7 +959,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             if (!TryProjectType(parameter.Type, knownSymbols, allowVoid: false, out var projection, out _))
                 return false;
 
-            parameters.Add(new(
+            parameters.Add(
+                new(
                     parameter.Name,
                     parameter.RefKind,
                     projection.SourceTypeFQN,

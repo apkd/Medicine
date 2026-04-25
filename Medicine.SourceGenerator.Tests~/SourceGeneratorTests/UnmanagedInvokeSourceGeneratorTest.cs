@@ -54,8 +54,12 @@ public static partial class InvokeStaticHost
         AssertContains(generatedText, "delegate nint UnmanagedDelegate(");
         AssertContains(generatedText, "static readonly global::Unity.Burst.SharedStatic<global::Unity.Burst.FunctionPointer<UnmanagedDelegate>> SharedStaticFunctionPointer");
         AssertContains(generatedText, "= global::Unity.Burst.SharedStatic<global::Unity.Burst.FunctionPointer<UnmanagedDelegate>>.GetOrCreate<SharedStaticKey>();");
+        AssertContains(generatedText, "static class ManagedStorage");
         AssertContains(generatedText, "static readonly UnmanagedDelegate ManagedDelegate = Managed;");
+        AssertContains(generatedText, "[global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]");
         AssertContains(generatedText, "[global::AOT.MonoPInvokeCallbackAttribute(typeof(UnmanagedDelegate))]");
+        AssertNestedAfter(generatedText, "static class ManagedStorage", "static readonly UnmanagedDelegate ManagedDelegate = Managed;");
+        AssertNestedAfter(generatedText, "static class ManagedStorage", "[global::AOT.MonoPInvokeCallbackAttribute(typeof(UnmanagedDelegate))]");
         AssertContains(generatedText, "public static global::Medicine.UnmanagedRef<global::Payload> ReplaceUnmanaged(");
         AssertContains(generatedText, "global::Medicine.UnmanagedRef<global::Payload> payload,");
         AssertContains(generatedText, "ref global::Medicine.UnmanagedRef<global::Payload> current,");
@@ -260,5 +264,16 @@ public partial class CollisionInvokeHost
             return;
 
         throw new InvalidOperationException($"Expected generated source to contain: {expected}");
+    }
+
+    static void AssertNestedAfter(string source, string container, string expected)
+    {
+        var containerIndex = source.IndexOf(container, StringComparison.Ordinal);
+        var expectedIndex = source.IndexOf(expected, StringComparison.Ordinal);
+
+        if (containerIndex >= 0 && expectedIndex > containerIndex)
+            return;
+
+        throw new InvalidOperationException($"Expected generated source to contain {expected} after {container}");
     }
 }
