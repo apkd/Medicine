@@ -11,6 +11,9 @@ static class UnmanagedInvokeSourceGeneratorTest
     public static readonly DiagnosticTest InstanceCase =
         new("UnmanagedInvoke generator emits UnmanagedAccess instance helpers", RunInstanceContract);
 
+    public static readonly DiagnosticTest AbstractInstanceCase =
+        new("UnmanagedInvoke generator emits abstract base helpers and derived forwarders", RunAbstractInstanceContract);
+
     public static readonly DiagnosticTest InvalidSignatureCase =
         new("MED038 when UnmanagedInvoke targets unsupported signatures", RunInvalidSignatureContract);
 
@@ -109,6 +112,53 @@ public partial class InvokeInstanceHost
         AssertContains(generatedText, "public readonly unsafe partial struct AccessRO");
     }
 
+    static void RunAbstractInstanceContract()
+    {
+        var run = RunGenerator(
+            """
+using Medicine;
+
+public sealed class Payload
+{
+    public int Value;
+}
+
+[UnmanagedAccess]
+public abstract partial class AbstractInvokeAgent
+{
+    public int Value;
+
+    [UnmanagedInvoke]
+    public abstract int Score(Payload payload, ref int value);
+}
+
+[UnmanagedAccess]
+public sealed partial class AbstractInvokeHuman : AbstractInvokeAgent
+{
+    public override int Score(Payload payload, ref int value)
+    {
+        value += payload.Value;
+        return Value + value;
+    }
+}
+"""
+        );
+
+        AssertNoGeneratorException(run);
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED038",
+            because: "abstract class UnmanagedInvoke methods should be supported"
+        );
+
+        var generatedText = GetGeneratedText(run);
+        AssertContains(generatedText, "new global::Medicine.UnmanagedRef<global::AbstractInvokeAgent>(self).Resolve().Score(new global::Medicine.UnmanagedRef<global::Payload>(payload).Resolve(), ref value)");
+        AssertContains(generatedText, "partial class AbstractInvokeHuman");
+        AssertContains(generatedText, "public int ScoreUnmanaged(");
+        AssertContains(generatedText, "this.AsAbstractInvokeAgent().ScoreUnmanaged(payload, ref value);");
+    }
+
     static void RunInvalidSignatureContract()
     {
         var run = RunGenerator(
@@ -119,6 +169,12 @@ public partial class InvalidInvokeHost
 {
     [UnmanagedInvoke]
     public static void Generic<T>(T value) { }
+}
+
+public partial interface IInvalidInvokeInterface
+{
+    [UnmanagedInvoke]
+    void InterfaceMethod();
 }
 """
         );

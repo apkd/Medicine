@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -56,6 +57,27 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         bool IsUnmanagedRef
     );
 
+    record struct AccessClassInfo : ISourceGeneratorPassData
+    {
+        public string? SourceGeneratorOutputFilename { get; init; }
+        public string? SourceGeneratorError { get; init; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
+        public string SourcePath;
+        public string TypeName;
+        public string TypeFQN;
+        public bool IsGenericType;
+        public EquatableArray<string> ContainingTypeDeclaration;
+        public EquatableArray<string> BaseTypeFQNs;
+    }
+
+    readonly record struct InheritedForwarderInfo(
+        string BaseTypeName,
+        string BaseTypeFQN,
+        string HelperName,
+        TypeProjection ReturnType,
+        EquatableArray<ParameterInfo> Parameters
+    );
+
     record struct GeneratorInput : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
@@ -73,6 +95,16 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         public bool IsStatic;
     }
 
+    record struct InheritedForwarderInput : ISourceGeneratorPassData
+    {
+        public string? SourceGeneratorOutputFilename { get; init; }
+        public string? SourceGeneratorError { get; init; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
+        public EquatableArray<string> ContainingTypeDeclaration;
+        public string TargetTypeFQN;
+        public EquatableArray<InheritedForwarderInfo> Forwarders;
+    }
+
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
         var generatorEnvironment = context.GetGeneratorEnvironment();
@@ -88,6 +120,21 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             .SelectEx((x, ct) => Transform(x.Left, x.Right, ct));
 
         context.RegisterSourceOutputEx(inputProvider, GenerateSource);
+
+        var accessClassProvider = context
+            .SyntaxProvider
+            .ForAttributeWithMetadataNameEx(
+                fullyQualifiedMetadataName: UnmanagedAccessAttributeMetadataName,
+                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                transform: static (context, ct) => TransformAccessClass(context, ct)
+            );
+
+        var inheritedForwarderProvider = inputProvider
+            .Collect()
+            .Combine(accessClassProvider.Collect())
+            .SelectManyEx(static (x, _) => BuildInheritedForwarderInputs(x.Left, x.Right));
+
+        context.RegisterSourceOutputEx(inheritedForwarderProvider, GenerateInheritedForwardersSource);
     }
 
     static ContextWithCacheGeneratorInput TransformForCache(GeneratorAttributeSyntaxContext context, CancellationToken ct)
@@ -149,8 +196,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         if (method.IsGenericMethod || HasGenericContainingType(method.ContainingType))
             AddInvalid("[UnmanagedInvoke] does not support generic methods or methods declared in generic types.");
 
-        if (method.IsAbstract || method.ContainingType?.TypeKind is TypeKind.Interface)
-            AddInvalid("[UnmanagedInvoke] does not support abstract or interface methods.");
+        if (method.ContainingType?.TypeKind is TypeKind.Interface)
+            AddInvalid("[UnmanagedInvoke] does not support interface methods.");
 
         if (method.IsExtern)
             AddInvalid("[UnmanagedInvoke] does not support extern methods.");
@@ -219,6 +266,168 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
         output.Diagnostics = diagnostics.ToArray();
         return output;
+    }
+
+    static AccessClassInfo TransformAccessClass(GeneratorAttributeSyntaxContext context, CancellationToken ct)
+    {
+        if (context is not { TargetNode: ClassDeclarationSyntax typeDecl, TargetSymbol: INamedTypeSymbol typeSymbol })
+            return default;
+
+        return new()
+        {
+            SourcePath = typeDecl.SyntaxTree.FilePath,
+            TypeName = typeSymbol.Name,
+            TypeFQN = typeSymbol.FQN,
+            IsGenericType = typeSymbol.IsGenericType,
+            ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDecl),
+            BaseTypeFQNs = typeSymbol.GetBaseTypes().Select(static x => x.FQN).ToArray(),
+            SourceGeneratorLocation = new(typeDecl.Identifier.GetLocation()),
+        };
+    }
+
+    static IEnumerable<InheritedForwarderInput> BuildInheritedForwarderInputs(
+        ImmutableArray<GeneratorInput> invokeInputs,
+        ImmutableArray<AccessClassInfo> accessClasses
+    )
+    {
+        var validInstanceInvokes = invokeInputs
+            .Where(static x => x.Diagnostics.Length is 0 && !x.IsStatic && x.ContainingTypeFQN is { Length: > 0 })
+            .ToArray();
+
+        var accessTypes = accessClasses
+            .Where(static x => !x.IsGenericType && x.TypeFQN is { Length: > 0 })
+            .OrderBy(static x => x.TypeFQN, StringComparer.Ordinal)
+            .ToArray();
+
+        foreach (var target in accessTypes)
+        {
+            using var r1 = Scratch.RentA<List<InheritedForwarderInfo>>(out var forwarders);
+            using var r2 = Scratch.RentB<HashSet<string>>(out var localKeys);
+            using var r3 = Scratch.RentC<List<(string Key, int Distance, GeneratorInput Invoke)>>(out var inheritedByKey);
+
+            foreach (var invoke in validInstanceInvokes)
+            {
+                string key = BuildHelperKey(isStatic: false, invoke.HelperName, invoke.Parameters.AsArray());
+
+                if (invoke.ContainingTypeFQN == target.TypeFQN)
+                {
+                    localKeys.Add(key);
+                    continue;
+                }
+
+                int distance = Array.IndexOf(target.BaseTypeFQNs.AsArray(), invoke.ContainingTypeFQN);
+                if (distance < 0)
+                    continue;
+
+                int existingIndex = inheritedByKey.FindIndex(x => x.Key == key);
+                if (existingIndex >= 0)
+                {
+                    if (inheritedByKey[existingIndex].Distance <= distance)
+                        continue;
+
+                    inheritedByKey[existingIndex] = (key, distance, invoke);
+                    continue;
+                }
+
+                inheritedByKey.Add((key, distance, invoke));
+            }
+
+            inheritedByKey.Sort(static (left, right) => string.Compare(left.Key, right.Key, StringComparison.Ordinal));
+
+            foreach (var pair in inheritedByKey)
+            {
+                if (localKeys.Contains(pair.Key))
+                    continue;
+
+                var invoke = pair.Invoke;
+                forwarders.Add(new(
+                        BaseTypeName: GetTypeName(invoke.ContainingTypeFQN),
+                        BaseTypeFQN: invoke.ContainingTypeFQN,
+                        HelperName: invoke.HelperName,
+                        ReturnType: invoke.ReturnType,
+                        Parameters: invoke.Parameters
+                    )
+                );
+            }
+
+            if (forwarders.Count is 0)
+                continue;
+
+            yield return new()
+            {
+                SourceGeneratorOutputFilename = Utility.GetOutputFilename(
+                    filePath: target.SourcePath,
+                    targetNodeName: target.TypeName,
+                    additionalNameForHash: $"{target.TypeFQN}|InheritedUnmanagedInvoke",
+                    label: $"[{UnmanagedInvokeAttributeNameShort}]",
+                    includeFilename: false
+                ),
+                SourceGeneratorLocation = target.SourceGeneratorLocation,
+                ContainingTypeDeclaration = target.ContainingTypeDeclaration,
+                TargetTypeFQN = target.TypeFQN,
+                Forwarders = forwarders.ToArray(),
+            };
+        }
+
+        static string GetTypeName(string typeFqn)
+        {
+            int index = typeFqn.LastIndexOf('.');
+            return index < 0 ? typeFqn.Replace("global::", "") : typeFqn[(index + 1)..];
+        }
+    }
+
+    static void GenerateInheritedForwardersSource(SourceProductionContext context, SourceWriter src, InheritedForwarderInput input)
+    {
+        if (input.Forwarders.Length is 0)
+            return;
+
+        src.Line.Write(Alias.UsingInline);
+        src.Line.Write("using Medicine;");
+        src.Linebreak();
+
+        foreach (var declaration in input.ContainingTypeDeclaration.AsArray())
+        {
+            src.Line.Write(declaration);
+            src.OpenBrace();
+        }
+
+        src.Line.Write("public static partial class Unmanaged");
+        using (src.Braces)
+        {
+            EmitAccessForwarders("AccessRW");
+            src.Linebreak();
+            EmitAccessForwarders("AccessRO");
+        }
+
+        foreach (var _ in input.ContainingTypeDeclaration.AsArray())
+            src.CloseBrace();
+
+        void EmitAccessForwarders(string accessStructName)
+        {
+            src.Line.Write($"public readonly unsafe partial struct {accessStructName}");
+            using (src.Braces)
+            {
+                foreach (var forwarder in input.Forwarders.AsArray())
+                {
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write($"public {forwarder.ReturnType.ProjectedTypeFQN} {forwarder.HelperName}(");
+                    using (src.Indent)
+                        EmitForwarderParameters(src, forwarder.Parameters);
+
+                    src.Line.Write(")");
+                    using (src.Braces)
+                    {
+                        string call = $"this.As{forwarder.BaseTypeName.Sanitize()}().{forwarder.HelperName}({BuildForwarderArguments(forwarder.Parameters)})";
+                        if (forwarder.ReturnType.IsVoid)
+                            src.Line.Write($"{call};");
+                        else
+                            src.Line.Write($"return {call};");
+                    }
+
+                    src.Linebreak();
+                }
+            }
+        }
     }
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
@@ -450,6 +659,22 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             src.Line.Write($"{GetParameterPrefix(parameter.RefKind)}{parameter.ProjectedTypeFQN} {parameter.Name}{(i < parameters.Length - 1 ? "," : "")}");
         }
     }
+
+    static void EmitForwarderParameters(SourceWriter src, EquatableArray<ParameterInfo> parametersArray)
+    {
+        var parameters = parametersArray.AsArray();
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            var parameter = parameters[i];
+            src.Line.Write($"{GetParameterPrefix(parameter.RefKind)}{parameter.ProjectedTypeFQN} {parameter.Name}{(i < parameters.Length - 1 ? "," : "")}");
+        }
+    }
+
+    static string BuildForwarderArguments(EquatableArray<ParameterInfo> parameters)
+        => string.Join(
+            ", ",
+            parameters.AsArray().Select(static x => $"{GetArgumentPrefix(x.RefKind)}{x.Name}")
+        );
 
     static void EmitHelperInvokeBody(SourceWriter src, GeneratorInput input, string? selfExpression)
     {

@@ -48,6 +48,25 @@ public partial class UnmanagedInvokeTests
             => payload;
     }
 
+    [UnmanagedAccess]
+    public abstract partial class AbstractInstanceHost
+    {
+        public int Value;
+
+        [UnmanagedInvoke]
+        public abstract int AddAbstract(Payload payload, ref int value);
+    }
+
+    [UnmanagedAccess]
+    public sealed partial class ConcreteInstanceHost : AbstractInstanceHost
+    {
+        public override int AddAbstract(Payload payload, ref int value)
+        {
+            value += payload.Value;
+            return Value + value;
+        }
+    }
+
     [Test]
     public void UnmanagedInvoke_StaticMethod_InvokesManagedMethod()
     {
@@ -114,6 +133,27 @@ public partial class UnmanagedInvokeTests
         var result = access.EchoUnmanaged(new UnmanagedRef<Payload>(payload));
 
         Assert.That(result.Resolve(), Is.SameAs(payload));
+    }
+
+    [Test]
+    public void UnmanagedInvoke_AbstractInstanceMethod_InvokesFromBaseAndDerivedAccessRW()
+    {
+        var host = new ConcreteInstanceHost { Value = 20 };
+        var payload = new Payload { Value = 5 };
+
+        UnmanagedRef<AbstractInstanceHost> baseRef = host;
+        var baseValue = 3;
+        var baseResult = baseRef.AccessRW().AddAbstractUnmanaged(new(payload), ref baseValue);
+
+        Assert.That(baseValue, Is.EqualTo(8));
+        Assert.That(baseResult, Is.EqualTo(28));
+
+        UnmanagedRef<ConcreteInstanceHost> derivedRef = host;
+        var derivedValue = 7;
+        var derivedResult = derivedRef.AccessRW().AddAbstractUnmanaged(new(payload), ref derivedValue);
+
+        Assert.That(derivedValue, Is.EqualTo(12));
+        Assert.That(derivedResult, Is.EqualTo(32));
     }
 
     [Test]
