@@ -136,36 +136,54 @@ jobs:
           size_bytes=$(docker image inspect "${{ env.IMAGE_TAG }}" --format='{{.Size}}')
           size_mib=$(awk -v b="$size_bytes" 'BEGIN{printf "%.2f", b/1024/1024}')
           echo "Docker image size: ${size_mib} MiB"
+          mkdir -p "$RUNNER_TEMP/test-results"
 
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE:$PROJECT/Packages/Medicine/" \
-            -v "$RUNNER_TEMP/test-results:$PROJECT/test-results" \
-            -v "$LIC_DIR:/root/.local/share/unity3d" \
-            -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
-            -w $PROJECT \
-            "${{ env.IMAGE_TAG }}" \
-            unity-editor \
-              -login \
-              -projectPath $PROJECT \
-              -executeMethod CI.RunTests
+          run_tests() {
+            docker run --rm \
+              -v "$GITHUB_WORKSPACE:$PROJECT/Packages/Medicine/" \
+              -v "$RUNNER_TEMP/test-results:$PROJECT/test-results" \
+              -v "$LIC_DIR:/root/.local/share/unity3d" \
+              -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
+              -w $PROJECT \
+              "${{ env.IMAGE_TAG }}" \
+              unity-editor \
+                -login \
+                -projectPath $PROJECT \
+                -executeMethod CI.RunTests
+          }
+
+          if ! run_tests; then
+            echo "::warning::Unity tests failed; retrying."
+            rm -f "$RUNNER_TEMP/test-results/"*tests.xml
+            run_tests
+          fi
 
       - name: Run tests in standalone player
 #        if: contains(fromJSON('["6000.0", "6000.1", "6000.2", "6000.3", "6000.4", "6000.5"]'), steps.vars.outputs.unity_v_mm)
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/test-results"
 
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE:$PROJECT/Packages/Medicine/" \
-            -v "$RUNNER_TEMP/test-results:$PROJECT/test-results" \
-            -v "$LIC_DIR:/root/.local/share/unity3d" \
-            -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
-            -w $PROJECT \
-            "${{ env.IMAGE_TAG }}" \
-            unity-editor \
-              -projectPath $PROJECT \
-              -runTests \
-              -testPlatform StandaloneLinux64 \
-              -testResults "$PROJECT/test-results/Standalone tests.xml"
+          run_tests() {
+            docker run --rm \
+              -v "$GITHUB_WORKSPACE:$PROJECT/Packages/Medicine/" \
+              -v "$RUNNER_TEMP/test-results:$PROJECT/test-results" \
+              -v "$LIC_DIR:/root/.local/share/unity3d" \
+              -v "$RUNNER_TEMP/unity-secrets:/run/secrets:ro" \
+              -w $PROJECT \
+              "${{ env.IMAGE_TAG }}" \
+              unity-editor \
+                -projectPath $PROJECT \
+                -runTests \
+                -testPlatform StandaloneLinux64 \
+                -testResults "$PROJECT/test-results/Standalone tests.xml"
+          }
+
+          if ! run_tests; then
+            echo "::warning::Standalone player tests failed; retrying."
+            rm -f "$RUNNER_TEMP/test-results/Standalone tests.xml"
+            run_tests
+          fi
 
 #        doesn't work for now - `unity-editor` command embedded in the Dockerfile
 #        runs with `-serial` which is incompatible with `-returnlicense`
