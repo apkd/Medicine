@@ -10,6 +10,15 @@ using static Constants;
 [Generator]
 public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 {
+    static readonly DiagnosticDescriptor MED040 = new(
+        id: nameof(MED040),
+        title: "Conflicting [UnmanagedAccess] cast helper",
+        messageFormat: "{0}",
+        category: "Medicine",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
     record struct GeneratorInput : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
@@ -18,6 +27,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public EquatableArray<string> ContainingTypeDeclaration;
         public string ClassName;
         public string ClassFQN;
+        public bool IsGenericType;
         public bool IsUnityObject;
         public bool UsesEntityId;
         public bool IsTracked;
@@ -26,8 +36,28 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public Defer<bool>? HasCachedEnableBuilderDeferred;
         public Defer<bool>? HasIInstanceIndexBuilderDeferred;
         public EquatableArray<FieldInfo> Fields;
+        public EquatableArray<string> BaseTypeFQNs;
         public Defer<string[]>? AccessROForwardingMembersForAccessRWDeferred;
     }
+
+    record struct CastExtensionsInput : ISourceGeneratorPassData
+    {
+        public string? SourceGeneratorOutputFilename { get; init; }
+        public string? SourceGeneratorError { get; init; }
+        public LocationInfo? SourceGeneratorLocation { get; set; }
+        public EquatableArray<CastInfo> Casts { get; set; }
+        public EquatableArray<CastDiagnostic> Diagnostics { get; set; }
+    }
+
+    readonly record struct CastInfo(
+        string SourceTypeFQN,
+        string SourceTypeName,
+        string TargetTypeFQN,
+        string TargetTypeName,
+        string HelperName
+    );
+
+    readonly record struct CastDiagnostic(string Message, LocationInfo? Location);
 
     record struct FieldInfo
     {
@@ -113,6 +143,15 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             source: inputProvider,
             action: GenerateSource
         );
+
+        var castExtensionsProvider = inputProvider
+            .Collect()
+            .SelectEx(static (x, _) => BuildCastExtensionsInput(x));
+
+        context.RegisterSourceOutputEx(
+            source: castExtensionsProvider,
+            action: GenerateCastExtensionsSource
+        );
     }
 
     static ContextWithCacheGeneratorInput TransformForCache(GeneratorAttributeSyntaxContext context, CancellationToken ct)
@@ -155,10 +194,12 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDecl),
             ClassName = typeSymbol.Name,
             ClassFQN = typeSymbol.FQN,
+            IsGenericType = typeSymbol is INamedTypeSymbol { IsGenericType: true },
             IsUnityObject = typeSymbol.InheritsFrom(knownSymbols.UnityObject),
             UsesEntityId = generatorEnvironment.IsUnity64OrNewer,
             IsTracked = trackAttribute is not null,
             SourceGeneratorLocation = new(typeDecl.Identifier.GetLocation()),
+            BaseTypeFQNs = typeSymbol.GetBaseTypes().Select(static x => x.FQN).ToArray(),
             AccessROForwardingMembersForAccessRWDeferred = new(() => CollectAccessROForwardingMembersForAccessRW(context.SemanticModel.Compilation, typeSymbol, ct)),
             HasCachedEnableBuilderDeferred = new(() =>
                 {
@@ -262,6 +303,66 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
         static bool IsNullableValueType(ITypeSymbol type)
             => type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T };
+    }
+
+    static CastExtensionsInput BuildCastExtensionsInput(ImmutableArray<GeneratorInput> inputs)
+    {
+        var result = new CastExtensionsInput
+        {
+            SourceGeneratorOutputFilename = "UnmanagedAccessCasts.g.cs",
+        };
+
+        using var r1 = Scratch.RentA<List<CastInfo>>(out var casts);
+        using var r2 = Scratch.RentB<List<string>>(out var duplicateMessages);
+        using var r3 = Scratch.RentC<HashSet<string>>(out var emittedKeys);
+        using var r4 = Scratch.RentD<HashSet<string>>(out var duplicateKeys);
+
+        var types = inputs
+            .Where(static x => !x.IsGenericType && x.ClassFQN is { Length: > 0 })
+            .OrderBy(static x => x.ClassFQN, StringComparer.Ordinal)
+            .ToArray();
+
+        foreach (var source in types)
+        foreach (var target in types)
+        {
+            if (source.ClassFQN == target.ClassFQN)
+                continue;
+
+            bool isRelated
+                = source.BaseTypeFQNs.AsArray().Contains(target.ClassFQN) ||
+                  target.BaseTypeFQNs.AsArray().Contains(source.ClassFQN);
+
+            if (!isRelated)
+                continue;
+
+            string helperName = $"As{target.ClassName.Sanitize()}";
+            string key = $"{source.ClassFQN}|{helperName}";
+            var cast = new CastInfo(
+                source.ClassFQN,
+                source.ClassName,
+                target.ClassFQN,
+                target.ClassName,
+                helperName
+            );
+
+            if (!emittedKeys.Add(key))
+            {
+                duplicateKeys.Add(key);
+                duplicateMessages.Add($"[UnmanagedAccess] generated cast helper '{helperName}' on '{source.ClassFQN}' conflicts with another related type with the same name.");
+            }
+
+            casts.Add(cast);
+        }
+
+        if (duplicateKeys.Count > 0)
+            casts.RemoveAll(x => duplicateKeys.Contains($"{x.SourceTypeFQN}|{x.HelperName}"));
+
+        result.Casts = casts.ToArray();
+        result.Diagnostics = duplicateMessages
+            .Distinct(StringComparer.Ordinal)
+            .Select(static x => new CastDiagnostic(x, null))
+            .ToArray();
+        return result;
     }
 
     static ulong GetInputChecksum(GeneratorAttributeSyntaxContext context, CancellationToken ct)
@@ -638,6 +739,51 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             TypeFQN = "global::System.Int32",
             Flags = FieldFlags.IsReadOnly | FieldFlags.IsUnmanagedType,
         };
+
+    static void GenerateCastExtensionsSource(SourceProductionContext context, SourceWriter src, CastExtensionsInput input)
+    {
+        foreach (var diagnostic in input.Diagnostics.AsArray())
+            context.ReportDiagnostic(Diagnostic.Create(
+                    descriptor: MED040,
+                    location: diagnostic.Location?.ToLocation() ?? Location.None,
+                    messageArgs: diagnostic.Message
+                )
+            );
+
+        if (input.Diagnostics.Length > 0 || input.Casts.Length is 0)
+            return;
+
+        src.Line.Write(Alias.UsingInline);
+        src.Linebreak();
+
+        src.Line.Write("namespace Medicine");
+        using (src.Braces)
+        {
+            src.Doc?.Write("/// <summary>");
+            src.Doc?.Write("/// Contains generated unmanaged access cast extension methods.");
+            src.Doc?.Write("/// </summary>");
+
+            src.Line.Write("public static partial class UnmanagedAccessExtensions");
+            using (src.Braces)
+            {
+                foreach (var cast in input.Casts.AsArray())
+                {
+                    EmitCast("AccessRW");
+                    src.Linebreak();
+                    EmitCast("AccessRO");
+                    src.Linebreak();
+
+                    void EmitCast(string accessStructName)
+                    {
+                        src.Line.Write(Alias.Inline);
+                        src.Line.Write($"public static {cast.TargetTypeFQN}.Unmanaged.{accessStructName} {cast.HelperName}(this in {cast.SourceTypeFQN}.Unmanaged.{accessStructName} access)");
+                        using (src.Indent)
+                            src.Line.Write($"=> new(new global::Medicine.UnmanagedRef<{cast.TargetTypeFQN}>(access.Ref.Ptr));");
+                    }
+                }
+            }
+        }
+    }
 
     static void GenerateSource(SourceProductionContext context, SourceWriter src, GeneratorInput input)
     {

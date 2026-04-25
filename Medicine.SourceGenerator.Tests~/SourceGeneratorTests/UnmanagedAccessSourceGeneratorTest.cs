@@ -29,6 +29,9 @@ static class UnmanagedAccessSourceGeneratorTest
     public static readonly DiagnosticTest NullableValueTypeProjectionCase =
         new("UnmanagedAccess generator projects nullable value types as refs", RunNullableValueTypeProjectionContract);
 
+    public static readonly DiagnosticTest CastHelperCase =
+        new("UnmanagedAccess generator emits inheritance cast extension helpers", RunCastHelperContract);
+
     public static readonly DiagnosticTest AccessROPartialForwardingCase =
         new("UnmanagedAccess generator forwards user AccessRO members from generated AccessRW", RunAccessROPartialForwardingContract);
 
@@ -665,6 +668,73 @@ partial class NullableValueTypeOuter
                 return;
 
             ThrowUnexpected(unexpected);
+        }
+    }
+
+    static void RunCastHelperContract()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using Medicine;
+
+[UnmanagedAccess]
+public abstract partial class AccessCastAnimal
+{
+    public int BaseValue;
+}
+
+[UnmanagedAccess]
+public partial class AccessCastMammal : AccessCastAnimal
+{
+    public int MidValue;
+}
+
+[UnmanagedAccess]
+public sealed partial class AccessCastHuman : AccessCastMammal
+{
+    public int DerivedValue;
+}
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new UnmanagedAccessSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "cast helper generation should not throw"
+        );
+
+        var generatedText = string.Join(
+            Environment.NewLine,
+            run.Results
+                .SelectMany(static x => x.GeneratedSources)
+                .Select(static x => x.SourceText.ToString())
+        );
+
+        AssertContains("public static global::AccessCastAnimal.Unmanaged.AccessRW AsAccessCastAnimal(this in global::AccessCastHuman.Unmanaged.AccessRW access)");
+        AssertContains("public static global::AccessCastHuman.Unmanaged.AccessRO AsAccessCastHuman(this in global::AccessCastAnimal.Unmanaged.AccessRO access)");
+        AssertContains("public static global::AccessCastMammal.Unmanaged.AccessRW AsAccessCastMammal(this in global::AccessCastAnimal.Unmanaged.AccessRW access)");
+        AssertContains("=> new(new global::Medicine.UnmanagedRef<global::AccessCastHuman>(access.Ref.Ptr));");
+
+        static void ThrowMissing(string expected)
+            => throw new InvalidOperationException($"Expected generated source to contain: {expected}");
+
+        void AssertContains(string expected)
+        {
+            if (generatedText.Contains(expected, StringComparison.Ordinal))
+                return;
+
+            ThrowMissing(expected);
         }
     }
 

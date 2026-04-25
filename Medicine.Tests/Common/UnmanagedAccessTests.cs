@@ -90,6 +90,25 @@ public partial class UnmanagedAccessTests
         Assert.That(obj.DerivedField, Is.EqualTo(20));
     }
 
+    [Test]
+    public void UnmanagedAccess_Inheritance_CastHelpers()
+    {
+        var obj = new DerivedClass();
+        UnmanagedRef<DerivedClass> derivedRef = obj;
+        UnmanagedRef<BaseClass> baseRef = obj;
+
+        var baseAccess = derivedRef.AccessRW().AsBaseClass();
+        baseAccess.BaseField = 15;
+
+        var derivedAccess = baseRef.AccessRW().AsDerivedClass();
+        derivedAccess.DerivedField = 25;
+
+        Assert.That(obj.BaseField, Is.EqualTo(15));
+        Assert.That(obj.DerivedField, Is.EqualTo(25));
+        Assert.That(derivedRef.AccessRO().AsBaseClass().BaseField, Is.EqualTo(15));
+        Assert.That(baseRef.AccessRO().AsDerivedClass().DerivedField, Is.EqualTo(25));
+    }
+
     [UnmanagedAccess]
     public partial class ReferenceFields
     {
