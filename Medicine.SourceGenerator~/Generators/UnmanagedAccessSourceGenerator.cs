@@ -846,18 +846,6 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         static string GetCollectionSourceElementType(in FieldInfo field)
             => field.ElementTypeFQN;
 
-        static string ArrayLengthOffsetName(in FieldInfo field)
-            => $"{m}{field.Name}ArrayLength";
-
-        static string ArrayDataOffsetName(in FieldInfo field)
-            => $"{m}{field.Name}ArrayData";
-
-        static string ListItemsOffsetName(in FieldInfo field)
-            => $"{m}{field.Name}ListItems";
-
-        static string ListCountOffsetName(in FieldInfo field)
-            => $"{m}{field.Name}ListCount";
-
         src.Line.Write($"#pragma warning disable CS0108");
         src.Line.Write(Alias.UsingStorage);
         src.Line.Write(Alias.UsingInline);
@@ -948,17 +936,6 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Line.Write($"public ushort {x.Name} {{ get; init; }}");
 
-                    if (x.EmitsArrayNativeArray || x.EmitsListAccess)
-                    {
-                        src.Line.Write($"public ushort {ArrayLengthOffsetName(x)} {{ get; init; }}");
-                        src.Line.Write($"public ushort {ArrayDataOffsetName(x)} {{ get; init; }}");
-                    }
-
-                    if (x.EmitsListAccess)
-                    {
-                        src.Line.Write($"public ushort {ListItemsOffsetName(x)} {{ get; init; }}");
-                        src.Line.Write($"public ushort {ListCountOffsetName(x)} {{ get; init; }}");
-                    }
                 }
 
                 src.Linebreak();
@@ -977,17 +954,6 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     {
                         src.Line.Write($"{x.Name} = ᵐUtility.GetFieldOffset(typeof({m}Self), \"{x.MetadataName}\", ᵐBF.{ToBindingFlagsVisibility(x.Flags.Has(FieldFlags.IsPublic))} | ᵐBF.Instance),");
 
-                        if (x.EmitsArrayNativeArray || x.EmitsListAccess)
-                        {
-                            src.Line.Write($"{ArrayLengthOffsetName(x)} = ᵐUtility.GetArrayLengthOffset<{GetCollectionSourceElementType(x)}>(),");
-                            src.Line.Write($"{ArrayDataOffsetName(x)} = ᵐUtility.GetArrayDataOffset<{GetCollectionSourceElementType(x)}, {GetCollectionElementAccessType(x)}>(),");
-                        }
-
-                        if (x.EmitsListAccess)
-                        {
-                            src.Line.Write($"{ListItemsOffsetName(x)} = ᵐUtility.GetFieldOffset(typeof({x.TypeFQN}), \"_items\", ᵐBF.NonPublic | ᵐBF.Instance),");
-                            src.Line.Write($"{ListCountOffsetName(x)} = ᵐUtility.GetFieldOffset(typeof({x.TypeFQN}), \"_size\", ᵐBF.NonPublic | ᵐBF.Instance),");
-                        }
                     }
 
                 src.Write(';');
@@ -1203,15 +1169,11 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Line.Write(Alias.Inline);
                 src.Line.Write($"public ListAccess(");
-                src.Line.Write($"    Medicine.UnmanagedRef<global::System.Collections.Generic.List<{m}Self>> listRef,");
-                src.Line.Write($"    int itemsOffset,");
-                src.Line.Write($"    int countOffset,");
-                src.Line.Write($"    int arrayLengthOffset,");
-                src.Line.Write($"    int arrayDataOffset");
+                src.Line.Write($"    Medicine.UnmanagedRef<global::System.Collections.Generic.List<{m}Self>> listRef");
                 src.Line.Write($")");
                 using (src.Braces)
                 {
-                    src.Line.Write("impl = new(listRef, itemsOffset, countOffset, arrayLengthOffset, arrayDataOffset);");
+                    src.Line.Write("impl = new(listRef);");
                     src.Line.Write("layoutInfo = (Layout*)unmanagedLayoutStorage.UnsafeDataPointer;");
                 }
 
@@ -1565,22 +1527,17 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     string GetProjectedListAccess(in FieldInfo field)
                     {
                         var listRef = $"Ref.Read<Medicine.UnmanagedRef<{field.TypeFQN}>>(layoutInfo->{field.Name})";
-                        var offsetArguments
-                            = $"layoutInfo->{ListItemsOffsetName(field)}, " +
-                              $"layoutInfo->{ListCountOffsetName(field)}, " +
-                              $"layoutInfo->{ArrayLengthOffsetName(field)}, " +
-                              $"layoutInfo->{ArrayDataOffsetName(field)}";
 
                         if (isReadOnly)
-                            return $"ᵐUtility.AsNativeArray<{GetCollectionSourceElementType(field)}, {GetCollectionElementAccessType(field)}>({listRef}, layoutInfo->{ListItemsOffsetName(field)}, layoutInfo->{ListCountOffsetName(field)}, layoutInfo->{ArrayDataOffsetName(field)});";
+                            return $"ᵐUtility.AsNativeArray<{GetCollectionSourceElementType(field)}, {GetCollectionElementAccessType(field)}>({listRef});";
 
                         if (field.Flags.Has(FieldFlags.ElementHasUnmanagedAccess))
-                            return $"new {field.ElementTypeFQN}.Unmanaged.ListAccess({listRef}, {offsetArguments});";
+                            return $"new {field.ElementTypeFQN}.Unmanaged.ListAccess({listRef});";
 
                         if (field.Flags.Has(FieldFlags.ElementIsUnmanagedType))
-                            return $"new global::Medicine.ListAccess<{GetCollectionSourceElementType(field)}>({listRef}, {offsetArguments});";
+                            return $"new global::Medicine.ListAccess<{GetCollectionSourceElementType(field)}>({listRef});";
 
-                        return $"new global::Medicine.ListAccess<{GetCollectionSourceElementType(field)}, {GetCollectionElementAccessType(field)}>({listRef}, {offsetArguments});";
+                        return $"new global::Medicine.ListAccess<{GetCollectionSourceElementType(field)}, {GetCollectionElementAccessType(field)}>({listRef});";
                     }
 
                     string GetProjectedAccess(in FieldInfo field)
@@ -1597,7 +1554,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         if (field.EmitsArrayNativeArray)
                         {
                             var arrayRef = $"Ref.Read<Medicine.UnmanagedRef<{field.TypeFQN}>>(layoutInfo->{field.Name})";
-                            return $"ᵐUtility.AsNativeArray{(isReadOnly ? "RO" : string.Empty)}<{GetCollectionSourceElementType(field)}, {GetCollectionElementAccessType(field)}>({arrayRef}, ᵐUtility.GetArrayLength({arrayRef}, layoutInfo->{ArrayLengthOffsetName(field)}), layoutInfo->{ArrayDataOffsetName(field)});";
+                            return $"ᵐUtility.AsNativeArray{(isReadOnly ? "RO" : string.Empty)}<{GetCollectionSourceElementType(field)}, {GetCollectionElementAccessType(field)}>({arrayRef}, ᵐUtility.GetArrayLength({arrayRef}));";
                         }
 
                         if (field.EmitsListAccess)

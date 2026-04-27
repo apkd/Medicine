@@ -288,6 +288,16 @@ partial class Outer
         AssertContains("public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::Inner>> Children");
         AssertContains("public global::Medicine.ListAccess<int> ValueList");
         AssertContains("public global::Inner.Unmanaged.ListAccess ChildList");
+        AssertContains("ᵐUtility.GetArrayLength(");
+        AssertContains("new global::Medicine.ListAccess<int>(");
+        AssertContains("new global::Inner.Unmanaged.ListAccess(");
+        AssertContains("ᵐUtility.AsNativeArray<int, int>(");
+        AssertDoesNotContain(", 24), 32);");
+        AssertDoesNotContain(", 24, 32);");
+        AssertDoesNotContain("layoutInfo->ᵐValueListListItems");
+        AssertDoesNotContain("layoutInfo->ᵐValueListListCount");
+        AssertDoesNotContain("layoutInfo->ᵐChildListListItems");
+        AssertDoesNotContain("layoutInfo->ᵐChildListListCount");
         AssertContainsAny(
             "public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::System.String>> Names",
             "public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<string>> Names"
@@ -309,6 +319,13 @@ partial class Outer
         AssertContains("public override int GetHashCode()");
         AssertDoesNotContain("public partial struct AccessArray");
         AssertDoesNotContain("public static AccessArray Instances");
+        AssertDoesNotContain("ArrayLength { get; init; }");
+        AssertDoesNotContain("ArrayData { get; init; }");
+        AssertDoesNotContain("ListItems { get; init; }");
+        AssertDoesNotContain("ListCount { get; init; }");
+        AssertDoesNotContain("GetArrayLengthOffset");
+        AssertDoesNotContain("GetArrayDataOffset");
+        AssertDoesNotContain("GetFieldOffset(typeof(global::System.Collections.Generic.List");
         AssertContains("public global::Inner.Unmanaged.AccessRW AutoChild");
         AssertContains("public global::Unity.Collections.NativeArray<int> AutoValues");
         AssertContains("public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::Inner>> AutoChildren");

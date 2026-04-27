@@ -74,14 +74,8 @@ namespace Medicine
         readonly ListAccess<T, T> impl;
 
         [MethodImpl(AggressiveInlining)]
-        public ListAccess(
-            UnmanagedRef<List<T>> listRef,
-            int itemsOffset,
-            int countOffset,
-            int arrayLengthOffset,
-            int arrayDataOffset
-        )
-            => impl = new(listRef, itemsOffset, countOffset, arrayLengthOffset, arrayDataOffset);
+        public ListAccess(UnmanagedRef<List<T>> listRef)
+            => impl = new(listRef);
 
         public int Count
         {
@@ -113,31 +107,15 @@ namespace Medicine
         where TElement : unmanaged
     {
         readonly UnmanagedRef<List<TSource>> listRef;
-        readonly int itemsOffset;
-        readonly int countOffset;
-        readonly int arrayLengthOffset;
-        readonly int arrayDataOffset;
 
         [MethodImpl(AggressiveInlining)]
-        public ListAccess(
-            UnmanagedRef<List<TSource>> listRef,
-            int itemsOffset,
-            int countOffset,
-            int arrayLengthOffset,
-            int arrayDataOffset
-        )
-        {
-            this.listRef = listRef;
-            this.itemsOffset = itemsOffset;
-            this.countOffset = countOffset;
-            this.arrayLengthOffset = arrayLengthOffset;
-            this.arrayDataOffset = arrayDataOffset;
-        }
+        public ListAccess(UnmanagedRef<List<TSource>> listRef)
+            => this.listRef = listRef;
 
         public int Count
         {
             [MethodImpl(AggressiveInlining)]
-            get => listRef.Ptr is 0 ? 0 : listRef.Read<int>(countOffset);
+            get => listRef.Ptr is 0 ? 0 : listRef.Read<int>(24);
             [MethodImpl(AggressiveInlining)]
             set
             {
@@ -149,14 +127,14 @@ namespace Medicine
                     throw new InvalidOperationException("Cannot set Count on a null List reference.");
 #endif
 
-                var arrayRef = listRef.Read<UnmanagedRef<TSource[]>>(itemsOffset);
+                var arrayRef = listRef.Read<UnmanagedRef<TSource[]>>(16);
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-                if (value > Internal.Utility.GetArrayLength(arrayRef, arrayLengthOffset))
+                if (value > Internal.Utility.GetArrayLength(arrayRef))
                     throw new ArgumentOutOfRangeException(nameof(value), "Cannot set Count beyond the List capacity from unmanaged access.");
 #endif
 
-                listRef.Read<int>(countOffset) = value;
+                listRef.Read<int>(24) = value;
             }
         }
 
@@ -166,8 +144,7 @@ namespace Medicine
             if (listRef.Ptr is 0)
                 return default;
 
-            var arrayRef = listRef.Read<UnmanagedRef<TSource[]>>(itemsOffset);
-            return Internal.Utility.AsNativeArray<TSource, TElement>(arrayRef, listRef.Read<int>(countOffset), arrayDataOffset);
+            return Internal.Utility.AsNativeArray<TSource, TElement>(listRef);
         }
 
         [MethodImpl(AggressiveInlining)]
@@ -212,6 +189,10 @@ namespace Medicine
             nint nativePtr = ptr is not 0 ? *(nint*)(ptr + sizeof(nint) * 2) : 0;
             return nativePtr is not 0;
         }
+
+        [MethodImpl(AggressiveInlining)]
+        public static ListAccess<T> AsListAccess<T>(this UnmanagedRef<List<T>> list) where T : unmanaged
+            => new(list);
 
         /// <summary>
         /// Retrieves the unmanaged native object pointer associated with a UnityEngine.Object instance.
