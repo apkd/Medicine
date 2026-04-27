@@ -235,6 +235,7 @@ sealed partial class UnmanagedAccessRangeContractComponent : MonoBehaviour
             Stubs.Core,
             """
 using System;
+using System.Collections.Generic;
 using Medicine;
 
 [UnmanagedAccess]
@@ -249,6 +250,8 @@ partial class Outer
     public Inner Child;
     public int[] Values;
     public Inner[] Children;
+    public List<int> ValueList = new();
+    public List<Inner> ChildList = new();
     public string[] Names;
     public Inner AutoChild { get; set; } = new();
     public int[] AutoValues { get; set; } = Array.Empty<int>();
@@ -283,10 +286,17 @@ partial class Outer
         AssertContains("public global::Inner.Unmanaged.AccessRW Child");
         AssertContains("public global::Unity.Collections.NativeArray<int> Values");
         AssertContains("public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::Inner>> Children");
+        AssertContains("public global::Medicine.ListAccess<int> ValueList");
+        AssertContains("public global::Inner.Unmanaged.ListAccess ChildList");
         AssertContainsAny(
             "public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::System.String>> Names",
             "public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<string>> Names"
         );
+        AssertContains("public readonly unsafe partial struct ListAccess");
+        AssertContains("public unsafe struct Enumerator");
+        AssertContains("layoutInfo = (Layout*)unmanagedLayoutStorage.UnsafeDataPointer;");
+        AssertContains("=> new(AsNativeArray().GetEnumerator(), layoutInfo);");
+        AssertContains("=> new(enumerator.Current, ref *layoutInfo);");
         AssertContains("public global::Inner.Unmanaged.AccessRW AutoChild");
         AssertContains("public global::Unity.Collections.NativeArray<int> AutoValues");
         AssertContains("public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::Inner>> AutoChildren");

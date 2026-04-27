@@ -1185,10 +1185,11 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             src.Doc?.Write("/// Mutable unmanaged access wrapper over a managed list of this class.");
             src.Doc?.Write("/// </summary>");
 
-            src.Line.Write("public readonly partial struct ListAccess : global::System.Collections.Generic.IEnumerable<AccessRW>");
+            src.Line.Write("public readonly unsafe partial struct ListAccess : global::System.Collections.Generic.IEnumerable<AccessRW>");
             using (src.Braces)
             {
                 src.Line.Write($"readonly global::Medicine.ListAccess<{m}Self, Medicine.UnmanagedRef<{m}Self>> impl;");
+                src.Line.Write("readonly Layout* layoutInfo;");
                 src.Linebreak();
 
                 src.Doc?.Write("/// <summary>");
@@ -1203,8 +1204,11 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"    int arrayLengthOffset,");
                 src.Line.Write($"    int arrayDataOffset");
                 src.Line.Write($")");
-                using (src.Indent)
-                    src.Line.Write("=> impl = new(listRef, itemsOffset, countOffset, arrayLengthOffset, arrayDataOffset);");
+                using (src.Braces)
+                {
+                    src.Line.Write("impl = new(listRef, itemsOffset, countOffset, arrayLengthOffset, arrayDataOffset);");
+                    src.Line.Write("layoutInfo = (Layout*)unmanagedLayoutStorage.UnsafeDataPointer;");
+                }
 
                 src.Linebreak();
 
@@ -1239,7 +1243,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 src.Line.Write(Alias.Inline);
                 src.Line.Write("public Enumerator GetEnumerator()");
                 using (src.Indent)
-                    src.Line.Write("=> new(AsNativeArray().GetEnumerator());");
+                    src.Line.Write("=> new(AsNativeArray().GetEnumerator(), layoutInfo);");
 
                 src.Linebreak();
 
@@ -1257,22 +1261,26 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                src.Line.Write("public struct Enumerator : global::System.Collections.Generic.IEnumerator<AccessRW>");
+                src.Line.Write("public unsafe struct Enumerator : global::System.Collections.Generic.IEnumerator<AccessRW>");
                 using (src.Braces)
                 {
                     src.Line.Write($"global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<{m}Self>>.Enumerator enumerator;");
+                    src.Line.Write("readonly Layout* layoutInfo;");
                     src.Linebreak();
 
                     src.Line.Write(Alias.Inline);
-                    src.Line.Write($"public Enumerator(global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<{m}Self>>.Enumerator enumerator)");
-                    using (src.Indent)
-                        src.Line.Write("=> this.enumerator = enumerator;");
+                    src.Line.Write($"public Enumerator(global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<{m}Self>>.Enumerator enumerator, Layout* layoutInfo)");
+                    using (src.Braces)
+                    {
+                        src.Line.Write("this.enumerator = enumerator;");
+                        src.Line.Write("this.layoutInfo = layoutInfo;");
+                    }
 
                     src.Linebreak();
 
                     src.Line.Write("public AccessRW Current");
                     using (src.Indent)
-                        src.Line.Write("=> new(enumerator.Current);");
+                        src.Line.Write("=> new(enumerator.Current, ref *layoutInfo);");
 
                     src.Linebreak();
 
