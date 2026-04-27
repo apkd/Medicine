@@ -1335,6 +1335,13 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 src.Doc?.Write("/// </summary>");
 
                 src.Line.Write($"public readonly unsafe partial struct {accessStructName}");
+                using (src.Indent)
+                {
+                    src.Line.Write($": global::System.IEquatable<AccessRW>,");
+                    src.Line.Write($"  global::System.IEquatable<AccessRO>,");
+                    src.Line.Write($"  global::System.IEquatable<Medicine.UnmanagedRef<{m}Self>>");
+                }
+
                 using (src.Braces)
                 {
                     src.Doc?.Write("/// <summary>");
@@ -1385,6 +1392,60 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     src.Line.Write($"public static implicit operator Medicine.UnmanagedRef<{m}Self>({accessStructName} access)");
                     using (src.Indent)
                         src.Line.Write("=> access.Ref;");
+
+                    src.Linebreak();
+
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write("public bool Equals(AccessRW other)");
+                    using (src.Indent)
+                        src.Line.Write("=> Ref.Equals(other.Ref);");
+
+                    src.Linebreak();
+
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write("public bool Equals(AccessRO other)");
+                    using (src.Indent)
+                        src.Line.Write("=> Ref.Equals(other.Ref);");
+
+                    src.Linebreak();
+
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write($"public bool Equals(Medicine.UnmanagedRef<{m}Self> other)");
+                    using (src.Indent)
+                        src.Line.Write("=> Ref.Equals(other);");
+
+                    src.Linebreak();
+
+                    src.Line.Write("public override bool Equals(object? obj)");
+                    using (src.Braces)
+                    {
+                        src.Line.Write("if (obj is AccessRW accessRW)");
+                        using (src.Indent)
+                            src.Line.Write("return Equals(accessRW);");
+
+                        src.Linebreak();
+
+                        src.Line.Write("if (obj is AccessRO accessRO)");
+                        using (src.Indent)
+                            src.Line.Write("return Equals(accessRO);");
+
+                        src.Linebreak();
+
+                        src.Line.Write($"if (obj is Medicine.UnmanagedRef<{m}Self> unmanagedRef)");
+                        using (src.Indent)
+                            src.Line.Write("return Equals(unmanagedRef);");
+
+                        src.Linebreak();
+
+                        src.Line.Write("return false;");
+                    }
+
+                    src.Linebreak();
+
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write("public override int GetHashCode()");
+                    using (src.Indent)
+                        src.Line.Write("=> Ref.Ptr.GetHashCode();");
 
                     src.Linebreak();
 

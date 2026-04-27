@@ -297,6 +297,16 @@ partial class Outer
         AssertContains("layoutInfo = (Layout*)unmanagedLayoutStorage.UnsafeDataPointer;");
         AssertContains("=> new(AsNativeArray().GetEnumerator(), layoutInfo);");
         AssertContains("=> new(enumerator.Current, ref *layoutInfo);");
+        AssertContains("public readonly unsafe partial struct AccessRW");
+        AssertContains("public readonly unsafe partial struct AccessRO");
+        AssertContains(": global::System.IEquatable<AccessRW>,");
+        AssertContains("global::System.IEquatable<AccessRO>,");
+        AssertContains("global::System.IEquatable<Medicine.UnmanagedRef<ᵐSelf>>");
+        AssertContains("public bool Equals(AccessRW other)");
+        AssertContains("public bool Equals(AccessRO other)");
+        AssertContains("public bool Equals(Medicine.UnmanagedRef<ᵐSelf> other)");
+        AssertContains("public override bool Equals(object? obj)");
+        AssertContains("public override int GetHashCode()");
         AssertDoesNotContain("public partial struct AccessArray");
         AssertDoesNotContain("public static AccessArray Instances");
         AssertContains("public global::Inner.Unmanaged.AccessRW AutoChild");

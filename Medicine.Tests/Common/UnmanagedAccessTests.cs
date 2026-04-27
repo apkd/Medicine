@@ -992,6 +992,45 @@ public partial class UnmanagedAccessTests
     }
 
     [Test]
+    public void UnmanagedAccess_Accessors_EqualByUnderlyingRef()
+    {
+        var obj = new BasicFields();
+        var other = new BasicFields();
+        UnmanagedRef<BasicFields> unmanagedRefA = obj;
+        UnmanagedRef<BasicFields> unmanagedRefB = obj;
+        UnmanagedRef<BasicFields> unmanagedRefOther = other;
+
+        var accessRWA = unmanagedRefA.AccessRW();
+        var accessRWB = unmanagedRefB.AccessRW();
+        var accessROA = unmanagedRefA.AccessRO();
+        var accessROOther = unmanagedRefOther.AccessRO();
+
+        IEquatable<BasicFields.Unmanaged.AccessRW> rwEquatable = accessRWA;
+        IEquatable<BasicFields.Unmanaged.AccessRO> roEquatable = accessRWA;
+        IEquatable<UnmanagedRef<BasicFields>> refEquatable = accessRWA;
+        IEquatable<BasicFields.Unmanaged.AccessRW> roRwEquatable = accessROA;
+        IEquatable<BasicFields.Unmanaged.AccessRO> roRoEquatable = accessROA;
+        IEquatable<UnmanagedRef<BasicFields>> roRefEquatable = accessROA;
+
+        Assert.That(rwEquatable.Equals(accessRWB), Is.True);
+        Assert.That(roEquatable.Equals(accessROA), Is.True);
+        Assert.That(refEquatable.Equals(unmanagedRefB), Is.True);
+        Assert.That(roRwEquatable.Equals(accessRWB), Is.True);
+        Assert.That(roRoEquatable.Equals(accessROA), Is.True);
+        Assert.That(roRefEquatable.Equals(unmanagedRefB), Is.True);
+
+        Assert.That(accessRWA.Equals(accessROA), Is.True);
+        Assert.That(accessROA.Equals(accessRWA), Is.True);
+        Assert.That(accessRWA.Equals(unmanagedRefB), Is.True);
+        Assert.That(accessROA.Equals(unmanagedRefB), Is.True);
+        Assert.That(accessRWA.Equals(accessROOther), Is.False);
+        Assert.That(accessROA.Equals(unmanagedRefOther), Is.False);
+        Assert.That(accessRWA.Equals((object)accessROA), Is.True);
+        Assert.That(accessROA.Equals((object)accessRWA), Is.True);
+        Assert.That(accessRWA.GetHashCode(), Is.EqualTo(accessROA.GetHashCode()));
+    }
+
+    [Test]
     public void UnmanagedRef_Equals_UsesPointerValue()
     {
         var obj = new BasicFields();
