@@ -297,6 +297,8 @@ partial class Outer
         AssertContains("layoutInfo = (Layout*)unmanagedLayoutStorage.UnsafeDataPointer;");
         AssertContains("=> new(AsNativeArray().GetEnumerator(), layoutInfo);");
         AssertContains("=> new(enumerator.Current, ref *layoutInfo);");
+        AssertDoesNotContain("public partial struct AccessArray");
+        AssertDoesNotContain("public static AccessArray Instances");
         AssertContains("public global::Inner.Unmanaged.AccessRW AutoChild");
         AssertContains("public global::Unity.Collections.NativeArray<int> AutoValues");
         AssertContains("public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<global::Inner>> AutoChildren");
@@ -314,12 +316,23 @@ partial class Outer
         static void ThrowMissingAny(string first, string second)
             => throw new InvalidOperationException($"Expected generated source to contain one of: {first} || {second}");
 
+        static void ThrowUnexpected(string unexpected)
+            => throw new InvalidOperationException($"Expected generated source not to contain: {unexpected}");
+
         void AssertContains(string expected)
         {
             if (generatedText.Contains(expected, StringComparison.Ordinal))
                 return;
 
             ThrowMissing(expected);
+        }
+
+        void AssertDoesNotContain(string unexpected)
+        {
+            if (!generatedText.Contains(unexpected, StringComparison.Ordinal))
+                return;
+
+            ThrowUnexpected(unexpected);
         }
 
         void AssertContainsAny(string first, string second)

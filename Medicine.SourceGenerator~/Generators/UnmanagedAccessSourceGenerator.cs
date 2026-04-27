@@ -995,146 +995,55 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
             src.Linebreak();
 
-            src.Doc?.Write("/// <summary>");
-            src.Doc?.Write("/// Mutable unmanaged access collection wrapper.");
-            src.Doc?.Write("/// </summary>");
-
-            src.Line.Write("public partial struct AccessArray");
-            using (src.Braces)
+            if (input.IsTracked)
             {
-                src.Line.Write($"Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO> impl;");
-                src.Linebreak();
-
                 src.Doc?.Write("/// <summary>");
-                src.Doc?.Write("/// Creates an access wrapper from an unmanaged reference list.");
+                src.Doc?.Write("/// Mutable unmanaged access collection wrapper.");
                 src.Doc?.Write("/// </summary>");
 
-                src.Line.Write($"public AccessArray(global::Unity.Collections.LowLevel.Unsafe.UnsafeList<Medicine.UnmanagedRef<{m}Self>> classRefArray)");
-                using (src.Indent)
-                    src.Line.Write("=> impl = new(classRefArray);");
-
-                src.Linebreak();
-
-                src.Doc?.Write("/// <summary>");
-                src.Doc?.Write("/// Creates an access wrapper from an array of managed instances.");
-                src.Doc?.Write("/// </summary>");
-
-                src.Line.Write($"public AccessArray({m}Self[]? classArray)");
-                using (src.Indent)
-                    src.Line.Write($"=> impl = new(ᵐUtility.AsUnsafeList<{m}Self, Medicine.UnmanagedRef<{m}Self>>(classArray));");
-
-                src.Linebreak();
-
-                src.Doc?.Write("/// <summary>");
-                src.Doc?.Write("/// Rebinds this wrapper to a different unmanaged reference list.");
-                src.Doc?.Write("/// </summary>");
-
-                src.Line.Write($"public void UpdateBuffer(global::Unity.Collections.LowLevel.Unsafe.UnsafeList<Medicine.UnmanagedRef<{m}Self>> classRefArray)");
-                using (src.Indent)
-                    src.Line.Write("=> impl.UpdateBuffer(classRefArray);");
-
-                src.Linebreak();
-
-                src.Doc?.Write("/// <summary>");
-                src.Doc?.Write("/// Rebinds this wrapper to a different managed instance array.");
-                src.Doc?.Write("/// </summary>");
-
-                src.Line.Write($"public void UpdateBuffer({m}Self[]? classArray)");
-                using (src.Indent)
-                    src.Line.Write($"=> impl.UpdateBuffer(ᵐUtility.AsUnsafeList<{m}Self, Medicine.UnmanagedRef<{m}Self>>(classArray));");
-
-                src.Linebreak();
-
-                src.Doc?.Write("/// <summary>");
-                src.Doc?.Write("/// Returns the number of available elements.");
-                src.Doc?.Write("/// </summary>");
-
-                src.Line.Write($"public int Length");
-                using (src.Indent)
-                    src.Line.Write("=> impl.Length;");
-
-                src.Linebreak();
-
-                src.Doc?.Write("/// <summary>");
-                src.Doc?.Write("/// Returns mutable unmanaged field access for the specified element index.");
-                src.Doc?.Write("/// </summary>");
-
-                src.Line.Write("public AccessRW this[int index]");
-                using (src.Braces)
-                    src.Line.Write($"{Alias.Inline} get => impl[index];");
-
-                src.Linebreak();
-
-                src.Doc?.Write("/// <summary>");
-                src.Doc?.Write("/// Returns a sliced view of this access collection.");
-                src.Doc?.Write("/// </summary>");
-
-                src.Line.Write("public AccessArray this[global::System.Range range]");
+                src.Line.Write("public partial struct AccessArray");
                 using (src.Braces)
                 {
-                    src.Line.Write("get");
-                    using (src.Braces)
-                    {
-                        src.Line.Write("AccessArray accessArray = new();");
-                        src.Line.Write("accessArray.impl = impl[range];");
-                        src.Line.Write("return accessArray;");
-                    }
-                }
-
-                src.Linebreak();
-
-                src.Doc?.Write("/// <summary>");
-                src.Doc?.Write("/// Converts this wrapper to a read-only view.");
-                src.Doc?.Write("/// </summary>");
-
-                src.Line.Write(Alias.Inline);
-                src.Line.Write("public ReadOnly AsReadOnly()");
-                using (src.Indent)
-                    src.Line.Write($"=> new(impl);");
-
-                src.Linebreak();
-
-                src.Doc?.Write("/// <summary>");
-                src.Doc?.Write("/// Returns an enumerator over mutable access elements.");
-                src.Doc?.Write("/// </summary>");
-
-                src.Line.Write(Alias.Inline);
-                src.Line.Write($"public Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.Enumerator GetEnumerator()");
-
-                src.Linebreak();
-
-                using (src.Indent)
-                    src.Line.Write("=> impl.GetEnumerator();");
-
-                src.Linebreak();
-
-                src.Doc?.Write("/// <summary>");
-                src.Doc?.Write("/// Read-only view over an <see cref=\"AccessArray\"/>.");
-                src.Doc?.Write("/// </summary>");
-
-                src.Line.Write("public readonly partial struct ReadOnly");
-                using (src.Braces)
-                {
-                    src.Line.Write($"readonly Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.ReadOnly impl;");
+                    src.Line.Write($"Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO> impl;");
                     src.Linebreak();
 
                     src.Doc?.Write("/// <summary>");
-                    src.Doc?.Write("/// Creates a read-only view from a mutable access wrapper.");
+                    src.Doc?.Write("/// Creates an access wrapper from an unmanaged reference list.");
                     src.Doc?.Write("/// </summary>");
 
-                    src.Line.Write($"public ReadOnly(Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO> accessArray)");
+                    src.Line.Write($"public AccessArray(global::Unity.Collections.LowLevel.Unsafe.UnsafeList<Medicine.UnmanagedRef<{m}Self>> classRefArray)");
                     using (src.Indent)
-                        src.Line.Write("=> impl = accessArray.AsReadOnly();");
+                        src.Line.Write("=> impl = new(classRefArray);");
 
                     src.Linebreak();
 
                     src.Doc?.Write("/// <summary>");
-                    src.Doc?.Write("/// Creates a read-only view from an existing read-only access wrapper.");
+                    src.Doc?.Write("/// Creates an access wrapper from an array of managed instances.");
                     src.Doc?.Write("/// </summary>");
 
-                    src.Line.Write($"public ReadOnly(Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.ReadOnly accessArray)");
+                    src.Line.Write($"public AccessArray({m}Self[]? classArray)");
                     using (src.Indent)
-                        src.Line.Write("=> impl = accessArray;");
+                        src.Line.Write($"=> impl = new(ᵐUtility.AsUnsafeList<{m}Self, Medicine.UnmanagedRef<{m}Self>>(classArray));");
+
+                    src.Linebreak();
+
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Rebinds this wrapper to a different unmanaged reference list.");
+                    src.Doc?.Write("/// </summary>");
+
+                    src.Line.Write($"public void UpdateBuffer(global::Unity.Collections.LowLevel.Unsafe.UnsafeList<Medicine.UnmanagedRef<{m}Self>> classRefArray)");
+                    using (src.Indent)
+                        src.Line.Write("=> impl.UpdateBuffer(classRefArray);");
+
+                    src.Linebreak();
+
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Rebinds this wrapper to a different managed instance array.");
+                    src.Doc?.Write("/// </summary>");
+
+                    src.Line.Write($"public void UpdateBuffer({m}Self[]? classArray)");
+                    using (src.Indent)
+                        src.Line.Write($"=> impl.UpdateBuffer(ᵐUtility.AsUnsafeList<{m}Self, Medicine.UnmanagedRef<{m}Self>>(classArray));");
 
                     src.Linebreak();
 
@@ -1149,34 +1058,130 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     src.Linebreak();
 
                     src.Doc?.Write("/// <summary>");
-                    src.Doc?.Write("/// Returns read-only unmanaged field access for the specified element index.");
+                    src.Doc?.Write("/// Returns mutable unmanaged field access for the specified element index.");
                     src.Doc?.Write("/// </summary>");
 
-                    src.Line.Write("public AccessRO this[int index]");
+                    src.Line.Write("public AccessRW this[int index]");
                     using (src.Braces)
                         src.Line.Write($"{Alias.Inline} get => impl[index];");
 
                     src.Linebreak();
 
                     src.Doc?.Write("/// <summary>");
-                    src.Doc?.Write("/// Returns a sliced read-only view of this access collection.");
+                    src.Doc?.Write("/// Returns a sliced view of this access collection.");
                     src.Doc?.Write("/// </summary>");
 
-                    src.Line.Write("public ReadOnly this[global::System.Range range]");
-                    using (src.Indent)
-                        src.Line.Write("=> new(impl[range]);");
+                    src.Line.Write("public AccessArray this[global::System.Range range]");
+                    using (src.Braces)
+                    {
+                        src.Line.Write("get");
+                        using (src.Braces)
+                        {
+                            src.Line.Write("AccessArray accessArray = new();");
+                            src.Line.Write("accessArray.impl = impl[range];");
+                            src.Line.Write("return accessArray;");
+                        }
+                    }
 
                     src.Linebreak();
 
                     src.Doc?.Write("/// <summary>");
-                    src.Doc?.Write("/// Returns an enumerator over read-only access elements.");
+                    src.Doc?.Write("/// Converts this wrapper to a read-only view.");
                     src.Doc?.Write("/// </summary>");
 
                     src.Line.Write(Alias.Inline);
-                    src.Line.Write($"public Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.ReadOnly.Enumerator GetEnumerator()");
+                    src.Line.Write("public ReadOnly AsReadOnly()");
+                    using (src.Indent)
+                        src.Line.Write($"=> new(impl);");
+
+                    src.Linebreak();
+
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Returns an enumerator over mutable access elements.");
+                    src.Doc?.Write("/// </summary>");
+
+                    src.Line.Write(Alias.Inline);
+                    src.Line.Write($"public Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.Enumerator GetEnumerator()");
+
+                    src.Linebreak();
+
                     using (src.Indent)
                         src.Line.Write("=> impl.GetEnumerator();");
+
+                    src.Linebreak();
+
+                    src.Doc?.Write("/// <summary>");
+                    src.Doc?.Write("/// Read-only view over an <see cref=\"AccessArray\"/>.");
+                    src.Doc?.Write("/// </summary>");
+
+                    src.Line.Write("public readonly partial struct ReadOnly");
+                    using (src.Braces)
+                    {
+                        src.Line.Write($"readonly Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.ReadOnly impl;");
+                        src.Linebreak();
+
+                        src.Doc?.Write("/// <summary>");
+                        src.Doc?.Write("/// Creates a read-only view from a mutable access wrapper.");
+                        src.Doc?.Write("/// </summary>");
+
+                        src.Line.Write($"public ReadOnly(Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO> accessArray)");
+                        using (src.Indent)
+                            src.Line.Write("=> impl = accessArray.AsReadOnly();");
+
+                        src.Linebreak();
+
+                        src.Doc?.Write("/// <summary>");
+                        src.Doc?.Write("/// Creates a read-only view from an existing read-only access wrapper.");
+                        src.Doc?.Write("/// </summary>");
+
+                        src.Line.Write($"public ReadOnly(Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.ReadOnly accessArray)");
+                        using (src.Indent)
+                            src.Line.Write("=> impl = accessArray;");
+
+                        src.Linebreak();
+
+                        src.Doc?.Write("/// <summary>");
+                        src.Doc?.Write("/// Returns the number of available elements.");
+                        src.Doc?.Write("/// </summary>");
+
+                        src.Line.Write($"public int Length");
+                        using (src.Indent)
+                            src.Line.Write("=> impl.Length;");
+
+                        src.Linebreak();
+
+                        src.Doc?.Write("/// <summary>");
+                        src.Doc?.Write("/// Returns read-only unmanaged field access for the specified element index.");
+                        src.Doc?.Write("/// </summary>");
+
+                        src.Line.Write("public AccessRO this[int index]");
+                        using (src.Braces)
+                            src.Line.Write($"{Alias.Inline} get => impl[index];");
+
+                        src.Linebreak();
+
+                        src.Doc?.Write("/// <summary>");
+                        src.Doc?.Write("/// Returns a sliced read-only view of this access collection.");
+                        src.Doc?.Write("/// </summary>");
+
+                        src.Line.Write("public ReadOnly this[global::System.Range range]");
+                        using (src.Indent)
+                            src.Line.Write("=> new(impl[range]);");
+
+                        src.Linebreak();
+
+                        src.Doc?.Write("/// <summary>");
+                        src.Doc?.Write("/// Returns an enumerator over read-only access elements.");
+                        src.Doc?.Write("/// </summary>");
+
+                        src.Line.Write(Alias.Inline);
+                        src.Line.Write($"public Medicine.Internal.UnmanagedAccessArray<{m}Self, Layout, AccessRW, AccessRO>.ReadOnly.Enumerator GetEnumerator()");
+                        using (src.Indent)
+                            src.Line.Write("=> impl.GetEnumerator();");
+                    }
                 }
+
+                src.Linebreak();
             }
 
             src.Linebreak();
