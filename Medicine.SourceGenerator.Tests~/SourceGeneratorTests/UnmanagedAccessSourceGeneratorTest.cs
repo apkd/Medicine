@@ -29,6 +29,9 @@ static class UnmanagedAccessSourceGeneratorTest
     public static readonly DiagnosticTest NullableValueTypeProjectionCase =
         new("UnmanagedAccess generator projects nullable value types as refs", RunNullableValueTypeProjectionContract);
 
+    public static readonly DiagnosticTest UnmanagedAliasProjectionCase =
+        new("UnmanagedAccess generator projects unmanaged aliases", RunUnmanagedAliasProjectionContract);
+
     public static readonly DiagnosticTest CastHelperCase =
         new("UnmanagedAccess generator emits inheritance cast extension helpers", RunCastHelperContract);
 
@@ -697,6 +700,123 @@ partial class NullableValueTypeOuter
         AssertContains("layoutInfo->MaybeCount");
         AssertContains("public ref readonly int? MaybeCount");
         AssertDoesNotContain("Ref.Read<int?>");
+
+        static void ThrowMissing(string expected)
+            => throw new InvalidOperationException($"Expected generated source to contain: {expected}");
+
+        static void ThrowUnexpected(string unexpected)
+            => throw new InvalidOperationException($"Expected generated source to not contain: {unexpected}");
+
+        void AssertContains(string expected)
+        {
+            if (generatedText.Contains(expected, StringComparison.Ordinal))
+                return;
+
+            ThrowMissing(expected);
+        }
+
+        void AssertDoesNotContain(string unexpected)
+        {
+            if (!generatedText.Contains(unexpected, StringComparison.Ordinal))
+                return;
+
+            ThrowUnexpected(unexpected);
+        }
+    }
+
+    static void RunUnmanagedAliasProjectionContract()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+using System.Collections.Generic;
+using Medicine;
+
+public struct PlainPayload
+{
+    public int Count;
+}
+
+[UnmanagedAlias(typeof(AliasPayload))]
+public partial struct AliasedPayload
+{
+    public object Target;
+}
+
+[UnmanagedAlias(typeof(void))]
+public partial struct LayoutOnlyPayload
+{
+    public object Target;
+}
+
+public struct AliasPayload
+{
+    public nint Target;
+    public int Count;
+}
+
+[UnmanagedAccess]
+partial class UnmanagedAliasOuter
+{
+    public PlainPayload Plain;
+    public AliasedPayload Alias;
+    public AliasedPayload[] AliasArray;
+    public List<AliasedPayload> AliasList = new();
+    public LayoutOnlyPayload LayoutOnly;
+    public LayoutOnlyPayload[] LayoutOnlyArray;
+    public List<LayoutOnlyPayload> LayoutOnlyList = new();
+}
+"""
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new UnmanagedAccessSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default
+                .WithLanguageVersion(LanguageVersion.Preview)
+                .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB")
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "unmanaged alias projection should not throw in generator"
+        );
+
+        var generatedText = string.Join(
+            Environment.NewLine,
+            run.Results
+                .SelectMany(static x => x.GeneratedSources)
+                .Select(static x => x.SourceText.ToString())
+        );
+
+        AssertContains("public ushort Alias { get; init; }");
+        AssertContains("Alias = \u1d50Utility.GetFieldOffset(typeof(\u1d50Self), \"Alias\", \u1d50BF.Public | \u1d50BF.Instance),");
+        AssertContains("public ref global::AliasPayload Alias");
+        AssertContains("Ref.Read<global::AliasPayload>(layoutInfo->Alias)");
+        AssertDoesNotContain("Ref.Read<global::AliasedPayload>");
+        AssertDoesNotContain("\u1d50Utility.AsRefUnchecked<global::AliasedPayload>");
+        AssertContains("public ref global::PlainPayload Plain");
+        AssertContains("Ref.Read<global::PlainPayload>(layoutInfo->Plain)");
+        AssertContains("public global::Unity.Collections.NativeArray<global::AliasPayload> AliasArray");
+        AssertContains("\u1d50Utility.AsNativeArray<global::AliasedPayload, global::AliasPayload>");
+        AssertContains("public global::Medicine.ListAccess<global::AliasedPayload, global::AliasPayload> AliasList");
+        AssertContains("new global::Medicine.ListAccess<global::AliasedPayload, global::AliasPayload>(");
+        AssertContains("public ushort LayoutOnly { get; init; }");
+        AssertContains("public ushort LayoutOnlyArray { get; init; }");
+        AssertContains("public ushort LayoutOnlyList { get; init; }");
+        AssertContains("LayoutOnly = \u1d50Utility.GetFieldOffset(typeof(\u1d50Self), \"LayoutOnly\", \u1d50BF.Public | \u1d50BF.Instance),");
+        AssertContains("LayoutOnlyArray = \u1d50Utility.GetFieldOffset(typeof(\u1d50Self), \"LayoutOnlyArray\", \u1d50BF.Public | \u1d50BF.Instance),");
+        AssertContains("LayoutOnlyList = \u1d50Utility.GetFieldOffset(typeof(\u1d50Self), \"LayoutOnlyList\", \u1d50BF.Public | \u1d50BF.Instance),");
+        AssertDoesNotContain("layoutInfo->LayoutOnly");
+        AssertDoesNotContain("layoutInfo->LayoutOnlyArray");
+        AssertDoesNotContain("layoutInfo->LayoutOnlyList");
+        AssertDoesNotContain("public ref void LayoutOnly");
+        AssertDoesNotContain("public ref global::System.Void LayoutOnly");
+        AssertDoesNotContain("NativeArray<void>");
+        AssertDoesNotContain("NativeArray<global::System.Void>");
 
         static void ThrowMissing(string expected)
             => throw new InvalidOperationException($"Expected generated source to contain: {expected}");

@@ -211,6 +211,40 @@ public partial class UnmanagedAccessTests
         public ManagedValueTypeData Data;
     }
 
+    [UnmanagedAlias(typeof(UnmanagedAliasData))]
+    public partial struct ManagedAliasData
+    {
+        public BasicFields Other;
+        public int Count;
+    }
+
+    public struct UnmanagedAliasData
+    {
+        public UnmanagedRef<BasicFields> Other;
+        public int Count;
+    }
+
+    [UnmanagedAccess]
+    public partial class UnmanagedAliasFields
+    {
+        public ManagedAliasData Data;
+        public ManagedAliasData[] Values = Array.Empty<ManagedAliasData>();
+        public List<ManagedAliasData> Items = new();
+    }
+
+    [UnmanagedAlias(typeof(void))]
+    public partial struct LayoutOnlyAliasData
+    {
+        public BasicFields Other;
+        public int Count;
+    }
+
+    [UnmanagedAccess]
+    public partial class LayoutOnlyAliasFields
+    {
+        public LayoutOnlyAliasData Data;
+    }
+
     [UnmanagedAccess]
     public partial class NullableValueTypeFields
     {
@@ -417,6 +451,82 @@ public partial class UnmanagedAccessTests
         Assert.That(obj.Data.Name, Is.EqualTo("battery"));
         Assert.That(obj.Data.Other.IntField, Is.EqualTo(27));
         Assert.That(obj.Data.Count, Is.EqualTo(8));
+    }
+
+    [Test]
+    public void UnmanagedAccess_UnmanagedAliasFields_ProjectAliasRefs()
+    {
+        var other = new BasicFields { IntField = 31 };
+        var arrayOther = new BasicFields { IntField = 37 };
+        var listOther = new BasicFields { IntField = 41 };
+        var replacement = new BasicFields { IntField = 43 };
+        var obj = new UnmanagedAliasFields
+        {
+            Data = new()
+            {
+                Other = other,
+                Count = 3,
+            },
+            Values = new[]
+            {
+                new ManagedAliasData
+                {
+                    Other = arrayOther,
+                    Count = 5,
+                },
+            },
+            Items = new()
+            {
+                new ManagedAliasData
+                {
+                    Other = listOther,
+                    Count = 7,
+                },
+            },
+        };
+
+        UnmanagedRef<UnmanagedAliasFields> unmanagedRef = obj;
+        var access = unmanagedRef.AccessRW();
+
+        Assert.That(access.Data.Count, Is.EqualTo(3));
+        Assert.That(access.Data.Other.AccessRO().IntField, Is.EqualTo(31));
+
+        access.Data.Count = 11;
+        access.Data.Other = replacement;
+
+        Assert.That(obj.Data.Count, Is.EqualTo(11));
+        Assert.That(obj.Data.Other, Is.SameAs(replacement));
+
+        var values = access.Values;
+        Assert.That(values[0].Count, Is.EqualTo(5));
+        Assert.That(values[0].Other.AccessRO().IntField, Is.EqualTo(37));
+
+        values[0] = new()
+        {
+            Other = replacement,
+            Count = 13,
+        };
+
+        Assert.That(obj.Values[0].Count, Is.EqualTo(13));
+        Assert.That(obj.Values[0].Other, Is.SameAs(replacement));
+
+        var items = access.Items.AsNativeArray();
+        Assert.That(items[0].Count, Is.EqualTo(7));
+        Assert.That(items[0].Other.AccessRO().IntField, Is.EqualTo(41));
+    }
+
+    [Test]
+    public void UnmanagedAccess_VoidUnmanagedAlias_EmitsLayoutOnly()
+    {
+        Assert.That(LayoutOnlyAliasFields.Unmanaged.ClassLayout.Data, Is.GreaterThan(0));
+        Assert.That(
+            typeof(LayoutOnlyAliasFields.Unmanaged.AccessRW).GetProperty(nameof(LayoutOnlyAliasFields.Data)),
+            Is.Null
+        );
+        Assert.That(
+            typeof(LayoutOnlyAliasFields.Unmanaged.AccessRO).GetProperty(nameof(LayoutOnlyAliasFields.Data)),
+            Is.Null
+        );
     }
 
     [Test]

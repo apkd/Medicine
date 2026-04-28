@@ -150,6 +150,12 @@ static class Stubs
                   ) { }
               }
 
+              [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Interface | AttributeTargets.Enum | AttributeTargets.Delegate)]
+              public sealed class UnmanagedAliasAttribute : Attribute
+              {
+                  public UnmanagedAliasAttribute(Type type) { }
+              }
+
               [AttributeUsage(AttributeTargets.Method)]
               public sealed class UnmanagedInvokeAttribute : Attribute { }
 

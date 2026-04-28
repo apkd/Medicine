@@ -277,6 +277,21 @@ namespace Medicine
     }
 
     /// <summary>
+    /// Makes generated unmanaged accessors expose this type as another unmanaged representation type.
+    /// </summary>
+    /// <remarks>
+    /// Use this only when the alias type has a layout compatible with the annotated type.
+    /// The generator still uses the original field for offset lookup, but reads and exposes the alias type.
+    /// </remarks>
+    /// <param name="type">Unmanaged representation type to expose in generated accessors.</param>
+    [MeansImplicitUse]
+    [AttributeUsage(Class | Struct | Interface | System.AttributeTargets.Enum | System.AttributeTargets.Delegate)]
+    public sealed class UnmanagedAliasAttribute : Attribute
+    {
+        public UnmanagedAliasAttribute(Type type) { }
+    }
+
+    /// <summary>
     /// Generates a Burst-compatible unmanaged invocation wrapper for a managed method.
     /// </summary>
     [MeansImplicitUse]

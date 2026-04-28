@@ -42,6 +42,11 @@ static class Constants
     public const string UnmanagedAccessAttributeMetadataName = $"{Namespace}.{UnmanagedAccessAttributeName}";
     public const string UnmanagedAccessAttributeFQN = $"{NamespaceWithGlobal}.{UnmanagedAccessAttributeName}";
 
+    public const string UnmanagedAliasAttributeNameShort = "UnmanagedAlias";
+    public const string UnmanagedAliasAttributeName = $"{UnmanagedAliasAttributeNameShort}Attribute";
+    public const string UnmanagedAliasAttributeMetadataName = $"{Namespace}.{UnmanagedAliasAttributeName}";
+    public const string UnmanagedAliasAttributeFQN = $"{NamespaceWithGlobal}.{UnmanagedAliasAttributeName}";
+
     public const string UnmanagedInvokeAttributeNameShort = "UnmanagedInvoke";
     public const string UnmanagedInvokeAttributeName = $"{UnmanagedInvokeAttributeNameShort}Attribute";
     public const string UnmanagedInvokeAttributeMetadataName = $"{Namespace}.{UnmanagedInvokeAttributeName}";

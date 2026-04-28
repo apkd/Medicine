@@ -57,6 +57,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         string HelperName
     );
 
+    readonly record struct AliasInfo(string TypeFQN, ITypeSymbol? Symbol, bool IsUnresolved);
+
     readonly record struct CastDiagnostic(string Message, LocationInfo? Location);
 
     record struct FieldInfo
@@ -64,21 +66,33 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public string Name;
         public string MetadataName;
         public string TypeFQN;
+        public string AliasTypeFQN;
         public string ElementTypeFQN;
+        public string ElementAliasTypeFQN;
         public FieldFlags Flags;
 
+        public readonly bool HasAlias
+            => AliasTypeFQN is { Length: > 0 };
+
+        public readonly bool ElementHasAlias
+            => ElementAliasTypeFQN is { Length: > 0 };
+
+        public readonly bool EmitsAccessor
+            => !Flags.Has(FieldFlags.LayoutOnly);
+
         public readonly bool EmitsDirectAccess
-            => Flags.Has(FieldFlags.TypeHasUnmanagedAccess) &&
+            => !HasAlias &&
+               Flags.Has(FieldFlags.TypeHasUnmanagedAccess) &&
                !Flags.Has(FieldFlags.IsManagedArrayType) &&
                !Flags.Has(FieldFlags.IsManagedListType);
 
         public readonly bool EmitsArrayNativeArray
             => Flags.Has(FieldFlags.IsManagedArrayType) &&
-               (Flags.Has(FieldFlags.ElementIsUnmanagedType) || Flags.Has(FieldFlags.ElementIsReferenceType));
+               (ElementHasAlias || Flags.Has(FieldFlags.ElementIsUnmanagedType) || Flags.Has(FieldFlags.ElementIsReferenceType));
 
         public readonly bool EmitsListAccess
             => Flags.Has(FieldFlags.IsManagedListType) &&
-               (Flags.Has(FieldFlags.ElementIsUnmanagedType) || Flags.Has(FieldFlags.ElementIsReferenceType));
+               (ElementHasAlias || Flags.Has(FieldFlags.ElementIsUnmanagedType) || Flags.Has(FieldFlags.ElementIsReferenceType));
     }
 
     [Flags]
@@ -96,6 +110,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         IsManagedValueType = 1 << 09,
         IsManagedListType = 1 << 10,
         ElementIsReferenceType = 1 << 11,
+        LayoutOnly = 1 << 12,
     }
 
     record struct AttributeSettings(
@@ -256,30 +271,38 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     : isManagedListType
                         ? listType!.TypeArguments.FirstOrDefault()
                         : null;
-                bool isNullableValueType = IsNullableValueType(field.Type);
-                bool elementIsNullableValueType = elementType is not null && IsNullableValueType(elementType);
-                bool elementTreatAsUnmanagedWrapper = elementType is not null && IsWrapperErrorType(elementType);
-                bool isManagedValueType = field.Type is { IsValueType: true }
-                                          && (!field.Type.IsUnmanagedType || isNullableValueType)
+                var aliasType = GetUnmanagedAlias(field.Type);
+                var accessType = aliasType.Symbol ?? field.Type;
+                var elementAliasType = elementType is not null
+                    ? GetUnmanagedAlias(elementType)
+                    : default;
+                var elementAccessType = elementAliasType.Symbol ?? elementType;
+                bool layoutOnly = IsVoidAlias(aliasType) || IsVoidAlias(elementAliasType);
+                bool isNullableValueType = IsNullableValueType(accessType);
+                bool elementIsNullableValueType = elementAccessType is not null && IsNullableValueType(elementAccessType);
+                bool elementTreatAsUnmanagedWrapper = elementAccessType is not null && IsWrapperErrorType(elementAccessType);
+                bool isManagedValueType = accessType is { IsValueType: true }
+                                          && (!accessType.IsUnmanagedType || isNullableValueType)
                                           && !treatAsUnmanagedWrapper;
 
                 var fieldFlags
                     = 0
                       | (field.DeclaredAccessibility is Accessibility.Public ? FieldFlags.IsPublic : 0)
                       | (field.IsReadOnly ? FieldFlags.IsReadOnly : 0)
-                      | ((field.Type.IsUnmanagedType && !isNullableValueType) || treatAsUnmanagedWrapper
+                      | ((accessType.IsUnmanagedType && !isNullableValueType) || treatAsUnmanagedWrapper || aliasType.IsUnresolved
                           ? FieldFlags.IsUnmanagedType
                           : 0)
-                      | (field.Type.IsReferenceType && !treatAsUnmanagedWrapper ? FieldFlags.IsReferenceType : 0)
+                      | (accessType.IsReferenceType && !treatAsUnmanagedWrapper ? FieldFlags.IsReferenceType : 0)
                       | (isManagedValueType ? FieldFlags.IsManagedValueType : 0)
                       | (isManagedArrayType ? FieldFlags.IsManagedArrayType : 0)
                       | (isManagedListType ? FieldFlags.IsManagedListType : 0)
-                      | (field.Type.GetAttribute(knownSymbols.UnmanagedAccessAttribute) is not null ? FieldFlags.TypeHasUnmanagedAccess : 0)
-                      | (elementType?.IsUnmanagedType is true && !elementIsNullableValueType || elementTreatAsUnmanagedWrapper
+                      | (accessType.GetAttribute(knownSymbols.UnmanagedAccessAttribute) is not null ? FieldFlags.TypeHasUnmanagedAccess : 0)
+                      | (elementAccessType?.IsUnmanagedType is true && !elementIsNullableValueType || elementTreatAsUnmanagedWrapper || elementAliasType.IsUnresolved
                           ? FieldFlags.ElementIsUnmanagedType
                           : 0)
-                      | (elementType?.IsReferenceType is true && !elementTreatAsUnmanagedWrapper ? FieldFlags.ElementIsReferenceType : 0)
-                      | (elementType?.GetAttribute(knownSymbols.UnmanagedAccessAttribute) is not null ? FieldFlags.ElementHasUnmanagedAccess : 0)
+                      | (elementAccessType?.IsReferenceType is true && !elementTreatAsUnmanagedWrapper ? FieldFlags.ElementIsReferenceType : 0)
+                      | (elementAccessType?.GetAttribute(knownSymbols.UnmanagedAccessAttribute) is not null ? FieldFlags.ElementHasUnmanagedAccess : 0)
+                      | (layoutOnly ? FieldFlags.LayoutOnly : 0)
                       | (isFromBaseType && field.DeclaredAccessibility is Accessibility.Private ? FieldFlags.IsPrivateInBaseType : 0);
 
                 fields.Add(
@@ -290,7 +313,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                             ? field.Name[1..^16] // trim generated backing field name
                             : field.Name,
                         TypeFQN = field.Type.FQN,
+                        AliasTypeFQN = aliasType.TypeFQN,
                         ElementTypeFQN = elementType?.FQN ?? string.Empty,
+                        ElementAliasTypeFQN = elementAliasType.TypeFQN,
                         Flags = fieldFlags,
                     }
                 );
@@ -303,6 +328,50 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
         static bool IsNullableValueType(ITypeSymbol type)
             => type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T };
+
+        static bool IsVoidAlias(AliasInfo alias)
+            => alias.Symbol?.SpecialType is SpecialType.System_Void ||
+               alias.TypeFQN is "void" or "System.Void" or "global::System.Void";
+
+        AliasInfo GetUnmanagedAlias(ITypeSymbol type)
+        {
+            var attribute = type.GetAttribute(knownSymbols.UnmanagedAliasAttribute);
+            if (attribute is null)
+                return default;
+
+            if (attribute.ConstructorArguments is [{ Value: ITypeSymbol aliasSymbol }, ..])
+            {
+                var aliasSyntax = GetAliasTypeSyntax(attribute);
+                return aliasSymbol is IErrorTypeSymbol
+                    ? new(aliasSyntax ?? aliasSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), null, IsUnresolved: true)
+                    : new(aliasSymbol.FQN, aliasSymbol, IsUnresolved: false);
+            }
+
+            if (GetAliasTypeSyntax(attribute) is { Length: > 0 } aliasTypeSyntax)
+                return new(aliasTypeSyntax, null, IsUnresolved: true);
+
+            return default;
+        }
+
+        string? GetAliasTypeSyntax(AttributeData attribute)
+        {
+            if (attribute.ApplicationSyntaxReference?.GetSyntax(ct) is not AttributeSyntax
+                {
+                    ArgumentList.Arguments: { Count: > 0 } arguments,
+                })
+                return null;
+
+            foreach (var argument in arguments)
+                if (argument.Expression is TypeOfExpressionSyntax typeOfExpression)
+                {
+                    var typeSyntax = typeOfExpression.Type;
+                    return context.SemanticModel.GetSymbolInfo(typeSyntax, ct).Symbol is ITypeSymbol aliasSymbol and not IErrorTypeSymbol
+                        ? aliasSymbol.FQN
+                        : typeSyntax.ToString();
+                }
+
+            return null;
+        }
     }
 
     static CastExtensionsInput BuildCastExtensionsInput(ImmutableArray<GeneratorInput> inputs)
@@ -839,7 +908,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         }
 
         static string GetCollectionElementAccessType(in FieldInfo field)
-            => field.Flags.Has(FieldFlags.ElementIsReferenceType)
+            => field.ElementHasAlias
+                ? field.ElementAliasTypeFQN
+                : field.Flags.Has(FieldFlags.ElementIsReferenceType)
                 ? $"Medicine.UnmanagedRef<{field.ElementTypeFQN}>"
                 : field.ElementTypeFQN;
 
@@ -1496,6 +1567,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     string GetProjectedType(in FieldInfo field)
                     {
+                        if (field.HasAlias)
+                            return $"{(isReadOnly || field.Flags.Has(FieldFlags.IsReadOnly) ? "ref readonly" : "ref")} {field.AliasTypeFQN}";
+
                         if (field.Flags.Has(FieldFlags.IsUnmanagedType) || field.Flags.Has(FieldFlags.IsManagedValueType))
                             return $"{(isReadOnly || field.Flags.Has(FieldFlags.IsReadOnly) ? "ref readonly" : "ref")} {field.TypeFQN}";
 
@@ -1511,6 +1585,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         {
                             if (isReadOnly)
                                 return $"global::Unity.Collections.NativeArray<{GetCollectionElementAccessType(field)}>";
+
+                            if (field.ElementHasAlias)
+                                return $"global::Medicine.ListAccess<{field.ElementTypeFQN}, {GetCollectionElementAccessType(field)}>";
 
                             if (field.Flags.Has(FieldFlags.ElementHasUnmanagedAccess))
                                 return $"{field.ElementTypeFQN}.Unmanaged.ListAccess";
@@ -1531,6 +1608,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                         if (isReadOnly)
                             return $"ᵐUtility.AsNativeArray<{GetCollectionSourceElementType(field)}, {GetCollectionElementAccessType(field)}>({listRef});";
 
+                        if (field.ElementHasAlias)
+                            return $"new global::Medicine.ListAccess<{GetCollectionSourceElementType(field)}, {GetCollectionElementAccessType(field)}>({listRef});";
+
                         if (field.Flags.Has(FieldFlags.ElementHasUnmanagedAccess))
                             return $"new {field.ElementTypeFQN}.Unmanaged.ListAccess({listRef});";
 
@@ -1542,6 +1622,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     string GetProjectedAccess(in FieldInfo field)
                     {
+                        if (field.HasAlias)
+                            return $"ref Ref.Read<{field.AliasTypeFQN}>(layoutInfo->{field.Name});";
+
                         if (field.Flags.Has(FieldFlags.IsUnmanagedType))
                             return $"ref Ref.Read<{field.TypeFQN}>(layoutInfo->{field.Name});";
 
@@ -1562,9 +1645,11 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                         return $"ref Ref.Read<Medicine.UnmanagedRef<{field.TypeFQN}>>(layoutInfo->{field.Name});";
                     }
-
                     foreach (var x in fields)
                     {
+                        if (!x.EmitsAccessor)
+                            continue;
+
                         if (x.Flags.Has(FieldFlags.IsUnmanagedType)
                             || x.Flags.Has(FieldFlags.IsReferenceType)
                             || x.Flags.Has(FieldFlags.IsManagedValueType))

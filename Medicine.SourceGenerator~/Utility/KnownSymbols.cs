@@ -12,6 +12,7 @@ public readonly record struct KnownSymbols
     public INamedTypeSymbol SingletonAttribute { get; }
     public INamedTypeSymbol TrackAttribute { get; }
     public INamedTypeSymbol UnmanagedAccessAttribute { get; }
+    public INamedTypeSymbol UnmanagedAliasAttribute { get; }
     public INamedTypeSymbol UnmanagedInvokeAttribute { get; }
     public INamedTypeSymbol IInstanceIndexInterface { get; }
     public INamedTypeSymbol UnmanagedDataInterface { get; }
@@ -64,6 +65,9 @@ public readonly record struct KnownSymbols
 
         UnmanagedAccessAttribute
             = Get(Constants.UnmanagedAccessAttributeMetadataName);
+
+        UnmanagedAliasAttribute
+            = Get(Constants.UnmanagedAliasAttributeMetadataName);
 
         UnmanagedInvokeAttribute
             = Get(Constants.UnmanagedInvokeAttributeMetadataName);
