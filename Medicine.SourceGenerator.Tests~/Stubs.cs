@@ -165,6 +165,11 @@ static class Stubs
                   public UnmanagedRef(nint ptr) => Ptr = ptr;
                   public UnmanagedRef(T value) => Ptr = default;
                   public T Resolve() => default!;
+                  public bool Equals(UnmanagedRef<T> other) => Ptr == other.Ptr;
+                  public override bool Equals(object? obj) => obj is UnmanagedRef<T> other && Equals(other);
+                  public override int GetHashCode() => Ptr.GetHashCode();
+                  public static bool operator ==(UnmanagedRef<T> left, UnmanagedRef<T> right) => left.Equals(right);
+                  public static bool operator !=(UnmanagedRef<T> left, UnmanagedRef<T> right) => !left.Equals(right);
               }
 
               [AttributeUsage(AttributeTargets.Method | AttributeTargets.Property)]
@@ -269,6 +274,12 @@ static class Stubs
               {
                   public static TTo As<TFrom, TTo>(ref TFrom value)
                       => default!;
+
+                  public static unsafe ref T AsRef<T>(void* ptr)
+                      => throw new NotSupportedException();
+
+                  public static unsafe void* AddressOf<T>(ref T value)
+                      => default;
               }
           }
 

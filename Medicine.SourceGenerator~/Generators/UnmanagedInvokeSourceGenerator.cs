@@ -93,6 +93,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         public string HelperName;
         public string ScaffoldName;
         public bool IsStatic;
+        public bool IsContainingTypeStruct;
     }
 
     record struct InheritedForwarderInput : ISourceGeneratorPassData
@@ -113,7 +114,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             .SyntaxProvider
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: UnmanagedInvokeAttributeMetadataName,
-                predicate: static (node, _) => node is MethodDeclarationSyntax,
+                predicate: static (node, _) => node is MethodDeclarationSyntax or LocalFunctionStatementSyntax,
                 transform: TransformForCache
             )
             .Combine(generatorEnvironment)
@@ -151,7 +152,34 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
     {
         var context = cacheInput.Context.Value;
 
-        if (context is not { TargetNode: MethodDeclarationSyntax methodDecl, TargetSymbol: IMethodSymbol method })
+        if (context is not { TargetSymbol: IMethodSymbol method })
+        {
+            return new()
+            {
+                SourceGeneratorOutputFilename = cacheInput.SourceGeneratorOutputFilename,
+                SourceGeneratorLocation = cacheInput.SourceGeneratorLocation,
+                SourceGeneratorError = "Unexpected target shape for [UnmanagedInvoke].",
+            };
+        }
+
+        if (context.TargetNode is LocalFunctionStatementSyntax localFunction)
+        {
+            return new()
+            {
+                SourceGeneratorOutputFilename = GetOutputFilename(context),
+                SourceGeneratorLocation = new(localFunction.Identifier.GetLocation()),
+                Diagnostics = new[]
+                {
+                    new GeneratorDiagnostic(
+                        Kind: DiagnosticKind.InvalidTarget,
+                        Message: "[UnmanagedInvoke] cannot be used on local functions.",
+                        Location: new(localFunction.Identifier.GetLocation())
+                    ),
+                },
+            };
+        }
+
+        if (context.TargetNode is not MethodDeclarationSyntax methodDecl)
         {
             return new()
             {
@@ -162,6 +190,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         }
 
         var knownSymbols = context.SemanticModel.Compilation.GetKnownSymbols();
+        var containingType = method.ContainingType;
 
         using var r1 = Scratch.RentA<List<GeneratorDiagnostic>>(out var diagnostics);
         using var r2 = Scratch.RentA<List<ParameterInfo>>(out var parameters);
@@ -177,19 +206,20 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             HelperName = $"{method.Name}Unmanaged",
             ScaffoldName = $"{method.Name}UnmanagedCallScaffold_{GetStableSignatureHash(method):X16}",
             IsStatic = method.IsStatic,
+            IsContainingTypeStruct = containingType?.TypeKind is TypeKind.Struct,
         };
 
         void AddInvalid(string message, Location? location = null)
             => diagnostics.Add(
                 new(
-                    DiagnosticKind.InvalidTarget,
-                    message,
-                    new(location ?? methodDecl.Identifier.GetLocation())
+                    Kind: DiagnosticKind.InvalidTarget,
+                    Message: message,
+                    Location: new(location ?? methodDecl.Identifier.GetLocation())
                 )
             );
 
-        if (method.ContainingType is not { TypeKind: TypeKind.Class } containingType)
-            AddInvalid("[UnmanagedInvoke] can only be used on methods declared in classes.");
+        if (containingType?.TypeKind is not (TypeKind.Class or TypeKind.Struct))
+            AddInvalid("[UnmanagedInvoke] can only be used on methods declared in classes or structs.");
 
         if (method.MethodKind is not MethodKind.Ordinary)
             AddInvalid("[UnmanagedInvoke] can only be used on ordinary methods.");
@@ -212,8 +242,15 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         if (method.ReturnsByRef || method.ReturnsByRefReadonly)
             AddInvalid("[UnmanagedInvoke] does not support ref returns.");
 
-        if (!method.IsStatic && method.ContainingType?.HasAttribute(knownSymbols.UnmanagedAccessAttribute) is not true)
+        if (!method.IsStatic &&
+            containingType?.TypeKind is TypeKind.Class &&
+            method.ContainingType?.HasAttribute(knownSymbols.UnmanagedAccessAttribute) is not true)
             AddInvalid("Instance [UnmanagedInvoke] methods must be declared in a class marked with [UnmanagedAccess].");
+
+        if (!method.IsStatic &&
+            containingType?.TypeKind is TypeKind.Struct &&
+            containingType.IsUnmanagedType is false)
+            AddInvalid("Instance [UnmanagedInvoke] methods declared in structs require an unmanaged containing struct.");
 
         if (TryGetFirstNonPartialContainingType(methodDecl, out var nonPartialType))
             AddInvalid(
@@ -260,9 +297,9 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             {
                 diagnostics.Add(
                     new(
-                        DiagnosticKind.HelperCollision,
-                        $"[UnmanagedInvoke] generated helper signature '{output.HelperName}' conflicts with another [UnmanagedInvoke] method after managed reference projection.",
-                        new(methodDecl.Identifier.GetLocation())
+                        Kind: DiagnosticKind.HelperCollision,
+                        Message: $"[UnmanagedInvoke] generated helper signature '{output.HelperName}' conflicts with another [UnmanagedInvoke] method after managed reference projection.",
+                        Location: new(methodDecl.Identifier.GetLocation())
                     )
                 );
             }
@@ -466,6 +503,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
         if (input.IsStatic)
             EmitStaticHelper(src, input);
+        else if (input.IsContainingTypeStruct)
+            EmitStructInstanceHelper(src, input);
         else
             EmitAccessHelpers(src, input);
 
@@ -524,7 +563,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                 src.Linebreak();
 
                 src.Line.Write("[global::AOT.MonoPInvokeCallbackAttribute(typeof(UnmanagedDelegate))]");
-                src.Line.Write($"static {input.ReturnType.ScaffoldTypeFQN} Managed(");
+                src.Line.Write($"static {GetUnsafeModifier(input)}{input.ReturnType.ScaffoldTypeFQN} Managed(");
                 using (src.Indent)
                 {
                     if (!input.IsStatic)
@@ -598,9 +637,23 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
     static void EmitManagedInvoke(SourceWriter src, GeneratorInput input)
     {
-        string call = input.IsStatic
-            ? $"{input.ContainingTypeFQN}.{input.MethodName}({BuildManagedCallArguments(input)})"
-            : $"new global::Medicine.UnmanagedRef<{input.ContainingTypeFQN}>(self).Resolve().{input.MethodName}({BuildManagedCallArguments(input)})";
+        string call;
+        if (input.IsStatic)
+        {
+            call = $"{input.ContainingTypeFQN}.{input.MethodName}({BuildManagedCallArguments(input)})";
+        }
+        else if (input.IsContainingTypeStruct)
+        {
+            src.Line.Write($"ref var {m}self = ref global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility.AsRef<{input.ContainingTypeFQN}>((void*)self);");
+            if (input.Parameters.AsArray().Any(static x => UsesPointerScaffold(x)))
+                src.Linebreak();
+
+            call = $"{m}self.{input.MethodName}({BuildManagedCallArguments(input)})";
+        }
+        else
+        {
+            call = $"new global::Medicine.UnmanagedRef<{input.ContainingTypeFQN}>(self).Resolve().{input.MethodName}({BuildManagedCallArguments(input)})";
+        }
 
         if (input.ReturnType.IsVoid)
         {
@@ -632,6 +685,25 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         src.Line.Write(")");
         using (src.Braces)
             EmitHelperInvokeBody(src, input, selfExpression: null);
+    }
+
+    static void EmitStructInstanceHelper(SourceWriter src, GeneratorInput input)
+    {
+        src.Line.Write(Alias.Inline);
+        src.Line.Write($"public static unsafe {input.ReturnType.ProjectedTypeFQN} {input.HelperName}(");
+        using (src.Indent)
+        {
+            src.Line.Write($"ref {input.ContainingTypeFQN} self{(input.Parameters.Length > 0 ? "," : "")}");
+            EmitHelperParameters(src, input);
+        }
+
+        src.Line.Write(")");
+        using (src.Braces)
+            EmitHelperInvokeBody(
+                src,
+                input,
+                selfExpression: "(nint)global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility.AddressOf(ref self)"
+            );
     }
 
     static void EmitAccessHelpers(SourceWriter src, GeneratorInput input)
@@ -719,28 +791,29 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         EmitHelperCopyBack(src, input);
 
         if (UsesPointerScaffold(input.ReturnType))
+        {
             src.Line.Write(
                 hasCopyBack
                     ? $"return new {input.ReturnType.ProjectedTypeFQN}(result);"
                     : $"return new {input.ReturnType.ProjectedTypeFQN}({invoke});"
             );
+        }
         else
+        {
             src.Line.Write(
                 hasCopyBack
                     ? "return result;"
                     : $"return {invoke};"
             );
+        }
     }
 
     static void EmitHelperCopyBack(SourceWriter src, GeneratorInput input)
     {
         foreach (var parameter in input.Parameters.AsArray())
-        {
-            if (!UsesPointerScaffold(parameter) || parameter.RefKind is not (RefKind.Ref or RefKind.Out))
-                continue;
-
-            src.Line.Write($"{parameter.Name} = new {parameter.ProjectedTypeFQN}({HelperPointerLocalName(parameter)});");
-        }
+            if (UsesPointerScaffold(parameter))
+                if (parameter.RefKind is RefKind.Ref or RefKind.Out)
+                    src.Line.Write($"{parameter.Name} = new {parameter.ProjectedTypeFQN}({HelperPointerLocalName(parameter)});");
     }
 
     static string BuildManagedCallArguments(GeneratorInput input)
@@ -848,6 +921,11 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             RefKind.Out => "out ",
             _           => "",
         };
+
+    static string GetUnsafeModifier(GeneratorInput input)
+        => input.IsContainingTypeStruct && !input.IsStatic
+            ? "unsafe "
+            : "";
 
     static string GetArgumentPrefix(RefKind refKind)
         => refKind switch
@@ -1089,12 +1167,35 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
     static string? GetOutputFilename(GeneratorAttributeSyntaxContext context)
     {
-        if (context.TargetNode is not MethodDeclarationSyntax
+        string name;
+        string filePath;
+        switch (context.TargetNode)
+        {
+            case MethodDeclarationSyntax
             {
-                Identifier.ValueText: { Length: > 0 } name,
-                SyntaxTree.FilePath: { Length: > 0 } filePath,
-            })
-            return null;
+                Identifier.ValueText: { Length: > 0 } methodName,
+                SyntaxTree.FilePath: { Length: > 0 } methodFilePath,
+            }:
+            {
+                name = methodName;
+                filePath = methodFilePath;
+                break;
+            }
+            case LocalFunctionStatementSyntax
+            {
+                Identifier.ValueText: { Length: > 0 } localFunctionName,
+                SyntaxTree.FilePath: { Length: > 0 } localFunctionFilePath,
+            }:
+            {
+                name = localFunctionName;
+                filePath = localFunctionFilePath;
+                break;
+            }
+            default:
+            {
+                return null;
+            }
+        }
 
         string signature = context.TargetSymbol is IMethodSymbol method
             ? BuildSourceSignatureKey(method)

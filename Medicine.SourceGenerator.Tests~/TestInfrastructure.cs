@@ -178,7 +178,7 @@ static class RoslynHarness
         .WithLanguageVersion(LanguageVersion.Preview)
         .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB");
 
-    static readonly CSharpCompilationOptions compilationOptions = new(OutputKind.DynamicallyLinkedLibrary);
+    static readonly CSharpCompilationOptions compilationOptions = new(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true);
 
     static readonly MetadataReference[] defaultReferences = BuildDefaultReferences();
 

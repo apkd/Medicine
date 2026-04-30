@@ -14,6 +14,9 @@ static class UnmanagedInvokeSourceGeneratorTest
     public static readonly DiagnosticTest AbstractInstanceCase =
         new("UnmanagedInvoke generator emits abstract base helpers and derived forwarders", RunAbstractInstanceContract);
 
+    public static readonly DiagnosticTest StructCase =
+        new("UnmanagedInvoke generator emits struct method helpers", RunStructContract);
+
     public static readonly DiagnosticTest InvalidSignatureCase =
         new("MED038 when UnmanagedInvoke targets unsupported signatures", RunInvalidSignatureContract);
 
@@ -163,6 +166,50 @@ public sealed partial class AbstractInvokeHuman : AbstractInvokeAgent
         AssertContains(generatedText, "this.AsAbstractInvokeAgent().ScoreUnmanaged(payload, ref value);");
     }
 
+    static void RunStructContract()
+    {
+        var run = RunGenerator(
+            """
+using Medicine;
+
+public partial struct InvokeStructHost
+{
+    public int Value;
+
+    [UnmanagedInvoke]
+    public static int AddStatic(int left, int right)
+        => left + right;
+
+    [UnmanagedInvoke]
+    public int Add(int value)
+    {
+        Value += value;
+        return Value;
+    }
+}
+"""
+        );
+
+        AssertNoGeneratorException(run);
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED038",
+            because: "UnmanagedInvoke methods declared in structs should be supported"
+        );
+
+        var generatedText = GetGeneratedText(run);
+        AssertContains(generatedText, "partial struct InvokeStructHost");
+        AssertContains(generatedText, "global::InvokeStructHost.AddStatic(left, right)");
+        AssertContains(generatedText, "public static int AddStaticUnmanaged(");
+        AssertContains(generatedText, "static unsafe int Managed(");
+        AssertContains(generatedText, "ref var ᵐself = ref global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility.AsRef<global::InvokeStructHost>((void*)self);");
+        AssertContains(generatedText, "ᵐself.Add(value)");
+        AssertContains(generatedText, "public static unsafe int AddUnmanaged(");
+        AssertContains(generatedText, "ref global::InvokeStructHost self");
+        AssertContains(generatedText, ".Invoke((nint)global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility.AddressOf(ref self), value);");
+    }
+
     static void RunInvalidSignatureContract()
     {
         var run = RunGenerator(
@@ -180,6 +227,15 @@ public partial interface IInvalidInvokeInterface
     [UnmanagedInvoke]
     void InterfaceMethod();
 }
+
+public partial class LocalFunctionInvokeHost
+{
+    public void Outer()
+    {
+        [UnmanagedInvoke]
+        static void Local() { }
+    }
+}
 """
         );
 
@@ -193,6 +249,12 @@ public partial interface IInvalidInvokeInterface
             diagnostics: run.Diagnostics.ToArray(),
             id: "MED911",
             because: "unsupported UnmanagedInvoke signatures should use a dedicated diagnostic"
+        );
+
+        AssertContainsDiagnosticMessage(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED038",
+            expectedMessage: "[UnmanagedInvoke] cannot be used on local functions."
         );
     }
 
@@ -275,5 +337,18 @@ public partial class CollisionInvokeHost
             return;
 
         throw new InvalidOperationException($"Expected generated source to contain {expected} after {container}");
+    }
+
+    static void AssertContainsDiagnosticMessage(Diagnostic[] diagnostics, string id, string expectedMessage)
+    {
+        foreach (var diagnostic in diagnostics)
+            if (diagnostic.Id.Equals(id, StringComparison.Ordinal) &&
+                diagnostic.GetMessage().Contains(expectedMessage, StringComparison.Ordinal))
+                return;
+
+        throw new InvalidOperationException(
+            $"Expected diagnostic '{id}' with message containing: {expectedMessage}{Environment.NewLine}" +
+            $"Actual:{Environment.NewLine}{RoslynHarness.FormatDiagnostics(diagnostics)}"
+        );
     }
 }
