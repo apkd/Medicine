@@ -306,6 +306,10 @@ partial class Outer
             "public global::Unity.Collections.NativeArray<Medicine.UnmanagedRef<string>> Names"
         );
         AssertContains("public readonly unsafe partial struct ListAccess");
+        AssertContains("global::System.IEquatable<ListAccess>,");
+        AssertContains("global::System.IEquatable<Medicine.UnmanagedRef<global::System.Collections.Generic.List<ᵐSelf>>>");
+        AssertContains("public bool Equals(ListAccess other)");
+        AssertContains("public bool Equals(Medicine.UnmanagedRef<global::System.Collections.Generic.List<ᵐSelf>> other)");
         AssertContains("public unsafe struct Enumerator");
         AssertContains("layoutInfo = (Layout*)unmanagedLayoutStorage.UnsafeDataPointer;");
         AssertContains("=> new(AsNativeArray().GetEnumerator(), layoutInfo);");
@@ -320,6 +324,12 @@ partial class Outer
         AssertContains("public bool Equals(Medicine.UnmanagedRef<ᵐSelf> other)");
         AssertContains("public override bool Equals(object? obj)");
         AssertContains("public override int GetHashCode()");
+        AssertContains("public static bool operator ==(AccessRW left, AccessRW right)");
+        AssertContains("public static bool operator ==(AccessRW left, Medicine.UnmanagedRef<ᵐSelf> right)");
+        AssertContains("public static bool operator ==(Medicine.UnmanagedRef<ᵐSelf> left, AccessRW right)");
+        AssertContains("public static bool operator ==(AccessRW left, AccessRO right)");
+        AssertContains("public static bool operator ==(AccessRO left, AccessRW right)");
+        AssertContains("public static bool operator ==(ListAccess left, ListAccess right)");
         AssertDoesNotContain("public partial struct AccessArray");
         AssertDoesNotContain("public static AccessArray Instances");
         AssertDoesNotContain("ArrayLength { get; init; }");

@@ -360,6 +360,14 @@ public partial class UnmanagedAccessTests
         Assert.That(obj.StructArray[0].Value, Is.EqualTo(23));
 
         var classList = access.ClassList;
+        var classListAgain = access.ClassList;
+        UnmanagedRef<List<CollectionClass>> classListRef = obj.ClassList;
+        Assert.That(classList == classListAgain, Is.True);
+        Assert.That(classList != classListAgain, Is.False);
+        Assert.That(classList == classListRef, Is.True);
+        Assert.That(classListRef == classList, Is.True);
+        Assert.That(classList.Equals((object)classListRef), Is.True);
+
         foreach (var classAccess in classList)
         {
             var writable = classAccess;
@@ -374,6 +382,14 @@ public partial class UnmanagedAccessTests
         Assert.That(firstClassListRef.AccessRW().Value, Is.EqualTo(5));
 
         var structList = access.StructList;
+        var structListAgain = access.StructList;
+        UnmanagedRef<List<CollectionStruct>> structListRef = obj.StructList;
+        Assert.That(structList == structListAgain, Is.True);
+        Assert.That(structList != structListAgain, Is.False);
+        Assert.That(structList == structListRef, Is.True);
+        Assert.That(structListRef == structList, Is.True);
+        Assert.That(structList.Equals((object)structListRef), Is.True);
+
         var structListArray = structList.AsNativeArray();
         structListArray[1] = new() { Value = 29 };
         Assert.That(obj.StructList[1].Value, Is.EqualTo(29));
@@ -1138,6 +1154,14 @@ public partial class UnmanagedAccessTests
         Assert.That(accessRWA.Equals((object)accessROA), Is.True);
         Assert.That(accessROA.Equals((object)accessRWA), Is.True);
         Assert.That(accessRWA.GetHashCode(), Is.EqualTo(accessROA.GetHashCode()));
+
+        Assert.That(accessRWA == accessRWB, Is.True);
+        Assert.That(accessRWA != accessRWB, Is.False);
+        Assert.That(accessRWA == accessROA, Is.True);
+        Assert.That(accessROA == accessRWA, Is.True);
+        Assert.That(accessRWA == unmanagedRefB, Is.True);
+        Assert.That(unmanagedRefB == accessRWA, Is.True);
+        Assert.That(accessRWA != accessROOther, Is.True);
     }
 
     [Test]
@@ -1149,6 +1173,8 @@ public partial class UnmanagedAccessTests
 
         Assert.That(unmanagedRefA.Equals(unmanagedRefB), Is.True);
         Assert.That(unmanagedRefA.Equals(new(IntPtr.Zero)), Is.False);
+        Assert.That(unmanagedRefA == unmanagedRefB, Is.True);
+        Assert.That(unmanagedRefA != unmanagedRefB, Is.False);
     }
 }
 #endif

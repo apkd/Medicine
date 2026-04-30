@@ -1227,7 +1227,13 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             src.Doc?.Write("/// Mutable unmanaged access wrapper over a managed list of this class.");
             src.Doc?.Write("/// </summary>");
 
-            src.Line.Write("public readonly unsafe partial struct ListAccess : global::System.Collections.Generic.IEnumerable<AccessRW>");
+            src.Line.Write("public readonly unsafe partial struct ListAccess");
+            using (src.Indent)
+            {
+                src.Line.Write(": global::System.Collections.Generic.IEnumerable<AccessRW>,");
+                src.Line.Write("  global::System.IEquatable<ListAccess>,");
+                src.Line.Write($"  global::System.IEquatable<Medicine.UnmanagedRef<global::System.Collections.Generic.List<{m}Self>>>");
+            }
             using (src.Braces)
             {
                 src.Line.Write($"readonly global::Medicine.ListAccess<{m}Self, Medicine.UnmanagedRef<{m}Self>> impl;");
@@ -1282,6 +1288,54 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 src.Line.Write("public Enumerator GetEnumerator()");
                 using (src.Indent)
                     src.Line.Write("=> new(AsNativeArray().GetEnumerator(), layoutInfo);");
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write("public bool Equals(ListAccess other)");
+                using (src.Indent)
+                    src.Line.Write("=> impl == other.impl;");
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public bool Equals(Medicine.UnmanagedRef<global::System.Collections.Generic.List<{m}Self>> other)");
+                using (src.Indent)
+                    src.Line.Write("=> impl == other;");
+
+                src.Linebreak();
+
+                src.Line.Write("public override bool Equals(object? obj)");
+                using (src.Braces)
+                {
+                    src.Line.Write("if (obj is ListAccess other)");
+                    using (src.Indent)
+                        src.Line.Write("return Equals(other);");
+
+                    src.Linebreak();
+
+                    src.Line.Write($"if (obj is Medicine.UnmanagedRef<global::System.Collections.Generic.List<{m}Self>> unmanagedRef)");
+                    using (src.Indent)
+                        src.Line.Write("return Equals(unmanagedRef);");
+
+                    src.Linebreak();
+
+                    src.Line.Write("return false;");
+                }
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write("public override int GetHashCode()");
+                using (src.Indent)
+                    src.Line.Write("=> impl.GetHashCode();");
+
+                src.Linebreak();
+
+                EmitEqualityOperators(
+                    "ListAccess",
+                    $"Medicine.UnmanagedRef<global::System.Collections.Generic.List<{m}Self>>"
+                );
 
                 src.Linebreak();
 
@@ -1431,21 +1485,21 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     src.Line.Write(Alias.Inline);
                     src.Line.Write("public bool Equals(AccessRW other)");
                     using (src.Indent)
-                        src.Line.Write("=> Ref.Equals(other.Ref);");
+                        src.Line.Write("=> Ref == other.Ref;");
 
                     src.Linebreak();
 
                     src.Line.Write(Alias.Inline);
                     src.Line.Write("public bool Equals(AccessRO other)");
                     using (src.Indent)
-                        src.Line.Write("=> Ref.Equals(other.Ref);");
+                        src.Line.Write("=> Ref == other.Ref;");
 
                     src.Linebreak();
 
                     src.Line.Write(Alias.Inline);
                     src.Line.Write($"public bool Equals(Medicine.UnmanagedRef<{m}Self> other)");
                     using (src.Indent)
-                        src.Line.Write("=> Ref.Equals(other);");
+                        src.Line.Write("=> Ref == other;");
 
                     src.Linebreak();
 
@@ -1478,7 +1532,42 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     src.Line.Write(Alias.Inline);
                     src.Line.Write("public override int GetHashCode()");
                     using (src.Indent)
-                        src.Line.Write("=> Ref.Ptr.GetHashCode();");
+                        src.Line.Write("=> Ref.GetHashCode();");
+
+                    src.Linebreak();
+
+                    EmitEqualityOperators(accessStructName, $"Medicine.UnmanagedRef<{m}Self>");
+
+                    if (!isReadOnly)
+                    {
+                        src.Linebreak();
+
+                        src.Line.Write(Alias.Inline);
+                        src.Line.Write("public static bool operator ==(AccessRW left, AccessRO right)");
+                        using (src.Indent)
+                            src.Line.Write("=> left.Ref == right.Ref;");
+
+                        src.Linebreak();
+
+                        src.Line.Write(Alias.Inline);
+                        src.Line.Write("public static bool operator !=(AccessRW left, AccessRO right)");
+                        using (src.Indent)
+                            src.Line.Write("=> left.Ref != right.Ref;");
+
+                        src.Linebreak();
+
+                        src.Line.Write(Alias.Inline);
+                        src.Line.Write("public static bool operator ==(AccessRO left, AccessRW right)");
+                        using (src.Indent)
+                            src.Line.Write("=> left.Ref == right.Ref;");
+
+                        src.Linebreak();
+
+                        src.Line.Write(Alias.Inline);
+                        src.Line.Write("public static bool operator !=(AccessRO left, AccessRW right)");
+                        using (src.Indent)
+                            src.Line.Write("=> left.Ref != right.Ref;");
+                    }
 
                     src.Linebreak();
 
@@ -1726,6 +1815,49 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 }
 
                 src.Linebreak();
+            }
+
+            void EmitEqualityOperators(string selfType, string otherType)
+            {
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public static bool operator ==({selfType} left, {selfType} right)");
+                using (src.Indent)
+                    src.Line.Write("=> left.Equals(right);");
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public static bool operator !=({selfType} left, {selfType} right)");
+                using (src.Indent)
+                    src.Line.Write("=> !left.Equals(right);");
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public static bool operator ==({selfType} left, {otherType} right)");
+                using (src.Indent)
+                    src.Line.Write("=> left.Equals(right);");
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public static bool operator !=({selfType} left, {otherType} right)");
+                using (src.Indent)
+                    src.Line.Write("=> !left.Equals(right);");
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public static bool operator ==({otherType} left, {selfType} right)");
+                using (src.Indent)
+                    src.Line.Write("=> right.Equals(left);");
+
+                src.Linebreak();
+
+                src.Line.Write(Alias.Inline);
+                src.Line.Write($"public static bool operator !=({otherType} left, {selfType} right)");
+                using (src.Indent)
+                    src.Line.Write("=> !right.Equals(left);");
             }
         }
 

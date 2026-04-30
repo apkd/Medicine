@@ -65,10 +65,25 @@ namespace Medicine
         [MethodImpl(AggressiveInlining)]
         public bool Equals(UnmanagedRef<TClass> other)
             => Ptr == other.Ptr;
+
+        public override bool Equals(object obj)
+            => obj is UnmanagedRef<TClass> other && Equals(other);
+
+        public override int GetHashCode()
+            => Ptr.GetHashCode();
+
+        public static bool operator ==(UnmanagedRef<TClass> left, UnmanagedRef<TClass> right)
+            => left.Equals(right);
+
+        public static bool operator !=(UnmanagedRef<TClass> left, UnmanagedRef<TClass> right)
+            => !left.Equals(right);
+
     }
 
     public readonly struct ListAccess<T>
-        : IEnumerable<T>
+        : IEnumerable<T>,
+          IEquatable<ListAccess<T>>,
+          IEquatable<UnmanagedRef<List<T>>>
         where T : unmanaged
     {
         readonly ListAccess<T, T> impl;
@@ -94,6 +109,43 @@ namespace Medicine
             => impl.GetEnumerator();
 
         [MethodImpl(AggressiveInlining)]
+        public bool Equals(ListAccess<T> other)
+            => impl == other.impl;
+
+        [MethodImpl(AggressiveInlining)]
+        public bool Equals(UnmanagedRef<List<T>> other)
+            => impl == other;
+
+        public override bool Equals(object obj)
+            => obj switch
+            {
+                ListAccess<T> other => Equals(other),
+                UnmanagedRef<List<T>> other => Equals(other),
+                _ => false,
+            };
+
+        public override int GetHashCode()
+            => impl.GetHashCode();
+
+        public static bool operator ==(ListAccess<T> left, ListAccess<T> right)
+            => left.Equals(right);
+
+        public static bool operator !=(ListAccess<T> left, ListAccess<T> right)
+            => !left.Equals(right);
+
+        public static bool operator ==(ListAccess<T> left, UnmanagedRef<List<T>> right)
+            => left.Equals(right);
+
+        public static bool operator !=(ListAccess<T> left, UnmanagedRef<List<T>> right)
+            => !left.Equals(right);
+
+        public static bool operator ==(UnmanagedRef<List<T>> left, ListAccess<T> right)
+            => right.Equals(left);
+
+        public static bool operator !=(UnmanagedRef<List<T>> left, ListAccess<T> right)
+            => !right.Equals(left);
+
+        [MethodImpl(AggressiveInlining)]
         IEnumerator<T> IEnumerable<T>.GetEnumerator()
             => GetEnumerator();
 
@@ -103,7 +155,9 @@ namespace Medicine
     }
 
     public readonly struct ListAccess<TSource, TElement>
-        : IEnumerable<TElement>
+        : IEnumerable<TElement>,
+          IEquatable<ListAccess<TSource, TElement>>,
+          IEquatable<UnmanagedRef<List<TSource>>>
         where TElement : unmanaged
     {
         readonly UnmanagedRef<List<TSource>> listRef;
@@ -150,6 +204,43 @@ namespace Medicine
         [MethodImpl(AggressiveInlining)]
         public NativeArray<TElement>.Enumerator GetEnumerator()
             => AsNativeArray().GetEnumerator();
+
+        [MethodImpl(AggressiveInlining)]
+        public bool Equals(ListAccess<TSource, TElement> other)
+            => listRef == other.listRef;
+
+        [MethodImpl(AggressiveInlining)]
+        public bool Equals(UnmanagedRef<List<TSource>> other)
+            => listRef == other;
+
+        public override bool Equals(object obj)
+            => obj switch
+            {
+                ListAccess<TSource, TElement> other => Equals(other),
+                UnmanagedRef<List<TSource>> other => Equals(other),
+                _ => false,
+            };
+
+        public override int GetHashCode()
+            => listRef.GetHashCode();
+
+        public static bool operator ==(ListAccess<TSource, TElement> left, ListAccess<TSource, TElement> right)
+            => left.Equals(right);
+
+        public static bool operator !=(ListAccess<TSource, TElement> left, ListAccess<TSource, TElement> right)
+            => !left.Equals(right);
+
+        public static bool operator ==(ListAccess<TSource, TElement> left, UnmanagedRef<List<TSource>> right)
+            => left.Equals(right);
+
+        public static bool operator !=(ListAccess<TSource, TElement> left, UnmanagedRef<List<TSource>> right)
+            => !left.Equals(right);
+
+        public static bool operator ==(UnmanagedRef<List<TSource>> left, ListAccess<TSource, TElement> right)
+            => right.Equals(left);
+
+        public static bool operator !=(UnmanagedRef<List<TSource>> left, ListAccess<TSource, TElement> right)
+            => !right.Equals(left);
 
         [MethodImpl(AggressiveInlining)]
         IEnumerator<TElement> IEnumerable<TElement>.GetEnumerator()
