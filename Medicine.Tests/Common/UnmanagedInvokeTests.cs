@@ -94,8 +94,11 @@ public partial class UnmanagedInvokeTests
     }
 
     [BurstCompile(CompileSynchronously = true)]
-    static void InvokeStructFromBurst(in Vector3 position, in Vector3 offset, out Vector3 result)
-        => StaticHost.MoveUnmanaged(in position, in offset, out result);
+    static int InvokeStructFromBurst()
+    {
+        var result = StaticHost.MoveUnmanaged(new Vector3(1, 2, 3), new Vector3(4, 5, 6));
+        return (int)(result.x + result.y + result.z);
+    }
 
     [Test]
     public void UnmanagedInvoke_StaticMethod_InvokesManagedMethod()
@@ -205,11 +208,7 @@ public partial class UnmanagedInvokeTests
     [Test]
     public void UnmanagedInvoke_StructParametersAndReturn_InvokeFromBurstDirectCall()
     {
-        var position = new Vector3(1, 2, 3);
-        var offset = new Vector3(4, 5, 6);
-        InvokeStructFromBurst(in position, in offset, out var result);
-
-        Assert.That(result, Is.EqualTo(new Vector3(5, 7, 9)));
+        Assert.That(InvokeStructFromBurst(), Is.EqualTo(21));
     }
 
     [Test]

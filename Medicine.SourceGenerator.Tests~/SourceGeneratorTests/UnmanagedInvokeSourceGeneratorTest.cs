@@ -94,11 +94,11 @@ public static partial class InvokeStaticHost
         AssertContains(generatedText, "ᵐresult = ᵐreturnValue;");
         AssertContains(generatedText, "public static void Invoke(");
         AssertContains(generatedText, "SharedStaticFunctionPointer.Data.Invoke(in position, offset, out ᵐresult);");
-        AssertContains(generatedText, "public static void MoveUnmanaged(");
-        AssertContains(generatedText, "in global::InvokeStaticHost.Position position,");
-        AssertContains(generatedText, "out global::InvokeStaticHost.Position result");
+        AssertContains(generatedText, "public static global::InvokeStaticHost.Position MoveUnmanaged(");
+        AssertContains(generatedText, "global::InvokeStaticHost.Position position,");
         AssertContains(generatedText, "MoveUnmanagedCallScaffold_");
-        AssertContains(generatedText, ".Invoke(in position, offset, out result);");
+        AssertContains(generatedText, ".Invoke(in position, offset, out var ᵐreturnValue);");
+        AssertContains(generatedText, "return ᵐreturnValue;");
     }
 
     static void RunInstanceContract()
