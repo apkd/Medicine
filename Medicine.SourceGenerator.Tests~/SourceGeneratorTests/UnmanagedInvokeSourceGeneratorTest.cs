@@ -36,6 +36,11 @@ public sealed class Payload
 
 public static partial class InvokeStaticHost
 {
+    public struct Position
+    {
+        public int Value;
+    }
+
     [UnmanagedInvoke]
     public static Payload Replace(Payload payload, ref Payload current, out Payload previous, int value, in int add)
     {
@@ -43,6 +48,10 @@ public static partial class InvokeStaticHost
         current = new Payload { Value = payload.Value + value + add };
         return current;
     }
+
+    [UnmanagedInvoke]
+    public static Position Move(Position position, int offset)
+        => new() { Value = position.Value + offset };
 }
 """
         );
@@ -77,6 +86,19 @@ public static partial class InvokeStaticHost
         AssertContains(generatedText, "return new global::Medicine.UnmanagedRef<global::Payload>(result).Ptr;");
         AssertContains(generatedText, "current = new global::Medicine.UnmanagedRef<global::Payload>(ᵐcurrentPtr);");
         AssertContains(generatedText, "previous = new global::Medicine.UnmanagedRef<global::Payload>(ᵐpreviousPtr);");
+        AssertContains(generatedText, "delegate void UnmanagedDelegate(");
+        AssertContains(generatedText, "in global::InvokeStaticHost.Position position,");
+        AssertContains(generatedText, "out global::InvokeStaticHost.Position ᵐresult");
+        AssertContains(generatedText, "static void Managed(");
+        AssertContains(generatedText, "var ᵐreturnValue = global::InvokeStaticHost.Move(position, offset);");
+        AssertContains(generatedText, "ᵐresult = ᵐreturnValue;");
+        AssertContains(generatedText, "public static void Invoke(");
+        AssertContains(generatedText, "SharedStaticFunctionPointer.Data.Invoke(in position, offset, out ᵐresult);");
+        AssertContains(generatedText, "public static void MoveUnmanaged(");
+        AssertContains(generatedText, "in global::InvokeStaticHost.Position position,");
+        AssertContains(generatedText, "out global::InvokeStaticHost.Position result");
+        AssertContains(generatedText, "MoveUnmanagedCallScaffold_");
+        AssertContains(generatedText, ".Invoke(in position, offset, out result);");
     }
 
     static void RunInstanceContract()

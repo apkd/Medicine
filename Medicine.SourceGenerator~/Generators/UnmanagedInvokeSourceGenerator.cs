@@ -44,7 +44,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         string ScaffoldTypeFQN,
         bool IsVoid,
         bool IsManagedReference,
-        bool IsUnmanagedRef
+        bool IsUnmanagedRef,
+        bool IsScaffoldStruct
     );
 
     readonly record struct ParameterInfo(
@@ -54,7 +55,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         string ProjectedTypeFQN,
         string ScaffoldTypeFQN,
         bool IsManagedReference,
-        bool IsUnmanagedRef
+        bool IsUnmanagedRef,
+        bool IsScaffoldStruct
     );
 
     record struct AccessClassInfo : ISourceGeneratorPassData
@@ -283,7 +285,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                     projection.ProjectedTypeFQN,
                     projection.ScaffoldTypeFQN,
                     projection.IsManagedReference,
-                    projection.IsUnmanagedRef
+                    projection.IsUnmanagedRef,
+                    projection.IsScaffoldStruct
                 )
             );
         }
@@ -292,7 +295,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
         if (diagnostics.Count is 0)
         {
-            string helperKey = BuildHelperKey(method.IsStatic, output.HelperName, output.Parameters.AsArray());
+            string helperKey = BuildHelperKey(method.IsStatic, output.HelperName, output.Parameters.AsArray(), output.ReturnType);
             if (HasProjectedHelperCollision(method, knownSymbols, helperKey, ct))
             {
                 diagnostics.Add(
@@ -348,7 +351,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
             foreach (var invoke in validInstanceInvokes)
             {
-                string key = BuildHelperKey(isStatic: false, invoke.HelperName, invoke.Parameters.AsArray());
+                string key = BuildHelperKey(isStatic: false, invoke.HelperName, invoke.Parameters.AsArray(), invoke.ReturnType);
 
                 if (invoke.ContainingTypeFQN == target.TypeFQN)
                 {
@@ -452,15 +455,15 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                 foreach (var forwarder in input.Forwarders.AsArray())
                 {
                     src.Line.Write(Alias.Inline);
-                    src.Line.Write($"public {forwarder.ReturnType.ProjectedTypeFQN} {forwarder.HelperName}(");
+                    src.Line.Write($"public {GetHelperReturnType(forwarder.ReturnType)} {forwarder.HelperName}(");
                     using (src.Indent)
-                        EmitForwarderParameters(src, forwarder.Parameters);
+                        EmitForwarderParameters(src, forwarder.Parameters, forwarder.ReturnType);
 
                     src.Line.Write(")");
                     using (src.Braces)
                     {
-                        string call = $"this.As{forwarder.BaseTypeName.Sanitize()}().{forwarder.HelperName}({BuildForwarderArguments(forwarder.Parameters)})";
-                        if (forwarder.ReturnType.IsVoid)
+                        string call = $"this.As{forwarder.BaseTypeName.Sanitize()}().{forwarder.HelperName}({BuildForwarderArguments(forwarder.Parameters, forwarder.ReturnType)})";
+                        if (forwarder.ReturnType.IsVoid || UsesOutReturnScaffold(forwarder.ReturnType))
                             src.Line.Write($"{call};");
                         else
                             src.Line.Write($"return {call};");
@@ -514,8 +517,6 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
     static void EmitScaffold(SourceWriter src, GeneratorInput input)
     {
-        var parameters = input.Parameters.AsArray();
-
         src.Line.Write("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
         src.Line.Write($"static class {input.ScaffoldName}");
         using (src.Braces)
@@ -523,18 +524,9 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             src.Line.Write("readonly struct SharedStaticKey { }");
             src.Linebreak();
 
-            src.Line.Write($"delegate {input.ReturnType.ScaffoldTypeFQN} UnmanagedDelegate(");
+            src.Line.Write($"delegate {GetScaffoldInvokeReturnType(input.ReturnType)} UnmanagedDelegate(");
             using (src.Indent)
-            {
-                if (!input.IsStatic)
-                    src.Line.Write($"nint self{(parameters.Length > 0 ? "," : "")}");
-
-                for (int i = 0; i < parameters.Length; i++)
-                {
-                    var parameter = parameters[i];
-                    src.Line.Write($"{GetParameterPrefix(parameter.RefKind)}{parameter.ScaffoldTypeFQN} {parameter.Name}{(i < parameters.Length - 1 ? "," : "")}");
-                }
-            }
+                EmitScaffoldParameters(src, input, includeSelf: !input.IsStatic, includeReturn: true);
 
             src.Line.Write(");");
             src.Linebreak();
@@ -563,18 +555,9 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                 src.Linebreak();
 
                 src.Line.Write("[global::AOT.MonoPInvokeCallbackAttribute(typeof(UnmanagedDelegate))]");
-                src.Line.Write($"static {GetUnsafeModifier(input)}{input.ReturnType.ScaffoldTypeFQN} Managed(");
+                src.Line.Write($"static {GetUnsafeModifier(input)}{GetScaffoldInvokeReturnType(input.ReturnType)} Managed(");
                 using (src.Indent)
-                {
-                    if (!input.IsStatic)
-                        src.Line.Write($"nint self{(parameters.Length > 0 ? "," : "")}");
-
-                    for (int i = 0; i < parameters.Length; i++)
-                    {
-                        var parameter = parameters[i];
-                        src.Line.Write($"{GetParameterPrefix(parameter.RefKind)}{parameter.ScaffoldTypeFQN} {parameter.Name}{(i < parameters.Length - 1 ? "," : "")}");
-                    }
-                }
+                    EmitScaffoldParameters(src, input, includeSelf: !input.IsStatic, includeReturn: true);
 
                 src.Line.Write(")");
                 using (src.Braces)
@@ -586,23 +569,33 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
             src.Linebreak();
 
-            src.Line.Write($"public static {input.ReturnType.ScaffoldTypeFQN} Invoke(");
+            src.Line.Write($"public static {GetScaffoldInvokeReturnType(input.ReturnType)} Invoke(");
             using (src.Indent)
-            {
-                if (!input.IsStatic)
-                    src.Line.Write($"nint self{(parameters.Length > 0 ? "," : "")}");
-
-                for (int i = 0; i < parameters.Length; i++)
-                {
-                    var parameter = parameters[i];
-                    src.Line.Write($"{GetParameterPrefix(parameter.RefKind)}{parameter.ScaffoldTypeFQN} {parameter.Name}{(i < parameters.Length - 1 ? "," : "")}");
-                }
-            }
+                EmitScaffoldParameters(src, input, includeSelf: !input.IsStatic, includeReturn: true);
 
             src.Line.Write(")");
             using (src.Indent)
                 src.Line.Write($"=> SharedStaticFunctionPointer.Data.Invoke({BuildScaffoldForwardArguments(input, includeSelf: !input.IsStatic)});");
         }
+    }
+
+    static void EmitScaffoldParameters(SourceWriter src, GeneratorInput input, bool includeSelf, bool includeReturn)
+    {
+        var parameters = input.Parameters.AsArray();
+        int count = parameters.Length + (includeSelf ? 1 : 0) + (includeReturn && UsesOutReturnScaffold(input.ReturnType) ? 1 : 0);
+        int index = 0;
+
+        void WriteParameter(string parameter)
+            => src.Line.Write($"{parameter}{(++index < count ? "," : "")}");
+
+        if (includeSelf)
+            WriteParameter("nint self");
+
+        foreach (var parameter in parameters)
+            WriteParameter($"{GetScaffoldParameterPrefix(parameter)}{parameter.ScaffoldTypeFQN} {parameter.Name}");
+
+        if (includeReturn && UsesOutReturnScaffold(input.ReturnType))
+            WriteParameter($"out {input.ReturnType.ScaffoldTypeFQN} {ScaffoldReturnParameterName()}");
     }
 
     static void EmitManagedLocals(SourceWriter src, GeneratorInput input)
@@ -662,6 +655,14 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             return;
         }
 
+        if (UsesOutReturnScaffold(input.ReturnType))
+        {
+            src.Line.Write($"var {ScaffoldReturnLocalName()} = {call};");
+            EmitManagedCopyBack(src, input);
+            src.Line.Write($"{ScaffoldReturnParameterName()} = {BuildScaffoldReturnExpression(input.ReturnType, ScaffoldReturnLocalName())};");
+            return;
+        }
+
         src.Line.Write($"var result = {call};");
         EmitManagedCopyBack(src, input);
         src.Line.Write($"return {BuildScaffoldReturnExpression(input.ReturnType, "result")};");
@@ -678,7 +679,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
     static void EmitStaticHelper(SourceWriter src, GeneratorInput input)
     {
         src.Line.Write(Alias.Inline);
-        src.Line.Write($"public static {input.ReturnType.ProjectedTypeFQN} {input.HelperName}(");
+        src.Line.Write($"public static {GetHelperReturnType(input.ReturnType)} {input.HelperName}(");
         using (src.Indent)
             EmitHelperParameters(src, input);
 
@@ -690,10 +691,10 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
     static void EmitStructInstanceHelper(SourceWriter src, GeneratorInput input)
     {
         src.Line.Write(Alias.Inline);
-        src.Line.Write($"public static unsafe {input.ReturnType.ProjectedTypeFQN} {input.HelperName}(");
+        src.Line.Write($"public static unsafe {GetHelperReturnType(input.ReturnType)} {input.HelperName}(");
         using (src.Indent)
         {
-            src.Line.Write($"ref {input.ContainingTypeFQN} self{(input.Parameters.Length > 0 ? "," : "")}");
+            src.Line.Write($"ref {input.ContainingTypeFQN} self{(input.Parameters.Length > 0 || UsesOutReturnScaffold(input.ReturnType) ? "," : "")}");
             EmitHelperParameters(src, input);
         }
 
@@ -722,7 +723,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             using (src.Braces)
             {
                 src.Line.Write(Alias.Inline);
-                src.Line.Write($"public {input.ReturnType.ProjectedTypeFQN} {input.HelperName}(");
+                src.Line.Write($"public {GetHelperReturnType(input.ReturnType)} {input.HelperName}(");
                 using (src.Indent)
                     EmitHelperParameters(src, input);
 
@@ -736,28 +737,45 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
     static void EmitHelperParameters(SourceWriter src, GeneratorInput input)
     {
         var parameters = input.Parameters.AsArray();
+        bool hasReturnParameter = UsesOutReturnScaffold(input.ReturnType);
         for (int i = 0; i < parameters.Length; i++)
         {
             var parameter = parameters[i];
-            src.Line.Write($"{GetParameterPrefix(parameter.RefKind)}{parameter.ProjectedTypeFQN} {parameter.Name}{(i < parameters.Length - 1 ? "," : "")}");
+            src.Line.Write($"{GetHelperParameterPrefix(parameter)}{parameter.ProjectedTypeFQN} {parameter.Name}{(i < parameters.Length - 1 || hasReturnParameter ? "," : "")}");
         }
+
+        if (hasReturnParameter)
+            src.Line.Write($"out {input.ReturnType.ProjectedTypeFQN} {BuildHelperReturnParameterName(input.Parameters)}");
     }
 
-    static void EmitForwarderParameters(SourceWriter src, EquatableArray<ParameterInfo> parametersArray)
+    static void EmitForwarderParameters(SourceWriter src, EquatableArray<ParameterInfo> parametersArray, TypeProjection returnType)
     {
         var parameters = parametersArray.AsArray();
+        bool hasReturnParameter = UsesOutReturnScaffold(returnType);
         for (int i = 0; i < parameters.Length; i++)
         {
             var parameter = parameters[i];
-            src.Line.Write($"{GetParameterPrefix(parameter.RefKind)}{parameter.ProjectedTypeFQN} {parameter.Name}{(i < parameters.Length - 1 ? "," : "")}");
+            src.Line.Write($"{GetHelperParameterPrefix(parameter)}{parameter.ProjectedTypeFQN} {parameter.Name}{(i < parameters.Length - 1 || hasReturnParameter ? "," : "")}");
         }
+
+        if (hasReturnParameter)
+            src.Line.Write($"out {returnType.ProjectedTypeFQN} {BuildHelperReturnParameterName(parametersArray)}");
     }
 
-    static string BuildForwarderArguments(EquatableArray<ParameterInfo> parameters)
+    static string BuildForwarderArguments(EquatableArray<ParameterInfo> parameters, TypeProjection returnType)
         => string.Join(
             ", ",
-            parameters.AsArray().Select(static x => $"{GetArgumentPrefix(x.RefKind)}{x.Name}")
+            BuildForwarderArgumentList(parameters, returnType)
         );
+
+    static IEnumerable<string> BuildForwarderArgumentList(EquatableArray<ParameterInfo> parameters, TypeProjection returnType)
+    {
+        foreach (var parameter in parameters.AsArray())
+            yield return $"{GetHelperArgumentPrefix(parameter)}{parameter.Name}";
+
+        if (UsesOutReturnScaffold(returnType))
+            yield return $"out {BuildHelperReturnParameterName(parameters)}";
+    }
 
     static void EmitHelperInvokeBody(SourceWriter src, GeneratorInput input, string? selfExpression)
     {
@@ -775,9 +793,20 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         if (input.Parameters.AsArray().Any(static x => UsesPointerScaffold(x) && x.RefKind is not RefKind.None))
             src.Linebreak();
 
-        string invoke = $"{input.ScaffoldName}.Invoke({BuildHelperInvokeArguments(input, selfExpression)})";
+        string? returnLocal = UsesOutReturnScaffold(input.ReturnType)
+            ? BuildHelperReturnParameterName(input.Parameters)
+            : null;
+
+        string invoke = $"{input.ScaffoldName}.Invoke({BuildHelperInvokeArguments(input, selfExpression, returnLocal)})";
 
         if (input.ReturnType.IsVoid)
+        {
+            src.Line.Write($"{invoke};");
+            EmitHelperCopyBack(src, input);
+            return;
+        }
+
+        if (UsesOutReturnScaffold(input.ReturnType))
         {
             src.Line.Write($"{invoke};");
             EmitHelperCopyBack(src, input);
@@ -838,10 +867,11 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         => BuildJoinedArguments(
             input,
             selfExpression: includeSelf ? "self" : null,
-            static parameter => parameter.Name
+            static parameter => parameter.Name,
+            UsesOutReturnScaffold(input.ReturnType) ? ScaffoldReturnParameterName() : null
         );
 
-    static string BuildHelperInvokeArguments(GeneratorInput input, string? selfExpression)
+    static string BuildHelperInvokeArguments(GeneratorInput input, string? selfExpression, string? returnExpression)
         => BuildJoinedArguments(
             input,
             selfExpression,
@@ -849,17 +879,19 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                 ? parameter.RefKind is RefKind.None
                     ? $"{parameter.Name}.Ptr"
                     : HelperPointerLocalName(parameter)
-                : parameter.Name
+                : parameter.Name,
+            returnExpression
         );
 
     static string BuildJoinedArguments(
         GeneratorInput input,
         string? selfExpression,
-        Func<ParameterInfo, string> buildParameterExpression
+        Func<ParameterInfo, string> buildParameterExpression,
+        string? returnExpression
     )
     {
         var parameters = input.Parameters.AsArray();
-        var count = parameters.Length + (selfExpression is null ? 0 : 1);
+        var count = parameters.Length + (selfExpression is null ? 0 : 1) + (returnExpression is null ? 0 : 1);
         var arguments = new string[count];
         var index = 0;
 
@@ -867,7 +899,10 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             arguments[index++] = selfExpression;
 
         foreach (var parameter in parameters)
-            arguments[index++] = $"{GetArgumentPrefix(parameter.RefKind)}{buildParameterExpression(parameter)}";
+            arguments[index++] = $"{GetScaffoldArgumentPrefix(parameter)}{buildParameterExpression(parameter)}";
+
+        if (returnExpression is not null)
+            arguments[index] = $"out {returnExpression}";
 
         return string.Join(", ", arguments);
     }
@@ -877,6 +912,12 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
     static string HelperPointerLocalName(ParameterInfo parameter)
         => $"{m}{parameter.Name}Ptr";
+
+    static string ScaffoldReturnParameterName()
+        => $"{m}result";
+
+    static string ScaffoldReturnLocalName()
+        => $"{m}returnValue";
 
     static string GetManagedLocalType(ParameterInfo parameter)
         => parameter.IsManagedReference || parameter.IsUnmanagedRef
@@ -913,6 +954,42 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
     static bool UsesPointerScaffold(TypeProjection projection)
         => projection.IsManagedReference || projection.IsUnmanagedRef;
 
+    static bool UsesByRefParameterScaffold(ParameterInfo parameter)
+        => parameter.IsScaffoldStruct && parameter.RefKind is RefKind.None;
+
+    static bool UsesOutReturnScaffold(TypeProjection projection)
+        => projection.IsScaffoldStruct;
+
+    static string GetHelperReturnType(TypeProjection returnType)
+        => UsesOutReturnScaffold(returnType)
+            ? "void"
+            : returnType.ProjectedTypeFQN;
+
+    static string GetScaffoldInvokeReturnType(TypeProjection returnType)
+        => UsesOutReturnScaffold(returnType)
+            ? "void"
+            : returnType.ScaffoldTypeFQN;
+
+    static string GetHelperParameterPrefix(ParameterInfo parameter)
+        => UsesByRefParameterScaffold(parameter)
+            ? "in "
+            : GetParameterPrefix(parameter.RefKind);
+
+    static string GetHelperArgumentPrefix(ParameterInfo parameter)
+        => UsesByRefParameterScaffold(parameter)
+            ? "in "
+            : GetArgumentPrefix(parameter.RefKind);
+
+    static string GetScaffoldParameterPrefix(ParameterInfo parameter)
+        => UsesByRefParameterScaffold(parameter)
+            ? "in "
+            : GetParameterPrefix(parameter.RefKind);
+
+    static string GetScaffoldArgumentPrefix(ParameterInfo parameter)
+        => UsesByRefParameterScaffold(parameter)
+            ? "in "
+            : GetArgumentPrefix(parameter.RefKind);
+
     static string GetParameterPrefix(RefKind refKind)
         => refKind switch
         {
@@ -946,7 +1023,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
     {
         if (allowVoid && type.SpecialType is SpecialType.System_Void)
         {
-            projection = new("void", "void", "void", IsVoid: true, IsManagedReference: false, IsUnmanagedRef: false);
+            projection = new("void", "void", "void", IsVoid: true, IsManagedReference: false, IsUnmanagedRef: false, IsScaffoldStruct: false);
             error = "";
             return true;
         }
@@ -960,7 +1037,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
         if (type is INamedTypeSymbol namedType && namedType.OriginalDefinition.Is(knownSymbols.UnmanagedRef1))
         {
-            projection = new(type.FQN, type.FQN, "nint", IsVoid: false, IsManagedReference: false, IsUnmanagedRef: true);
+            projection = new(type.FQN, type.FQN, "nint", IsVoid: false, IsManagedReference: false, IsUnmanagedRef: true, IsScaffoldStruct: false);
             error = "";
             return true;
         }
@@ -968,14 +1045,14 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         if (type.IsReferenceType)
         {
             string typeFQN = type.FQN;
-            projection = new(typeFQN, $"global::Medicine.UnmanagedRef<{typeFQN}>", "nint", IsVoid: false, IsManagedReference: true, IsUnmanagedRef: false);
+            projection = new(typeFQN, $"global::Medicine.UnmanagedRef<{typeFQN}>", "nint", IsVoid: false, IsManagedReference: true, IsUnmanagedRef: false, IsScaffoldStruct: false);
             error = "";
             return true;
         }
 
         if (type.IsUnmanagedType)
         {
-            projection = new(type.FQN, type.FQN, type.FQN, IsVoid: false, IsManagedReference: false, IsUnmanagedRef: false);
+            projection = new(type.FQN, type.FQN, type.FQN, IsVoid: false, IsManagedReference: false, IsUnmanagedRef: false, IsScaffoldStruct: IsAggregateStruct(type));
             error = "";
             return true;
         }
@@ -1032,6 +1109,9 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             return false;
 
         using var r1 = Scratch.RentB<List<ParameterInfo>>(out var parameters);
+        if (!TryProjectType(method.ReturnType, knownSymbols, allowVoid: true, out var returnType, out _))
+            return false;
+
         foreach (var parameter in method.Parameters)
         {
             if (!TryProjectType(parameter.Type, knownSymbols, allowVoid: false, out var projection, out _))
@@ -1045,17 +1125,41 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                     projection.ProjectedTypeFQN,
                     projection.ScaffoldTypeFQN,
                     projection.IsManagedReference,
-                    projection.IsUnmanagedRef
+                    projection.IsUnmanagedRef,
+                    projection.IsScaffoldStruct
                 )
             );
         }
 
-        key = BuildHelperKey(method.IsStatic, $"{method.Name}Unmanaged", parameters);
+        key = BuildHelperKey(method.IsStatic, $"{method.Name}Unmanaged", parameters, returnType);
         return true;
     }
 
-    static string BuildHelperKey(bool isStatic, string helperName, IEnumerable<ParameterInfo> parameters)
-        => $"{(isStatic ? "static" : "instance")}:{helperName}({string.Join(",", parameters.Select(static x => $"{x.RefKind}:{x.ProjectedTypeFQN}"))})";
+    static string BuildHelperKey(bool isStatic, string helperName, IEnumerable<ParameterInfo> parameters, TypeProjection returnType)
+        => $"{(isStatic ? "static" : "instance")}:{helperName}({string.Join(",", BuildHelperKeyParameterList(parameters, returnType))})";
+
+    static IEnumerable<string> BuildHelperKeyParameterList(IEnumerable<ParameterInfo> parameters, TypeProjection returnType)
+    {
+        foreach (var parameter in parameters)
+            yield return $"{GetHelperParameterPrefix(parameter)}:{parameter.ProjectedTypeFQN}";
+
+        if (UsesOutReturnScaffold(returnType))
+            yield return $"out:{returnType.ProjectedTypeFQN}";
+    }
+
+    static string BuildHelperReturnParameterName(EquatableArray<ParameterInfo> parameters)
+    {
+        const string baseName = "result";
+        var name = baseName;
+
+        while (parameters.AsArray().Any(x => x.Name == name))
+            name = $"_{name}";
+
+        return name;
+    }
+
+    static bool IsAggregateStruct(ITypeSymbol type)
+        => type.TypeKind is TypeKind.Struct && type.SpecialType is SpecialType.None;
 
     static bool HasGenericContainingType(INamedTypeSymbol? typeSymbol)
     {

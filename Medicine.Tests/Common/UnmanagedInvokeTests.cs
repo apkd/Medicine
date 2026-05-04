@@ -3,6 +3,7 @@ using System;
 using Medicine;
 using NUnit.Framework;
 using Unity.Burst;
+using UnityEngine;
 
 [BurstCompile]
 public partial class UnmanagedInvokeTests
@@ -32,6 +33,10 @@ public partial class UnmanagedInvokeTests
             previous = current;
             current = next;
         }
+
+        [UnmanagedInvoke]
+        public static Vector3 Move(Vector3 position, Vector3 offset)
+            => position + offset;
     }
 
     [UnmanagedAccess]
@@ -87,6 +92,10 @@ public partial class UnmanagedInvokeTests
 
         return baseResult + baseValue * 100 + derivedResult * 10000 + derivedValue * 1000000;
     }
+
+    [BurstCompile(CompileSynchronously = true)]
+    static void InvokeStructFromBurst(in Vector3 position, in Vector3 offset, out Vector3 result)
+        => StaticHost.MoveUnmanaged(in position, in offset, out result);
 
     [Test]
     public void UnmanagedInvoke_StaticMethod_InvokesManagedMethod()
@@ -191,6 +200,16 @@ public partial class UnmanagedInvokeTests
         Assert.That(result, Is.EqualTo(12320828));
         GC.KeepAlive(host);
         GC.KeepAlive(payload);
+    }
+
+    [Test]
+    public void UnmanagedInvoke_StructParametersAndReturn_InvokeFromBurstDirectCall()
+    {
+        var position = new Vector3(1, 2, 3);
+        var offset = new Vector3(4, 5, 6);
+        InvokeStructFromBurst(in position, in offset, out var result);
+
+        Assert.That(result, Is.EqualTo(new Vector3(5, 7, 9)));
     }
 
     [Test]
