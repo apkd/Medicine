@@ -27,7 +27,7 @@ namespace Medicine.Internal
     sealed class ArrayView<T>
     {
         public nint Bounds;
-        public long Length;
+        public nint Length;
         public T Elements = default!;
     }
 
@@ -65,6 +65,21 @@ namespace Medicine.Internal
         public const bool IsAssetImportWorkerProcess
             = false; // always false
 #endif
+
+        internal static class ManagedLayout
+        {
+#if UNITY_64
+            public const int PointerSize = 8;
+#else
+            public const int PointerSize = 4;
+#endif
+            public const int ObjectHeaderSize = PointerSize * 2;
+            public const int ArrayLengthOffset = ObjectHeaderSize + PointerSize;
+            public const int ArrayDataOffset = ObjectHeaderSize + PointerSize * 2;
+            public const int ListItemsOffset = ObjectHeaderSize;
+            public const int ListCountOffset = ObjectHeaderSize + PointerSize;
+            public const int ListVersionOffset = ObjectHeaderSize + PointerSize + sizeof(int);
+        }
 
         // direct access to the list's backing array, version, etc.
         [MethodImpl(AggressiveInlining)]
@@ -145,7 +160,7 @@ namespace Medicine.Internal
 
         [MethodImpl(AggressiveInlining)]
         public static int GetArrayLength<T>(UnmanagedRef<T[]> arrayRef)
-            => arrayRef.Ptr is 0 ? 0 : (int)arrayRef.Read<long>(24);
+            => arrayRef.Ptr is 0 ? 0 : (int)arrayRef.Read<nint>(ManagedLayout.ArrayLengthOffset);
 
         [MethodImpl(AggressiveInlining)]
         public static unsafe NativeArray<TTo> AsNativeArray<TFrom, TTo>(
@@ -157,7 +172,7 @@ namespace Medicine.Internal
                 return default;
 
             var nativeArray = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<TTo>(
-                dataPointer: (void*)(arrayRef.Ptr + 32),
+                dataPointer: (void*)(arrayRef.Ptr + ManagedLayout.ArrayDataOffset),
                 length: length,
                 allocator: Allocator.None
             );
@@ -184,8 +199,8 @@ namespace Medicine.Internal
             if (listRef.Ptr is 0)
                 return default;
 
-            var arrayRef = listRef.Read<UnmanagedRef<TFrom[]>>(16);
-            return AsNativeArray<TFrom, TTo>(arrayRef, listRef.Read<int>(24));
+            var arrayRef = listRef.Read<UnmanagedRef<TFrom[]>>(ManagedLayout.ListItemsOffset);
+            return AsNativeArray<TFrom, TTo>(arrayRef, listRef.Read<int>(ManagedLayout.ListCountOffset));
         }
 
         [MethodImpl(AggressiveInlining)]

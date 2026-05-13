@@ -169,7 +169,7 @@ namespace Medicine
         public int Count
         {
             [MethodImpl(AggressiveInlining)]
-            get => listRef.Ptr is 0 ? 0 : listRef.Read<int>(24);
+            get => listRef.Ptr is 0 ? 0 : listRef.Read<int>(Internal.Utility.ManagedLayout.ListCountOffset);
             [MethodImpl(AggressiveInlining)]
             set
             {
@@ -181,14 +181,14 @@ namespace Medicine
                     throw new InvalidOperationException("Cannot set Count on a null List reference.");
 #endif
 
-                var arrayRef = listRef.Read<UnmanagedRef<TSource[]>>(16);
+                var arrayRef = listRef.Read<UnmanagedRef<TSource[]>>(Internal.Utility.ManagedLayout.ListItemsOffset);
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                 if (value > Internal.Utility.GetArrayLength(arrayRef))
                     throw new ArgumentOutOfRangeException(nameof(value), "Cannot set Count beyond the List capacity from unmanaged access.");
 #endif
 
-                listRef.Read<int>(24) = value;
+                listRef.Read<int>(Internal.Utility.ManagedLayout.ListCountOffset) = value;
             }
         }
 
