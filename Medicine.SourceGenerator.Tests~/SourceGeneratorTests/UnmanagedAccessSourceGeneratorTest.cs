@@ -26,6 +26,18 @@ static class UnmanagedAccessSourceGeneratorTest
     public static readonly DiagnosticTest GenericProjectionCase =
         new("UnmanagedAccess generator projects constructed generic unmanaged-access fields", RunGenericProjectionContract);
 
+    public static readonly DiagnosticTest GenericOpenReferenceStorageCase =
+        new("UnmanagedAccess generator emits non-generic layout storage for open generic reference storage", RunGenericOpenReferenceStorageContract);
+
+    public static readonly DiagnosticTest GenericReferenceConstrainedCase =
+        new("UnmanagedAccess generator supports reference-constrained generic fields", RunGenericReferenceConstrainedContract);
+
+    public static readonly DiagnosticTest GenericUnsupportedValueCase =
+        new("UnmanagedAccess generator reports unsupported generic value layouts", RunGenericUnsupportedValueContract);
+
+    public static readonly DiagnosticTest GenericPack1ValueCase =
+        new("UnmanagedAccess generator supports conservative Pack=1 generic value layouts", RunGenericPack1ValueContract);
+
     public static readonly DiagnosticTest ManagedValueTypeProjectionCase =
         new("UnmanagedAccess generator projects managed value types as refs", RunManagedValueTypeProjectionContract);
 
@@ -951,17 +963,108 @@ public sealed partial class GenericGridOwner
             because: "generic unmanaged-access projection should not throw"
         );
 
-        var errors = run.CompilationDiagnostics
-            .Where(static x => x.Severity is DiagnosticSeverity.Error)
-            .ToArray();
-
-        if (errors.Length is 0)
-            return;
-
-        throw new InvalidOperationException(
-            "Expected constructed generic unmanaged-access projection to compile." + Environment.NewLine +
-            RoslynHarness.FormatDiagnostics(errors)
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.GeneratorDiagnostics,
+            id: "MED041",
+            because: "constructed generic unmanaged-access projection should be supported by the generator"
         );
+    }
+
+    static void RunGenericOpenReferenceStorageContract()
+    {
+        var generatedText = RunAndGetGeneratedText(
+            """
+using Medicine;
+using System.Collections.Generic;
+
+[UnmanagedAccess]
+public sealed partial class GenericReferenceStorage<T>
+{
+    public int Size;
+    public T[] Items = System.Array.Empty<T>();
+    public List<T> Values = new();
+}
+"""
+        );
+
+        AssertContains(generatedText, "public static unsafe class ᵐUnmanagedAccessLayout_global__GenericReferenceStorage_T_");
+        AssertContains(generatedText, "typeof(global::GenericReferenceStorage<>)");
+        AssertContains(generatedText, "public static unsafe ref Layout ClassLayout");
+        AssertContains(generatedText, "=> ref *LayoutPointer;");
+        AssertContains(generatedText, "LayoutPointer");
+        AssertDoesNotContain(generatedText, "static void InitializeUnmanagedLayout()\r\n            =>");
+    }
+
+    static void RunGenericReferenceConstrainedContract()
+    {
+        var generatedText = RunAndGetGeneratedText(
+            """
+using Medicine;
+
+[UnmanagedAccess]
+public sealed partial class GenericReferenceConstrained<T>
+    where T : class
+{
+    public int Size;
+    public T Value = null!;
+}
+"""
+        );
+
+        AssertContains(generatedText, "typeof(global::GenericReferenceConstrained<>)");
+        AssertContains(generatedText, "public ref Medicine.UnmanagedRef<T> Value");
+    }
+
+    static void RunGenericUnsupportedValueContract()
+    {
+        var run = RoslynHarness.RunGenerators(
+            RoslynHarness.CreateCompilation(
+                Stubs.Core,
+                """
+using Medicine;
+
+[UnmanagedAccess]
+public sealed partial class GenericValueStorage<T>
+{
+    public int Size;
+    public T Value = default!;
+}
+"""
+            ),
+            new UnmanagedAccessSourceGenerator()
+        );
+
+        RoslynHarness.AssertContainsDiagnostic(
+            diagnostics: run.GeneratorDiagnostics,
+            id: "MED041",
+            because: "unconstrained generic value storage does not have a static layout"
+        );
+    }
+
+    static void RunGenericPack1ValueContract()
+    {
+        var generatedText = RunAndGetGeneratedText(
+            """
+using Medicine;
+using System.Runtime.InteropServices;
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+[UnmanagedAccess]
+public sealed partial class GenericPack1ValueStorage<T>
+    where T : struct
+{
+    public byte Prefix;
+    public T Value;
+    public T Omitted;
+}
+"""
+        );
+
+        AssertContains(generatedText, "typeof(global::GenericPack1ValueStorage<byte>)");
+        AssertContains(generatedText, "public ushort Value { get; init; }");
+        AssertContains(generatedText, "public ref T Value");
+        AssertDoesNotContain(generatedText, "public ushort Omitted { get; init; }");
+        AssertDoesNotContain(generatedText, "public ref T Omitted");
     }
 
     static void AssertNoGeneratorException(string source)
@@ -981,5 +1084,52 @@ public sealed partial class GenericGridOwner
             return;
 
         throw new InvalidOperationException("Expected generator to emit at least one source file.");
+    }
+
+    static string RunAndGetGeneratedText(string source)
+    {
+        var compilation = RoslynHarness.CreateCompilation(Stubs.Core, source);
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new UnmanagedAccessSourceGenerator().AsSourceGenerator()],
+            parseOptions: CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview)
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var result = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: result.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "generic unmanaged-access generation should not throw"
+        );
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: result.Diagnostics.ToArray(),
+            id: "MED041",
+            because: "this generic unmanaged-access contract should be supported"
+        );
+
+        return string.Join(
+            Environment.NewLine,
+            result.Results
+                .SelectMany(static x => x.GeneratedSources)
+                .Select(static x => x.SourceText.ToString())
+        );
+    }
+
+    static void AssertContains(string source, string expected)
+    {
+        if (source.Contains(expected, StringComparison.Ordinal))
+            return;
+
+        throw new InvalidOperationException($"Expected generated source to contain: {expected}");
+    }
+
+    static void AssertDoesNotContain(string source, string unexpected)
+    {
+        if (!source.Contains(unexpected, StringComparison.Ordinal))
+            return;
+
+        throw new InvalidOperationException($"Expected generated source not to contain: {unexpected}");
     }
 }

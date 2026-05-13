@@ -314,7 +314,9 @@ static class Stubs
 
               public struct SharedStatic<T>
               {
-                  public T Data;
+                  static T data;
+                  public ref T Data => ref data;
+                  public unsafe void* UnsafeDataPointer => default;
 
                   public static SharedStatic<T> GetOrCreate<TContext>()
                       => default;

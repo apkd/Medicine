@@ -19,6 +19,15 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         isEnabledByDefault: true
     );
 
+    static readonly DiagnosticDescriptor MED041 = new(
+        id: nameof(MED041),
+        title: "Unsupported generic [UnmanagedAccess] layout",
+        messageFormat: "{0}",
+        category: "Medicine",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
     record struct GeneratorInput : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
@@ -28,9 +37,14 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public string ClassName;
         public string ClassFQN;
         public bool IsGenericType;
+        public bool HasPack1SequentialLayout;
         public bool IsUnityObject;
         public bool UsesEntityId;
         public bool IsTracked;
+        public string GenericOpenTypeFQN;
+        public string GenericRepresentativeByteTypeFQN;
+        public string GenericLayoutStorageTypeFQN;
+        public string GenericLayoutStorageTypeName;
         public GeneratorEnvironment GeneratorEnvironment;
         public AttributeSettings AttributeSettings;
         public Defer<bool>? HasCachedEnableBuilderDeferred;
@@ -111,6 +125,16 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         IsManagedListType = 1 << 10,
         ElementIsReferenceType = 1 << 11,
         LayoutOnly = 1 << 12,
+        ContainsGenericParameters = 1 << 13,
+        IsDirectTypeParameter = 1 << 14,
+        IsValueConstrainedTypeParameter = 1 << 15,
+    }
+
+    enum GenericLayoutMode
+    {
+        None,
+        OpenType,
+        RepresentativeByte,
     }
 
     record struct AttributeSettings(
@@ -210,9 +234,14 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             ClassName = typeSymbol.Name,
             ClassFQN = typeSymbol.FQN,
             IsGenericType = IsGenericOrNestedInGenericType(typeSymbol),
+            HasPack1SequentialLayout = HasPack1SequentialLayout(typeSymbol),
             IsUnityObject = typeSymbol.InheritsFrom(knownSymbols.UnityObject),
             UsesEntityId = generatorEnvironment.IsUnity64OrNewer,
             IsTracked = trackAttribute is not null,
+            GenericOpenTypeFQN = GetOpenGenericTypeFQN(typeSymbol),
+            GenericRepresentativeByteTypeFQN = GetRepresentativeByteTypeFQN(typeSymbol),
+            GenericLayoutStorageTypeFQN = GetGenericLayoutStorageTypeFQN(typeSymbol),
+            GenericLayoutStorageTypeName = GetGenericLayoutStorageTypeName(typeSymbol),
             SourceGeneratorLocation = new(typeDecl.Identifier.GetLocation()),
             BaseTypeFQNs = typeSymbol.GetBaseTypes().Select(static x => x.FQN).ToArray(),
             AccessROForwardingMembersForAccessRWDeferred = new(() => CollectAccessROForwardingMembersForAccessRW(context.SemanticModel.Compilation, typeSymbol, ct)),
@@ -284,6 +313,15 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 bool isManagedValueType = accessType is { IsValueType: true }
                                           && (!accessType.IsUnmanagedType || isNullableValueType)
                                           && !treatAsUnmanagedWrapper;
+                bool containsGenericParameters = ContainsTypeParameter(field.Type);
+                bool isDirectTypeParameter = field.Type is ITypeParameterSymbol;
+                bool isValueConstrainedTypeParameter = field.Type is ITypeParameterSymbol
+                {
+                    HasValueTypeConstraint: true,
+                } or ITypeParameterSymbol
+                {
+                    HasUnmanagedTypeConstraint: true,
+                };
 
                 var fieldFlags
                     = 0
@@ -303,7 +341,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                       | (elementAccessType?.IsReferenceType is true && !elementTreatAsUnmanagedWrapper ? FieldFlags.ElementIsReferenceType : 0)
                       | (elementAccessType?.GetAttribute(knownSymbols.UnmanagedAccessAttribute) is not null ? FieldFlags.ElementHasUnmanagedAccess : 0)
                       | (layoutOnly ? FieldFlags.LayoutOnly : 0)
-                      | (isFromBaseType && field.DeclaredAccessibility is Accessibility.Private ? FieldFlags.IsPrivateInBaseType : 0);
+                      | (isFromBaseType && field.DeclaredAccessibility is Accessibility.Private ? FieldFlags.IsPrivateInBaseType : 0)
+                      | (containsGenericParameters ? FieldFlags.ContainsGenericParameters : 0)
+                      | (isDirectTypeParameter ? FieldFlags.IsDirectTypeParameter : 0)
+                      | (isValueConstrainedTypeParameter ? FieldFlags.IsValueConstrainedTypeParameter : 0);
 
                 fields.Add(
                     new()
@@ -381,6 +422,95 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
             return false;
         }
+
+        static bool ContainsTypeParameter(ITypeSymbol type)
+        {
+            if (type is ITypeParameterSymbol)
+                return true;
+
+            if (type is IArrayTypeSymbol arrayType)
+                return ContainsTypeParameter(arrayType.ElementType);
+
+            if (type is INamedTypeSymbol namedType)
+                foreach (var argument in namedType.TypeArguments)
+                    if (ContainsTypeParameter(argument))
+                        return true;
+
+            return false;
+        }
+
+        static bool HasPack1SequentialLayout(INamedTypeSymbol type)
+        {
+            foreach (var attribute in type.GetAttributes())
+            {
+                if (attribute.AttributeClass?.ToDisplayString() is not "System.Runtime.InteropServices.StructLayoutAttribute")
+                    continue;
+
+                if (attribute.ConstructorArguments is not [{ Value: int layoutKind }, ..] || layoutKind is not 0)
+                    return false;
+
+                foreach (var argument in attribute.NamedArguments)
+                    if (argument.Key is nameof(System.Runtime.InteropServices.StructLayoutAttribute.Pack))
+                        return argument.Value.Value is 1;
+
+                return false;
+            }
+
+            return false;
+        }
+
+        static string GetOpenGenericTypeFQN(INamedTypeSymbol type)
+            => IsGenericOrNestedInGenericType(type)
+                ? GetUnboundGenericTypeFQN(type)
+                : type.FQN;
+
+        static string GetRepresentativeByteTypeFQN(INamedTypeSymbol type)
+        {
+            if (!IsGenericOrNestedInGenericType(type))
+                return type.FQN;
+
+            return Build(type);
+
+            static string Build(INamedTypeSymbol symbol)
+            {
+                var prefix = symbol.ContainingType is { } containingType
+                    ? Build(containingType) + "."
+                    : symbol.ContainingNamespace is { IsGlobalNamespace: false }
+                        ? $"global::{symbol.ContainingNamespace.ToDisplayString()}."
+                        : "global::";
+
+                if (symbol.TypeParameters.Length is 0)
+                    return prefix + symbol.Name;
+
+                var arguments = symbol.TypeParameters
+                    .Select(static x => x.HasValueTypeConstraint || x.HasUnmanagedTypeConstraint
+                        ? "byte"
+                        : "object"
+                    );
+
+                return $"{prefix}{symbol.Name}<{string.Join(", ", arguments)}>";
+            }
+        }
+
+        static string GetUnboundGenericTypeFQN(INamedTypeSymbol type)
+        {
+            var prefix = type.ContainingType is { } containingType
+                ? GetUnboundGenericTypeFQN(containingType) + "."
+                : type.ContainingNamespace is { IsGlobalNamespace: false }
+                    ? $"global::{type.ContainingNamespace.ToDisplayString()}."
+                    : "global::";
+
+            if (type.TypeParameters.Length is 0)
+                return prefix + type.Name;
+
+            return $"{prefix}{type.Name}<{new string(',', type.TypeParameters.Length - 1)}>";
+        }
+
+        static string GetGenericLayoutStorageTypeName(INamedTypeSymbol type)
+            => $"{m}UnmanagedAccessLayout_{type.FQN.Sanitize()}";
+
+        static string GetGenericLayoutStorageTypeFQN(INamedTypeSymbol type)
+            => $"global::Medicine.Internal.{GetGenericLayoutStorageTypeName(type)}";
     }
 
     static CastExtensionsInput BuildCastExtensionsInput(ImmutableArray<GeneratorInput> inputs)
@@ -903,6 +1033,20 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         if (!input.AttributeSettings.IncludePrivate)
             fields = fields.Where(x => x.Flags.Has(FieldFlags.IsPublic)).ToArray();
 
+        var genericLayoutMode = GenericLayoutMode.None;
+        if (input.IsGenericType && !ValidateGenericLayout(ref fields, out genericLayoutMode, out var genericLayoutDiagnostic))
+        {
+            context.ReportDiagnostic(
+                Diagnostic.Create(
+                    descriptor: MED041,
+                    location: input.SourceGeneratorLocation?.ToLocation() ?? Location.None,
+                    messageArgs: genericLayoutDiagnostic
+                )
+            );
+
+            return;
+        }
+
         if (fields.Length is 0)
         {
             context.ReportDiagnostic(
@@ -926,9 +1070,100 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         static string GetCollectionSourceElementType(in FieldInfo field)
             => field.ElementTypeFQN;
 
+        static bool IsReferenceSizedGenericStorage(in FieldInfo field)
+            => field.Flags.Has(FieldFlags.IsReferenceType) ||
+               field.Flags.Has(FieldFlags.IsManagedArrayType) ||
+               field.Flags.Has(FieldFlags.IsManagedListType);
+
+        bool ValidateGenericLayout(ref FieldInfo[] candidateFields, out GenericLayoutMode mode, out string diagnostic)
+        {
+            mode = GenericLayoutMode.OpenType;
+            diagnostic = "";
+
+            using var r1 = Scratch.RentA<List<int>>(out var genericValueFieldIndexes);
+
+            for (int i = 0; i < candidateFields.Length; i++)
+            {
+                var field = candidateFields[i];
+                if (!field.Flags.Has(FieldFlags.ContainsGenericParameters))
+                    continue;
+
+                if (IsReferenceSizedGenericStorage(field))
+                    continue;
+
+                genericValueFieldIndexes.Add(i);
+            }
+
+            if (genericValueFieldIndexes.Count is 0)
+                return true;
+
+            mode = GenericLayoutMode.RepresentativeByte;
+
+            if (!input.HasPack1SequentialLayout)
+            {
+                diagnostic = "[UnmanagedAccess] on a generic type can only include direct generic value fields when the type uses [StructLayout(LayoutKind.Sequential, Pack = 1)].";
+                return false;
+            }
+
+            int firstValueIndex = genericValueFieldIndexes[0];
+            for (int i = firstValueIndex; i < candidateFields.Length; i++)
+                if (!genericValueFieldIndexes.Contains(i))
+                {
+                    diagnostic = "[UnmanagedAccess] on a generic type can only include generic value fields when they form the trailing field suffix.";
+                    return false;
+                }
+
+            var firstValueField = candidateFields[firstValueIndex];
+            if (!firstValueField.Flags.Has(FieldFlags.IsDirectTypeParameter) ||
+                !firstValueField.Flags.Has(FieldFlags.IsValueConstrainedTypeParameter))
+            {
+                diagnostic = "[UnmanagedAccess] on a generic type can only include generic value storage for a direct value-constrained type parameter field.";
+                return false;
+            }
+
+            if (input.GenericRepresentativeByteTypeFQN is not { Length: > 0 })
+            {
+                diagnostic = "[UnmanagedAccess] could not build a representative closed generic type for static layout calculation.";
+                return false;
+            }
+
+            if (genericValueFieldIndexes.Count is 1)
+                return true;
+
+            using var r2 = Scratch.RentB<List<FieldInfo>>(out var filteredFields);
+            for (int i = 0; i < candidateFields.Length; i++)
+            {
+                if (i <= firstValueIndex)
+                {
+                    filteredFields.Add(candidateFields[i]);
+                    continue;
+                }
+
+                if (input.AttributeSettings.MemberNames.Length > 0 &&
+                    input.AttributeSettings.MemberNames.AsArray().Contains(candidateFields[i].Name))
+                {
+                    diagnostic = $"[UnmanagedAccess] cannot generate static layout for generic value field '{candidateFields[i].Name}' because its offset depends on the closed generic type argument.";
+                    return false;
+                }
+            }
+
+            candidateFields = filteredFields.ToArray();
+            return true;
+        }
+
         var selfType = input.IsGenericType
             ? input.ClassFQN
             : $"{m}Self";
+
+        string layoutTypeFQN = genericLayoutMode is GenericLayoutMode.RepresentativeByte
+            ? input.GenericRepresentativeByteTypeFQN
+            : input.IsGenericType
+                ? input.GenericOpenTypeFQN
+                : selfType;
+
+        string layoutPointerExpression = input.IsGenericType
+            ? $"{input.GenericLayoutStorageTypeFQN}.LayoutPointer"
+            : "unmanagedLayoutStorage.UnsafeDataPointer";
 
         src.Line.Write($"#pragma warning disable CS0108");
         src.Line.Write(Alias.UsingStorage);
@@ -954,19 +1189,33 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         src.Line.Write("public static partial class Unmanaged");
         using (src.Braces)
         {
-            src.Line.Write($"static readonly global::Unity.Burst.SharedStatic<Layout> unmanagedLayoutStorage");
-            using (src.Indent)
-                src.Line.Write($"= global::Unity.Burst.SharedStatic<Layout>.GetOrCreate<Layout>();");
+            if (!input.IsGenericType)
+            {
+                src.Line.Write($"static readonly global::Unity.Burst.SharedStatic<Layout> unmanagedLayoutStorage");
+                using (src.Indent)
+                    src.Line.Write($"= global::Unity.Burst.SharedStatic<Layout>.GetOrCreate<Layout>();");
 
-            src.Linebreak();
+                src.Linebreak();
+            }
+            else
+            {
+                src.Line.Write("static unsafe Layout* LayoutPointer");
+                using (src.Indent)
+                    src.Line.Write($"=> (Layout*){input.GenericLayoutStorageTypeFQN}.LayoutPointer;");
+
+                src.Linebreak();
+            }
 
             src.Doc?.Write("/// <summary>");
             src.Doc?.Write("/// Returns the cached unmanaged layout metadata for the generated access API.");
             src.Doc?.Write("/// </summary>");
 
-            src.Line.Write("public static ref Layout ClassLayout");
+            src.Line.Write($"public static {(input.IsGenericType ? "unsafe " : "")}ref Layout ClassLayout");
             using (src.Braces)
-                src.Line.Write($"{Alias.Inline} get => ref unmanagedLayoutStorage.Data;");
+                src.Line.Write(input.IsGenericType
+                    ? $"{Alias.Inline} get => ref *LayoutPointer;"
+                    : $"{Alias.Inline} get => ref unmanagedLayoutStorage.Data;"
+                );
 
             src.Linebreak();
 
@@ -1025,23 +1274,23 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                 src.Linebreak();
 
-                if (symbols.Has(UNITY_EDITOR))
-                    src.Write(Alias.EditorInit);
+                if (!input.IsGenericType)
+                {
+                    if (symbols.Has(UNITY_EDITOR))
+                        src.Write(Alias.EditorInit);
 
-                src.Line.Write(Alias.RuntimeInit);
-                src.Line.Write("static void InitializeUnmanagedLayout()");
-                using (src.Indent)
-                    src.Line.Write("=> unmanagedLayoutStorage.Data = new()");
+                    src.Line.Write(Alias.RuntimeInit);
+                    src.Line.Write("static void InitializeUnmanagedLayout()");
+                    using (src.Indent)
+                        src.Line.Write("=> unmanagedLayoutStorage.Data = new()");
 
-                using (src.Indent)
-                using (src.Braces)
-                    foreach (var x in fields)
-                    {
-                        src.Line.Write($"{x.Name} = ᵐUtility.GetFieldOffset(typeof({selfType}), \"{x.MetadataName}\", ᵐBF.{ToBindingFlagsVisibility(x.Flags.Has(FieldFlags.IsPublic))} | ᵐBF.Instance),");
+                    using (src.Indent)
+                    using (src.Braces)
+                        foreach (var x in fields)
+                            src.Line.Write($"{x.Name} = ᵐUtility.GetFieldOffset(typeof({layoutTypeFQN}), \"{x.MetadataName}\", ᵐBF.{ToBindingFlagsVisibility(x.Flags.Has(FieldFlags.IsPublic))} | ᵐBF.Instance),");
 
-                    }
-
-                src.Write(';');
+                    src.Write(';');
+                }
             }
 
             src.Linebreak();
@@ -1052,7 +1301,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 src.Doc?.Write("/// Mutable unmanaged access collection wrapper.");
                 src.Doc?.Write("/// </summary>");
 
-                src.Line.Write("public partial struct AccessArray");
+                src.Line.Write($"public {(input.IsGenericType ? "unsafe " : "")}partial struct AccessArray");
                 using (src.Braces)
                 {
                     src.Line.Write($"Medicine.Internal.UnmanagedAccessArray<{selfType}, Layout, AccessRW, AccessRO> impl;");
@@ -1064,7 +1313,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Line.Write($"public AccessArray(global::Unity.Collections.LowLevel.Unsafe.UnsafeList<Medicine.UnmanagedRef<{selfType}>> classRefArray)");
                     using (src.Indent)
-                        src.Line.Write("=> impl = new(classRefArray);");
+                        src.Line.Write(input.IsGenericType
+                            ? "=> impl = new(classRefArray, LayoutPointer);"
+                            : "=> impl = new(classRefArray);"
+                        );
 
                     src.Linebreak();
 
@@ -1074,7 +1326,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     src.Line.Write($"public AccessArray({selfType}[]? classArray)");
                     using (src.Indent)
-                        src.Line.Write($"=> impl = new(ᵐUtility.AsUnsafeList<{selfType}, Medicine.UnmanagedRef<{selfType}>>(classArray));");
+                        src.Line.Write(input.IsGenericType
+                            ? $"=> impl = new(ᵐUtility.AsUnsafeList<{selfType}, Medicine.UnmanagedRef<{selfType}>>(classArray), LayoutPointer);"
+                            : $"=> impl = new(ᵐUtility.AsUnsafeList<{selfType}, Medicine.UnmanagedRef<{selfType}>>(classArray));"
+                        );
 
                     src.Linebreak();
 
@@ -1265,7 +1520,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 using (src.Braces)
                 {
                     src.Line.Write("impl = new(listRef);");
-                    src.Line.Write("layoutInfo = (Layout*)unmanagedLayoutStorage.UnsafeDataPointer;");
+                    src.Line.Write($"layoutInfo = (Layout*){layoutPointerExpression};");
                 }
 
                 src.Linebreak();
@@ -1472,7 +1727,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     using (src.Braces)
                     {
                         src.Line.Write("this.Ref = Ref;");
-                        src.Line.Write("layoutInfo = (Layout*)unmanagedLayoutStorage.UnsafeDataPointer;");
+                        src.Line.Write($"layoutInfo = (Layout*){layoutPointerExpression};");
                     }
 
                     src.Doc?.Write("/// <summary>");
@@ -1879,7 +2134,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             src.CloseBrace();
 
         if (input.IsGenericType)
+        {
+            EmitGenericLayoutStorage();
             return;
+        }
 
         src.Linebreak();
 
@@ -1931,6 +2189,59 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                     src.Line.Write("=> new(classRef, ref layout);");
 
                 src.Linebreak();
+            }
+        }
+
+        void EmitGenericLayoutStorage()
+        {
+            src.Linebreak();
+
+            src.Line.Write("namespace Medicine.Internal");
+            using (src.Braces)
+            {
+                src.Line.Write(Alias.Hidden);
+                src.Line.Write($"public static unsafe class {input.GenericLayoutStorageTypeName}");
+                using (src.Braces)
+                {
+                    src.Line.Write($"static readonly global::Unity.Burst.SharedStatic<Layout> unmanagedLayoutStorage");
+                    using (src.Indent)
+                        src.Line.Write($"= global::Unity.Burst.SharedStatic<Layout>.GetOrCreate<Layout>();");
+
+                    src.Linebreak();
+
+                    src.Line.Write("public static void* LayoutPointer");
+                    using (src.Indent)
+                        src.Line.Write("=> unmanagedLayoutStorage.UnsafeDataPointer;");
+
+                    src.Linebreak();
+
+                    src.Write("\n#if UNITY_EDITOR");
+                    src.Line.Write("[global::System.Runtime.InteropServices.StructLayout((short)0, Size = 128)]");
+                    src.Write("\n#endif");
+                    src.Line.Write("public readonly struct Layout");
+                    using (src.Braces)
+                    {
+                        foreach (var x in fields)
+                            src.Line.Write($"public ushort {x.Name} {{ get; init; }}");
+
+                        src.Linebreak();
+
+                        if (symbols.Has(UNITY_EDITOR))
+                            src.Write(Alias.EditorInit);
+
+                        src.Line.Write(Alias.RuntimeInit);
+                        src.Line.Write("static void InitializeUnmanagedLayout()");
+                        using (src.Indent)
+                            src.Line.Write("=> unmanagedLayoutStorage.Data = new()");
+
+                        using (src.Indent)
+                        using (src.Braces)
+                            foreach (var x in fields)
+                                src.Line.Write($"{x.Name} = ᵐUtility.GetFieldOffset(typeof({layoutTypeFQN}), \"{x.MetadataName}\", ᵐBF.{ToBindingFlagsVisibility(x.Flags.Has(FieldFlags.IsPublic))} | ᵐBF.Instance),");
+
+                        src.Write(';');
+                    }
+                }
             }
         }
     }

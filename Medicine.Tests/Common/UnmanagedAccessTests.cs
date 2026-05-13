@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Medicine.Internal;
 using Unity.Collections;
 using static System.Reflection.BindingFlags;
@@ -691,6 +692,78 @@ public partial class UnmanagedAccessTests
         Assert.That(BasicFields.Unmanaged.ClassLayout.privateIntField, Is.GreaterThan(0));
         Assert.That(BasicFields.Unmanaged.ClassLayout.IntField, Is.Not.EqualTo(BasicFields.Unmanaged.ClassLayout.FloatField));
         Assert.That(BasicFields.Unmanaged.ClassLayout.IntField, Is.Not.EqualTo(BasicFields.Unmanaged.ClassLayout.privateIntField));
+    }
+
+    public sealed class GenericPayload
+    {
+        public int Value;
+    }
+
+    [UnmanagedAccess]
+    public partial class GenericArrayFields<T>
+    {
+        public int Size = 2;
+        public T[] Items = Array.Empty<T>();
+    }
+
+    [UnmanagedAccess]
+    public partial class GenericReferenceFields<T>
+        where T : class
+    {
+        public int Count = 1;
+        public T Value = null!;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    [UnmanagedAccess]
+    public partial class GenericPack1ValueFields<T>
+        where T : struct
+    {
+        public byte Prefix = 1;
+        public T Value;
+        public T Omitted;
+    }
+
+    [Test]
+    public void UnmanagedAccess_GenericArrayFields_LayoutInitialized()
+    {
+        Assert.That(GenericArrayFields<int>.Unmanaged.ClassLayout.Size, Is.GreaterThan(0));
+        Assert.That(GenericArrayFields<int>.Unmanaged.ClassLayout.Items, Is.GreaterThan(0));
+        Assert.That(GenericArrayFields<string>.Unmanaged.ClassLayout.Items, Is.EqualTo(GenericArrayFields<int>.Unmanaged.ClassLayout.Items));
+    }
+
+    [Test]
+    public void UnmanagedAccess_GenericReferenceFields_ReadWrite()
+    {
+        var initial = new GenericPayload { Value = 10 };
+        var replacement = new GenericPayload { Value = 20 };
+        var obj = new GenericReferenceFields<GenericPayload> { Value = initial };
+        var access = new GenericReferenceFields<GenericPayload>.Unmanaged.AccessRW(obj);
+
+        Assert.That(access.Count, Is.EqualTo(1));
+        Assert.That((GenericPayload)access.Value, Is.SameAs(initial));
+
+        access.Count = 5;
+        access.Value = replacement;
+
+        Assert.That(obj.Count, Is.EqualTo(5));
+        Assert.That(obj.Value, Is.SameAs(replacement));
+    }
+
+    [Test]
+    public void UnmanagedAccess_GenericPack1ValueFields_ReadWrite()
+    {
+        var intObj = new GenericPack1ValueFields<int> { Value = 12 };
+        var intAccess = new GenericPack1ValueFields<int>.Unmanaged.AccessRW(intObj);
+        Assert.That(intAccess.Value, Is.EqualTo(12));
+        intAccess.Value = 34;
+        Assert.That(intObj.Value, Is.EqualTo(34));
+
+        var doubleObj = new GenericPack1ValueFields<double> { Value = 1.5 };
+        var doubleAccess = new GenericPack1ValueFields<double>.Unmanaged.AccessRW(doubleObj);
+        Assert.That(doubleAccess.Value, Is.EqualTo(1.5));
+        doubleAccess.Value = 2.5;
+        Assert.That(doubleObj.Value, Is.EqualTo(2.5));
     }
 
     [Test]
