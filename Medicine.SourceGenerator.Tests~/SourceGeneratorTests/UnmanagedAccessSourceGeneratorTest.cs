@@ -23,6 +23,9 @@ static class UnmanagedAccessSourceGeneratorTest
     public static readonly DiagnosticTest ProjectionCase =
         new("UnmanagedAccess generator projects nested access types and arrays", RunProjectionContract);
 
+    public static readonly DiagnosticTest GenericProjectionCase =
+        new("UnmanagedAccess generator projects constructed generic unmanaged-access fields", RunGenericProjectionContract);
+
     public static readonly DiagnosticTest ManagedValueTypeProjectionCase =
         new("UnmanagedAccess generator projects managed value types as refs", RunManagedValueTypeProjectionContract);
 
@@ -916,6 +919,49 @@ public sealed partial class AccessCastHuman : AccessCastMammal
 
             ThrowMissing(expected);
         }
+    }
+
+    static void RunGenericProjectionContract()
+    {
+        var run = RoslynHarness.RunGenerators(
+            RoslynHarness.CreateCompilation(
+                Stubs.Core,
+                """
+using Medicine;
+
+[UnmanagedAccess]
+public sealed partial class GenericGrid<T>
+{
+    public int Value;
+}
+
+[UnmanagedAccess]
+public sealed partial class GenericGridOwner
+{
+    public GenericGrid<int> Grid = new();
+}
+"""
+            ),
+            new UnmanagedAccessSourceGenerator()
+        );
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.GeneratorDiagnostics,
+            id: "MED911",
+            because: "generic unmanaged-access projection should not throw"
+        );
+
+        var errors = run.CompilationDiagnostics
+            .Where(static x => x.Severity is DiagnosticSeverity.Error)
+            .ToArray();
+
+        if (errors.Length is 0)
+            return;
+
+        throw new InvalidOperationException(
+            "Expected constructed generic unmanaged-access projection to compile." + Environment.NewLine +
+            RoslynHarness.FormatDiagnostics(errors)
+        );
     }
 
     static void AssertNoGeneratorException(string source)
