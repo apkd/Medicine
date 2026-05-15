@@ -83,12 +83,12 @@ public partial class UnmanagedInvokeTests
         var baseValue = 3;
         var baseResult = new UnmanagedRef<AbstractInstanceHost>(basePtr)
             .AccessRW()
-            .AddAbstractUnmanaged(payload, ref baseValue);
+            .AddAbstract(payload, ref baseValue);
 
         var derivedValue = 7;
         var derivedResult = new UnmanagedRef<ConcreteInstanceHost>(derivedPtr)
             .AccessRW()
-            .AddAbstractUnmanaged(payload, ref derivedValue);
+            .AddAbstract(payload, ref derivedValue);
 
         return baseResult + baseValue * 100 + derivedResult * 10000 + derivedValue * 1000000;
     }
@@ -149,7 +149,7 @@ public partial class UnmanagedInvokeTests
         var hostRef = new UnmanagedRef<InstanceHost>(host);
         var access = hostRef.AccessRW();
 
-        var result = access.AddUnmanaged(new UnmanagedRef<Payload>(payload), ref value);
+        var result = access.Add(new UnmanagedRef<Payload>(payload), ref value);
 
         Assert.That(value, Is.EqualTo(7));
         Assert.That(result, Is.EqualTo(17));
@@ -163,7 +163,7 @@ public partial class UnmanagedInvokeTests
         var hostRef = new UnmanagedRef<InstanceHost>(host);
         var access = hostRef.AccessRO();
 
-        var result = access.EchoUnmanaged(new UnmanagedRef<Payload>(payload));
+        var result = access.Echo(new UnmanagedRef<Payload>(payload));
 
         Assert.That(result.Resolve(), Is.SameAs(payload));
     }
@@ -176,14 +176,14 @@ public partial class UnmanagedInvokeTests
 
         UnmanagedRef<AbstractInstanceHost> baseRef = host;
         var baseValue = 3;
-        var baseResult = baseRef.AccessRW().AddAbstractUnmanaged(new(payload), ref baseValue);
+        var baseResult = baseRef.AccessRW().AddAbstract(new(payload), ref baseValue);
 
         Assert.That(baseValue, Is.EqualTo(8));
         Assert.That(baseResult, Is.EqualTo(28));
 
         UnmanagedRef<ConcreteInstanceHost> derivedRef = host;
         var derivedValue = 7;
-        var derivedResult = derivedRef.AccessRW().AddAbstractUnmanaged(new(payload), ref derivedValue);
+        var derivedResult = derivedRef.AccessRW().AddAbstract(new(payload), ref derivedValue);
 
         Assert.That(derivedValue, Is.EqualTo(12));
         Assert.That(derivedResult, Is.EqualTo(32));

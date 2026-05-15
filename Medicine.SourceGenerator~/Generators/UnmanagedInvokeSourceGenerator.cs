@@ -59,6 +59,11 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         bool IsScaffoldStruct
     );
 
+    readonly record struct ManagedCallInfo(
+        string? ReceiverExpression,
+        string InvocationExpression
+    );
+
     record struct AccessClassInfo : ISourceGeneratorPassData
     {
         public string? SourceGeneratorOutputFilename { get; init; }
@@ -75,7 +80,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
     readonly record struct InheritedForwarderInfo(
         string BaseTypeName,
         string BaseTypeFQN,
-        string HelperName,
+        string AccessMemberName,
         TypeProjection ReturnType,
         EquatableArray<ParameterInfo> Parameters
     );
@@ -93,6 +98,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         public string ContainingTypeFQN;
         public string MethodName;
         public string HelperName;
+        public string AccessMemberName;
         public string ScaffoldName;
         public bool IsStatic;
         public bool IsContainingTypeStruct;
@@ -206,6 +212,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             ContainingTypeFQN = method.ContainingType?.FQN ?? "",
             MethodName = method.Name,
             HelperName = $"{method.Name}Unmanaged",
+            AccessMemberName = method.Name,
             ScaffoldName = $"{method.Name}UnmanagedCallScaffold_{GetStableSignatureHash(method):X16}",
             IsStatic = method.IsStatic,
             IsContainingTypeStruct = containingType?.TypeKind is TypeKind.Struct,
@@ -295,13 +302,14 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
         if (diagnostics.Count is 0)
         {
-            string helperKey = BuildHelperKey(method.IsStatic, output.HelperName, output.Parameters.AsArray());
+            var generatedMemberName = GetGeneratedMemberName(method);
+            string helperKey = BuildHelperKey(method.IsStatic, generatedMemberName, output.Parameters.AsArray());
             if (HasProjectedHelperCollision(method, knownSymbols, helperKey, ct))
             {
                 diagnostics.Add(
                     new(
                         Kind: DiagnosticKind.HelperCollision,
-                        Message: $"[UnmanagedInvoke] generated helper signature '{output.HelperName}' conflicts with another [UnmanagedInvoke] method after managed reference projection.",
+                        Message: $"[UnmanagedInvoke] generated helper signature '{generatedMemberName}' conflicts with another [UnmanagedInvoke] method after managed reference projection.",
                         Location: new(methodDecl.Identifier.GetLocation())
                     )
                 );
@@ -351,7 +359,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
             foreach (var invoke in validInstanceInvokes)
             {
-                string key = BuildHelperKey(isStatic: false, invoke.HelperName, invoke.Parameters.AsArray());
+                string key = BuildHelperKey(isStatic: false, invoke.AccessMemberName, invoke.Parameters.AsArray());
 
                 if (invoke.ContainingTypeFQN == target.TypeFQN)
                 {
@@ -388,7 +396,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                     new(
                         BaseTypeName: GetTypeName(invoke.ContainingTypeFQN),
                         BaseTypeFQN: invoke.ContainingTypeFQN,
-                        HelperName: invoke.HelperName,
+                        AccessMemberName: invoke.AccessMemberName,
                         ReturnType: invoke.ReturnType,
                         Parameters: invoke.Parameters
                     )
@@ -455,14 +463,14 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                 foreach (var forwarder in input.Forwarders.AsArray())
                 {
                     src.Line.Write(Alias.Inline);
-                    src.Line.Write($"public {forwarder.ReturnType.ProjectedTypeFQN} {forwarder.HelperName}(");
+                    src.Line.Write($"public {forwarder.ReturnType.ProjectedTypeFQN} {forwarder.AccessMemberName}(");
                     using (src.Indent)
                         EmitForwarderParameters(src, forwarder.Parameters);
 
                     src.Line.Write(")");
                     using (src.Braces)
                     {
-                        string call = $"this.As{forwarder.BaseTypeName.Sanitize()}().{forwarder.HelperName}({BuildForwarderArguments(forwarder.Parameters)})";
+                        string call = $"this.As{forwarder.BaseTypeName.Sanitize()}().{forwarder.AccessMemberName}({BuildForwarderArguments(forwarder.Parameters)})";
                         if (forwarder.ReturnType.IsVoid)
                             src.Line.Write($"{call};");
                         else
@@ -630,10 +638,10 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
     static void EmitManagedInvoke(SourceWriter src, GeneratorInput input)
     {
-        string call;
+        ManagedCallInfo call;
         if (input.IsStatic)
         {
-            call = $"{input.ContainingTypeFQN}.{input.MethodName}({BuildManagedCallArguments(input)})";
+            call = new(null, $"{input.ContainingTypeFQN}.{input.MethodName}({BuildManagedCallArguments(input)})");
         }
         else if (input.IsContainingTypeStruct)
         {
@@ -641,31 +649,54 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             if (input.Parameters.AsArray().Any(static x => UsesPointerScaffold(x)))
                 src.Linebreak();
 
-            call = $"{m}self.{input.MethodName}({BuildManagedCallArguments(input)})";
+            call = new($"{m}self", $".{input.MethodName}({BuildManagedCallArguments(input)})");
         }
         else
         {
-            call = $"new global::Medicine.UnmanagedRef<{input.ContainingTypeFQN}>(self).Resolve().{input.MethodName}({BuildManagedCallArguments(input)})";
+            call = new(
+                $"new global::Medicine.UnmanagedRef<{input.ContainingTypeFQN}>(self).Resolve()",
+                $".{input.MethodName}({BuildManagedCallArguments(input)})"
+            );
         }
 
         if (input.ReturnType.IsVoid)
         {
-            src.Line.Write($"{call};");
+            EmitManagedMethodCall(src, assignmentPrefix: "", call);
             EmitManagedCopyBack(src, input);
             return;
         }
 
         if (UsesOutReturnScaffold(input.ReturnType))
         {
-            src.Line.Write($"var {ScaffoldReturnLocalName()} = {call};");
+            EmitManagedMethodCall(src, assignmentPrefix: $"var {ScaffoldReturnLocalName()} = ", call);
             EmitManagedCopyBack(src, input);
             src.Line.Write($"{ScaffoldReturnParameterName()} = {BuildScaffoldReturnExpression(input.ReturnType, ScaffoldReturnLocalName())};");
             return;
         }
 
-        src.Line.Write($"var result = {call};");
+        EmitManagedMethodCall(src, assignmentPrefix: "var result = ", call);
         EmitManagedCopyBack(src, input);
         src.Line.Write($"return {BuildScaffoldReturnExpression(input.ReturnType, "result")};");
+    }
+
+    static void EmitManagedMethodCall(SourceWriter src, string assignmentPrefix, ManagedCallInfo call)
+    {
+        if (call.ReceiverExpression is { Length: > 0 })
+        {
+            src.Line.Write($"{assignmentPrefix}{call.ReceiverExpression}");
+            src.Line.Write("// ------------------------------------");
+            src.Line.Write("// this is the original managed method:");
+            using (src.Indent)
+                src.Line.Write($"{call.InvocationExpression};");
+
+            src.Line.Write("// ------------------------------------");
+            return;
+        }
+
+        src.Line.Write("// ------------------------------------");
+        src.Line.Write("// this is the original managed method:");
+        src.Line.Write($"{assignmentPrefix}{call.InvocationExpression};");
+        src.Line.Write("// ------------------------------------");
     }
 
     static void EmitManagedCopyBack(SourceWriter src, GeneratorInput input)
@@ -723,7 +754,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             using (src.Braces)
             {
                 src.Line.Write(Alias.Inline);
-                src.Line.Write($"public {input.ReturnType.ProjectedTypeFQN} {input.HelperName}(");
+                src.Line.Write($"public {input.ReturnType.ProjectedTypeFQN} {input.AccessMemberName}(");
                 using (src.Indent)
                     EmitHelperParameters(src, input);
 
@@ -1097,9 +1128,14 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             );
         }
 
-        key = BuildHelperKey(method.IsStatic, $"{method.Name}Unmanaged", parameters);
+        key = BuildHelperKey(method.IsStatic, GetGeneratedMemberName(method), parameters);
         return true;
     }
+
+    static string GetGeneratedMemberName(IMethodSymbol method)
+        => !method.IsStatic && method.ContainingType?.TypeKind is TypeKind.Class
+            ? method.Name
+            : $"{method.Name}Unmanaged";
 
     static string BuildHelperKey(bool isStatic, string helperName, IEnumerable<ParameterInfo> parameters)
         => $"{(isStatic ? "static" : "instance")}:{helperName}({string.Join(",", parameters.Select(static x => $"{x.RefKind}:{x.ProjectedTypeFQN}"))})";

@@ -132,10 +132,12 @@ public partial class InvokeInstanceHost
         var generatedText = GetGeneratedText(run);
         AssertContains(generatedText, "static class AddUnmanagedCallScaffold_");
         AssertContains(generatedText, "nint self,");
-        AssertContains(generatedText, "new global::Medicine.UnmanagedRef<global::InvokeInstanceHost>(self).Resolve().Add(new global::Medicine.UnmanagedRef<global::Payload>(payload).Resolve(), ref value)");
+        AssertContains(generatedText, "var result = new global::Medicine.UnmanagedRef<global::InvokeInstanceHost>(self).Resolve()");
+        AssertContains(generatedText, "// this is the original managed method:");
+        AssertContains(generatedText, ".Add(new global::Medicine.UnmanagedRef<global::Payload>(payload).Resolve(), ref value);");
         AssertContains(generatedText, "public static partial class Unmanaged");
         AssertContains(generatedText, "public readonly unsafe partial struct AccessRW");
-        AssertContains(generatedText, "public int AddUnmanaged(");
+        AssertContains(generatedText, "public int Add(");
         AssertContains(generatedText, "return AddUnmanagedCallScaffold_");
         AssertContains(generatedText, ".Invoke(Ref.Ptr, payload.Ptr, ref value);");
         AssertContains(generatedText, "public readonly unsafe partial struct AccessRO");
@@ -182,10 +184,11 @@ public sealed partial class AbstractInvokeHuman : AbstractInvokeAgent
         );
 
         var generatedText = GetGeneratedText(run);
-        AssertContains(generatedText, "new global::Medicine.UnmanagedRef<global::AbstractInvokeAgent>(self).Resolve().Score(new global::Medicine.UnmanagedRef<global::Payload>(payload).Resolve(), ref value)");
+        AssertContains(generatedText, "var result = new global::Medicine.UnmanagedRef<global::AbstractInvokeAgent>(self).Resolve()");
+        AssertContains(generatedText, ".Score(new global::Medicine.UnmanagedRef<global::Payload>(payload).Resolve(), ref value);");
         AssertContains(generatedText, "partial class AbstractInvokeHuman");
-        AssertContains(generatedText, "public int ScoreUnmanaged(");
-        AssertContains(generatedText, "this.AsAbstractInvokeAgent().ScoreUnmanaged(payload, ref value);");
+        AssertContains(generatedText, "public int Score(");
+        AssertContains(generatedText, "this.AsAbstractInvokeAgent().Score(payload, ref value);");
     }
 
     static void RunStructContract()
@@ -226,7 +229,8 @@ public partial struct InvokeStructHost
         AssertContains(generatedText, "public static int AddStaticUnmanaged(");
         AssertContains(generatedText, "static unsafe int Managed(");
         AssertContains(generatedText, "ref var ᵐself = ref global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility.AsRef<global::InvokeStructHost>((void*)self);");
-        AssertContains(generatedText, "ᵐself.Add(value)");
+        AssertContains(generatedText, "var result = ᵐself");
+        AssertContains(generatedText, ".Add(value);");
         AssertContains(generatedText, "public static unsafe int AddUnmanaged(");
         AssertContains(generatedText, "ref global::InvokeStructHost self");
         AssertContains(generatedText, ".Invoke((nint)global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility.AddressOf(ref self), value);");
