@@ -128,8 +128,8 @@ public partial class UnmanagedInvokeTests
         var payload = new UnmanagedRef<Payload>(payloadPtr);
 
         var value = 3;
-        var interfaceResult = host.AddInterfaceUnmanaged(payload, ref value);
-        var defaultResult = host.AddDefaultUnmanaged(payload, 7);
+        var interfaceResult = host.AddInterface(payload, ref value);
+        var defaultResult = host.AddDefault(payload, 7);
 
         return interfaceResult + value * 100 + defaultResult * 10000;
     }
@@ -248,24 +248,10 @@ public partial class UnmanagedInvokeTests
         var interfaceRef = new UnmanagedRef<IInterfaceHost>(interfaceHost);
         var value = 3;
 
-        var result = interfaceRef.AddInterfaceUnmanaged(new(payload), ref value);
+        var result = interfaceRef.AddInterface(new(payload), ref value);
 
         Assert.That(value, Is.EqualTo(8));
         Assert.That(result, Is.EqualTo(28));
-    }
-
-    [Test]
-    public void UnmanagedInvoke_InterfaceMethod_InvokesFromManagedReceiver()
-    {
-        var host = new InterfaceHost { Value = 10 };
-        var payload = new Payload { Value = 6 };
-        IInterfaceHost interfaceHost = host;
-        var value = 4;
-
-        var result = interfaceHost.AddInterfaceUnmanaged(new(payload), ref value);
-
-        Assert.That(value, Is.EqualTo(10));
-        Assert.That(result, Is.EqualTo(20));
     }
 
     [Test]
@@ -274,8 +260,9 @@ public partial class UnmanagedInvokeTests
         var host = new InterfaceHost();
         var payload = new Payload { Value = 5 };
         IInterfaceHost interfaceHost = host;
+        var interfaceRef = new UnmanagedRef<IInterfaceHost>(interfaceHost);
 
-        var result = interfaceHost.AddDefaultUnmanaged(new(payload), 2);
+        var result = interfaceRef.AddDefault(new(payload), 2);
 
         Assert.That(result, Is.EqualTo(107));
     }

@@ -797,17 +797,13 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
             src.Line.Write("public static partial class UnmanagedInvokeExtensions");
             using (src.Braces)
-            {
                 EmitUnmanagedRefExtension();
-                src.Linebreak();
-                EmitManagedInterfaceExtension();
-            }
         }
 
         void EmitUnmanagedRefExtension()
         {
             src.Line.Write(Alias.Inline);
-            src.Line.Write($"{input.InterfaceExtensionAccessibility} static {input.ReturnType.ProjectedTypeFQN} {input.HelperName}(");
+            src.Line.Write($"{input.InterfaceExtensionAccessibility} static {input.ReturnType.ProjectedTypeFQN} {input.MethodName}(");
             using (src.Indent)
             {
                 src.Line.Write($"this in global::Medicine.UnmanagedRef<{input.ContainingTypeFQN}> {m}self{(input.Parameters.Length > 0 ? "," : "")}");
@@ -817,29 +813,6 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             src.Line.Write(")");
             using (src.Braces)
                 EmitHelperInvokeBody(src, input, selfExpression: $"{m}self.Ptr");
-        }
-
-        void EmitManagedInterfaceExtension()
-        {
-            src.Line.Write(Alias.Inline);
-            src.Line.Write($"{input.InterfaceExtensionAccessibility} static {input.ReturnType.ProjectedTypeFQN} {input.HelperName}(");
-            using (src.Indent)
-            {
-                src.Line.Write($"this {input.ContainingTypeFQN} {m}self{(input.Parameters.Length > 0 ? "," : "")}");
-                EmitHelperParameters(src, input);
-            }
-
-            src.Line.Write(")");
-            using (src.Braces)
-            {
-                string arguments = BuildManagedInterfaceForwardArguments(input);
-                string call = $"{input.HelperName}({arguments})";
-
-                if (input.ReturnType.IsVoid)
-                    src.Line.Write($"{call};");
-                else
-                    src.Line.Write($"return {call};");
-            }
         }
     }
 
@@ -868,15 +841,6 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             ", ",
             parameters.AsArray().Select(static x => $"{GetArgumentPrefix(x.RefKind)}{x.Name}")
         );
-
-    static string BuildManagedInterfaceForwardArguments(GeneratorInput input)
-    {
-        string self = $"new global::Medicine.UnmanagedRef<{input.ContainingTypeFQN}>({m}self)";
-        string parameters = BuildForwarderArguments(input.Parameters);
-        return parameters.Length is 0
-            ? self
-            : $"{self}, {parameters}";
-    }
 
     static void EmitHelperInvokeBody(SourceWriter src, GeneratorInput input, string? selfExpression)
     {
@@ -1220,7 +1184,7 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
     }
 
     static string GetGeneratedMemberName(IMethodSymbol method)
-        => !method.IsStatic && method.ContainingType?.TypeKind is TypeKind.Class
+        => !method.IsStatic && method.ContainingType?.TypeKind is TypeKind.Class or TypeKind.Interface
             ? method.Name
             : $"{method.Name}Unmanaged";
 

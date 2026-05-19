@@ -288,11 +288,10 @@ public sealed class InvokeInterfaceHost : IInvokeInterfaceHost
         AssertContains(generatedText, "nint self,");
         AssertContains(generatedText, "var result = new global::Medicine.UnmanagedRef<global::IInvokeInterfaceHost>(self).Resolve()");
         AssertContains(generatedText, ".Add(new global::Medicine.UnmanagedRef<global::Payload>(payload).Resolve(), ref value);");
-        AssertContains(generatedText, "public static int AddUnmanaged(");
+        AssertContains(generatedText, "public static int Add(");
         AssertContains(generatedText, "this in global::Medicine.UnmanagedRef<global::IInvokeInterfaceHost> ᵐself,");
         AssertContains(generatedText, ".Invoke(ᵐself.Ptr, payload.Ptr, ref value);");
-        AssertContains(generatedText, "this global::IInvokeInterfaceHost ᵐself,");
-        AssertContains(generatedText, "return AddUnmanaged(new global::Medicine.UnmanagedRef<global::IInvokeInterfaceHost>(ᵐself), payload, ref value);");
+        AssertDoesNotContain(generatedText, "this global::IInvokeInterfaceHost ᵐself,");
         AssertContains(generatedText, "static class AddDefaultUnmanagedCallScaffold_");
         AssertContains(generatedText, ".AddDefault(new global::Medicine.UnmanagedRef<global::Payload>(payload).Resolve(), value);");
     }
@@ -428,6 +427,14 @@ public partial class CollisionInvokeHost
             return;
 
         throw new InvalidOperationException($"Expected generated source to contain: {expected}");
+    }
+
+    static void AssertDoesNotContain(string source, string unexpected)
+    {
+        if (!source.Contains(unexpected, StringComparison.Ordinal))
+            return;
+
+        throw new InvalidOperationException($"Expected generated source not to contain: {unexpected}");
     }
 
     static void AssertNestedAfter(string source, string container, string expected)
