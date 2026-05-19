@@ -75,6 +75,27 @@ public partial class UnmanagedInvokeTests
         }
     }
 
+    public interface IInterfaceHost
+    {
+        [UnmanagedInvoke]
+        int AddInterface(Payload payload, ref int value);
+
+        [UnmanagedInvoke]
+        int AddDefault(Payload payload, int value)
+            => payload.Value + value + 100;
+    }
+
+    public sealed class InterfaceHost : IInterfaceHost
+    {
+        public int Value;
+
+        public int AddInterface(Payload payload, ref int value)
+        {
+            value += payload.Value;
+            return Value + value;
+        }
+    }
+
     [BurstCompile(CompileSynchronously = true)]
     static int InvokeAbstractFromBurst(nint basePtr, nint derivedPtr, nint payloadPtr)
     {
@@ -98,6 +119,19 @@ public partial class UnmanagedInvokeTests
     {
         var result = StaticHost.MoveUnmanaged(new Vector3(1, 2, 3), new Vector3(4, 5, 6));
         return (int)(result.x + result.y + result.z);
+    }
+
+    [BurstCompile(CompileSynchronously = true)]
+    static int InvokeInterfaceFromBurst(nint hostPtr, nint payloadPtr)
+    {
+        var host = new UnmanagedRef<IInterfaceHost>(hostPtr);
+        var payload = new UnmanagedRef<Payload>(payloadPtr);
+
+        var value = 3;
+        var interfaceResult = host.AddInterfaceUnmanaged(payload, ref value);
+        var defaultResult = host.AddDefaultUnmanaged(payload, 7);
+
+        return interfaceResult + value * 100 + defaultResult * 10000;
     }
 
     [Test]
@@ -201,6 +235,63 @@ public partial class UnmanagedInvokeTests
         var result = InvokeAbstractFromBurst(baseRef.Ptr, derivedRef.Ptr, payloadRef.Ptr);
 
         Assert.That(result, Is.EqualTo(12320828));
+        GC.KeepAlive(host);
+        GC.KeepAlive(payload);
+    }
+
+    [Test]
+    public void UnmanagedInvoke_InterfaceMethod_InvokesFromUnmanagedRef()
+    {
+        var host = new InterfaceHost { Value = 20 };
+        var payload = new Payload { Value = 5 };
+        IInterfaceHost interfaceHost = host;
+        var interfaceRef = new UnmanagedRef<IInterfaceHost>(interfaceHost);
+        var value = 3;
+
+        var result = interfaceRef.AddInterfaceUnmanaged(new(payload), ref value);
+
+        Assert.That(value, Is.EqualTo(8));
+        Assert.That(result, Is.EqualTo(28));
+    }
+
+    [Test]
+    public void UnmanagedInvoke_InterfaceMethod_InvokesFromManagedReceiver()
+    {
+        var host = new InterfaceHost { Value = 10 };
+        var payload = new Payload { Value = 6 };
+        IInterfaceHost interfaceHost = host;
+        var value = 4;
+
+        var result = interfaceHost.AddInterfaceUnmanaged(new(payload), ref value);
+
+        Assert.That(value, Is.EqualTo(10));
+        Assert.That(result, Is.EqualTo(20));
+    }
+
+    [Test]
+    public void UnmanagedInvoke_DefaultInterfaceMethod_InvokesDefaultBody()
+    {
+        var host = new InterfaceHost();
+        var payload = new Payload { Value = 5 };
+        IInterfaceHost interfaceHost = host;
+
+        var result = interfaceHost.AddDefaultUnmanaged(new(payload), 2);
+
+        Assert.That(result, Is.EqualTo(107));
+    }
+
+    [Test]
+    public void UnmanagedInvoke_InterfaceMethod_InvokesFromBurstDirectCall()
+    {
+        var host = new InterfaceHost { Value = 20 };
+        var payload = new Payload { Value = 5 };
+        IInterfaceHost interfaceHost = host;
+        var interfaceRef = new UnmanagedRef<IInterfaceHost>(interfaceHost);
+        UnmanagedRef<Payload> payloadRef = payload;
+
+        var result = InvokeInterfaceFromBurst(interfaceRef.Ptr, payloadRef.Ptr);
+
+        Assert.That(result, Is.EqualTo(1120828));
         GC.KeepAlive(host);
         GC.KeepAlive(payload);
     }

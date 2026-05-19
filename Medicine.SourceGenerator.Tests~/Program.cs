@@ -94,6 +94,7 @@ DiagnosticTest[] cases =
     UnmanagedInvokeSourceGeneratorTest.InstanceCase,
     UnmanagedInvokeSourceGeneratorTest.AbstractInstanceCase,
     UnmanagedInvokeSourceGeneratorTest.StructCase,
+    UnmanagedInvokeSourceGeneratorTest.InterfaceCase,
     UnmanagedInvokeSourceGeneratorTest.InvalidSignatureCase,
     UnmanagedInvokeSourceGeneratorTest.HelperCollisionCase,
     WrapValueEnumerableSourceGeneratorTest.Case,

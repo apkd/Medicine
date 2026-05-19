@@ -17,6 +17,9 @@ static class UnmanagedInvokeSourceGeneratorTest
     public static readonly DiagnosticTest StructCase =
         new("UnmanagedInvoke generator emits struct method helpers", RunStructContract);
 
+    public static readonly DiagnosticTest InterfaceCase =
+        new("UnmanagedInvoke generator emits interface extension helpers", RunInterfaceContract);
+
     public static readonly DiagnosticTest InvalidSignatureCase =
         new("MED038 when UnmanagedInvoke targets unsupported signatures", RunInvalidSignatureContract);
 
@@ -236,6 +239,64 @@ public partial struct InvokeStructHost
         AssertContains(generatedText, ".Invoke((nint)global::Unity.Collections.LowLevel.Unsafe.UnsafeUtility.AddressOf(ref self), value);");
     }
 
+    static void RunInterfaceContract()
+    {
+        var run = RunGenerator(
+            """
+using Medicine;
+
+public sealed class Payload
+{
+    public int Value;
+}
+
+public interface IInvokeInterfaceHost
+{
+    [UnmanagedInvoke]
+    int Add(Payload payload, ref int value);
+
+    [UnmanagedInvoke]
+    int AddDefault(Payload payload, int value)
+        => payload.Value + value;
+}
+
+public sealed class InvokeInterfaceHost : IInvokeInterfaceHost
+{
+    public int Value;
+
+    public int Add(Payload payload, ref int value)
+    {
+        value += payload.Value;
+        return Value + value;
+    }
+}
+"""
+        );
+
+        AssertNoGeneratorException(run);
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED038",
+            because: "interface UnmanagedInvoke methods should be supported"
+        );
+
+        var generatedText = GetGeneratedText(run);
+        AssertContains(generatedText, "namespace Medicine");
+        AssertContains(generatedText, "public static partial class UnmanagedInvokeExtensions");
+        AssertContains(generatedText, "static class AddUnmanagedCallScaffold_");
+        AssertContains(generatedText, "nint self,");
+        AssertContains(generatedText, "var result = new global::Medicine.UnmanagedRef<global::IInvokeInterfaceHost>(self).Resolve()");
+        AssertContains(generatedText, ".Add(new global::Medicine.UnmanagedRef<global::Payload>(payload).Resolve(), ref value);");
+        AssertContains(generatedText, "public static int AddUnmanaged(");
+        AssertContains(generatedText, "this in global::Medicine.UnmanagedRef<global::IInvokeInterfaceHost> ᵐself,");
+        AssertContains(generatedText, ".Invoke(ᵐself.Ptr, payload.Ptr, ref value);");
+        AssertContains(generatedText, "this global::IInvokeInterfaceHost ᵐself,");
+        AssertContains(generatedText, "return AddUnmanaged(new global::Medicine.UnmanagedRef<global::IInvokeInterfaceHost>(ᵐself), payload, ref value);");
+        AssertContains(generatedText, "static class AddDefaultUnmanagedCallScaffold_");
+        AssertContains(generatedText, ".AddDefault(new global::Medicine.UnmanagedRef<global::Payload>(payload).Resolve(), value);");
+    }
+
     static void RunInvalidSignatureContract()
     {
         var run = RunGenerator(
@@ -248,10 +309,13 @@ public partial class InvalidInvokeHost
     public static void Generic<T>(T value) { }
 }
 
-public partial interface IInvalidInvokeInterface
+public interface IInvalidInvokeInterface
 {
     [UnmanagedInvoke]
-    void InterfaceMethod();
+    static void StaticInterfaceMethod() { }
+
+    [UnmanagedInvoke]
+    private void PrivateInterfaceMethod() { }
 }
 
 public partial class LocalFunctionInvokeHost
@@ -281,6 +345,18 @@ public partial class LocalFunctionInvokeHost
             diagnostics: run.Diagnostics.ToArray(),
             id: "MED038",
             expectedMessage: "[UnmanagedInvoke] cannot be used on local functions."
+        );
+
+        AssertContainsDiagnosticMessage(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED038",
+            expectedMessage: "[UnmanagedInvoke] does not support static interface methods."
+        );
+
+        AssertContainsDiagnosticMessage(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED038",
+            expectedMessage: "[UnmanagedInvoke] only supports public interface methods."
         );
     }
 

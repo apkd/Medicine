@@ -100,8 +100,10 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         public string HelperName;
         public string AccessMemberName;
         public string ScaffoldName;
+        public string InterfaceExtensionAccessibility;
         public bool IsStatic;
         public bool IsContainingTypeStruct;
+        public bool IsContainingTypeInterface;
     }
 
     record struct InheritedForwarderInput : ISourceGeneratorPassData
@@ -214,8 +216,12 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             HelperName = $"{method.Name}Unmanaged",
             AccessMemberName = method.Name,
             ScaffoldName = $"{method.Name}UnmanagedCallScaffold_{GetStableSignatureHash(method):X16}",
+            InterfaceExtensionAccessibility = containingType is null
+                ? "public"
+                : GetGeneratedTopLevelAccessibility(containingType),
             IsStatic = method.IsStatic,
             IsContainingTypeStruct = containingType?.TypeKind is TypeKind.Struct,
+            IsContainingTypeInterface = containingType?.TypeKind is TypeKind.Interface,
         };
 
         void AddInvalid(string message, Location? location = null)
@@ -227,8 +233,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                 )
             );
 
-        if (containingType?.TypeKind is not (TypeKind.Class or TypeKind.Struct))
-            AddInvalid("[UnmanagedInvoke] can only be used on methods declared in classes or structs.");
+        if (containingType?.TypeKind is not (TypeKind.Class or TypeKind.Struct or TypeKind.Interface))
+            AddInvalid("[UnmanagedInvoke] can only be used on methods declared in classes, structs, or interfaces.");
 
         if (method.MethodKind is not MethodKind.Ordinary)
             AddInvalid("[UnmanagedInvoke] can only be used on ordinary methods.");
@@ -237,7 +243,16 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             AddInvalid("[UnmanagedInvoke] does not support generic methods or methods declared in generic types.");
 
         if (method.ContainingType?.TypeKind is TypeKind.Interface)
-            AddInvalid("[UnmanagedInvoke] does not support interface methods.");
+        {
+            if (method.IsStatic)
+                AddInvalid("[UnmanagedInvoke] does not support static interface methods.");
+
+            if (method.DeclaredAccessibility is not Accessibility.Public)
+                AddInvalid("[UnmanagedInvoke] only supports public interface methods.");
+
+            if (!context.SemanticModel.IsAccessible(position: 0, method.ContainingType))
+                AddInvalid("[UnmanagedInvoke] interface methods must be declared on an interface that is accessible from generated top-level code.");
+        }
 
         if (method.IsExtern)
             AddInvalid("[UnmanagedInvoke] does not support extern methods.");
@@ -261,7 +276,8 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             containingType.IsUnmanagedType is false)
             AddInvalid("Instance [UnmanagedInvoke] methods declared in structs require an unmanaged containing struct.");
 
-        if (TryGetFirstNonPartialContainingType(methodDecl, out var nonPartialType))
+        if (containingType?.TypeKind is not TypeKind.Interface &&
+            TryGetFirstNonPartialContainingType(methodDecl, out var nonPartialType))
             AddInvalid(
                 $"Containing type '{nonPartialType.Identifier.ValueText}' must be partial because it uses [UnmanagedInvoke].",
                 GetTypeDeclarationHeaderLocation(nonPartialType)
@@ -501,6 +517,12 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
 
         src.Line.Write(Alias.UsingInline);
         src.Linebreak();
+
+        if (input.IsContainingTypeInterface)
+        {
+            EmitInterfaceHelpers(src, input);
+            return;
+        }
 
         foreach (var declaration in input.ContainingTypeDeclaration.AsArray())
         {
@@ -765,6 +787,62 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
         }
     }
 
+    static void EmitInterfaceHelpers(SourceWriter src, GeneratorInput input)
+    {
+        src.Line.Write("namespace Medicine");
+        using (src.Braces)
+        {
+            EmitScaffold(src, input);
+            src.Linebreak();
+
+            src.Line.Write("public static partial class UnmanagedInvokeExtensions");
+            using (src.Braces)
+            {
+                EmitUnmanagedRefExtension();
+                src.Linebreak();
+                EmitManagedInterfaceExtension();
+            }
+        }
+
+        void EmitUnmanagedRefExtension()
+        {
+            src.Line.Write(Alias.Inline);
+            src.Line.Write($"{input.InterfaceExtensionAccessibility} static {input.ReturnType.ProjectedTypeFQN} {input.HelperName}(");
+            using (src.Indent)
+            {
+                src.Line.Write($"this in global::Medicine.UnmanagedRef<{input.ContainingTypeFQN}> {m}self{(input.Parameters.Length > 0 ? "," : "")}");
+                EmitHelperParameters(src, input);
+            }
+
+            src.Line.Write(")");
+            using (src.Braces)
+                EmitHelperInvokeBody(src, input, selfExpression: $"{m}self.Ptr");
+        }
+
+        void EmitManagedInterfaceExtension()
+        {
+            src.Line.Write(Alias.Inline);
+            src.Line.Write($"{input.InterfaceExtensionAccessibility} static {input.ReturnType.ProjectedTypeFQN} {input.HelperName}(");
+            using (src.Indent)
+            {
+                src.Line.Write($"this {input.ContainingTypeFQN} {m}self{(input.Parameters.Length > 0 ? "," : "")}");
+                EmitHelperParameters(src, input);
+            }
+
+            src.Line.Write(")");
+            using (src.Braces)
+            {
+                string arguments = BuildManagedInterfaceForwardArguments(input);
+                string call = $"{input.HelperName}({arguments})";
+
+                if (input.ReturnType.IsVoid)
+                    src.Line.Write($"{call};");
+                else
+                    src.Line.Write($"return {call};");
+            }
+        }
+    }
+
     static void EmitHelperParameters(SourceWriter src, GeneratorInput input)
     {
         var parameters = input.Parameters.AsArray();
@@ -790,6 +868,15 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
             ", ",
             parameters.AsArray().Select(static x => $"{GetArgumentPrefix(x.RefKind)}{x.Name}")
         );
+
+    static string BuildManagedInterfaceForwardArguments(GeneratorInput input)
+    {
+        string self = $"new global::Medicine.UnmanagedRef<{input.ContainingTypeFQN}>({m}self)";
+        string parameters = BuildForwarderArguments(input.Parameters);
+        return parameters.Length is 0
+            ? self
+            : $"{self}, {parameters}";
+    }
 
     static void EmitHelperInvokeBody(SourceWriter src, GeneratorInput input, string? selfExpression)
     {
@@ -1150,6 +1237,15 @@ public sealed class UnmanagedInvokeSourceGenerator : IIncrementalGenerator
                 return true;
 
         return false;
+    }
+
+    static string GetGeneratedTopLevelAccessibility(INamedTypeSymbol type)
+    {
+        for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
+            if (current.DeclaredAccessibility is not Accessibility.Public)
+                return "internal";
+
+        return "public";
     }
 
     static bool TryGetFirstNonPartialContainingType(MethodDeclarationSyntax methodDecl, out TypeDeclarationSyntax typeDeclaration)
