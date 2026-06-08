@@ -162,6 +162,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
     readonly record struct TrackApiSurfaceInput(
         string TypeFQN,
         string TypeDisplayName,
+        TypeFlags Flags,
         TrackAttributeSettings AttributeSettings,
         string NewModifier,
         EquatableArray<string> UnmanagedDataFQNs,
@@ -194,6 +195,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         IsValueType = 1 << 9,
         IsInterface = 1 << 10,
         IsAbstract = 1 << 11,
+        IsExecuteAlways = 1 << 12,
     }
 
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
@@ -322,12 +324,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
         Environment = input.Right.Environment,
         Context = input.Left.Context,
         AttributeSettingsByType = input.Right.AttributeSettingsByType.Value,
-        Checksum64ForCache = input.Left.Context.TargetNode switch
-        {
-            TypeDeclarationSyntax { AttributeLists.Count: > 0 } typeDeclaration
-                => typeDeclaration.GetAttributeListChecksum(ct),
-            _ => input.Left.Context.TargetNode.GetNodeChecksum(ct),
-        },
+        Checksum64ForCache = input.Left.Context.TargetSymbol.GetDeclarationHierarchyChecksum(ct),
     };
 
     static SingletonCacheInput TransformTrackForCache(
@@ -707,8 +704,18 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                     | (classSymbol.InheritsFrom(knownSymbols.UnityObject) ? IsUnityEngineObject : 0)
                     | (classSymbol.InheritsFrom(knownSymbols.UnityComponent) ? IsComponent : 0)
                     | (classSymbol.InheritsFrom(knownSymbols.UnityMonoBehaviour) ? IsMonoBehaviour : 0)
-                    | (classSymbol.InheritsFrom(knownSymbols.UnityScriptableObject) ? IsScriptableObject : 0),
+                    | (classSymbol.InheritsFrom(knownSymbols.UnityScriptableObject) ? IsScriptableObject : 0)
+                    | (isMonoBehaviour && HasExecuteAlwaysAttribute(classSymbol, knownSymbols) ? IsExecuteAlways : 0),
         };
+    }
+
+    static bool HasExecuteAlwaysAttribute(INamedTypeSymbol classSymbol, KnownSymbols knownSymbols)
+    {
+        for (INamedTypeSymbol? type = classSymbol; type is not null; type = type.BaseType)
+            if (type.HasAttribute(knownSymbols.UnityExecuteAlways))
+                return true;
+
+        return false;
     }
 
     static InterfaceGeneratorInput TransformInterfaceSyntaxContext(
@@ -906,6 +913,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 input: new(
                     TypeFQN: input.TypeFQN ?? "",
                     TypeDisplayName: typeDisplayName,
+                    Flags: input.Flags,
                     AttributeSettings: input.AttributeSettings,
                     NewModifier: "",
                     UnmanagedDataFQNs: input.UnmanagedDataFQNs,
@@ -1338,6 +1346,7 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 src, new(
                     TypeFQN: input.TypeFQN ?? "",
                     TypeDisplayName: input.TypeDisplayName ?? input.TypeFQN ?? "",
+                    Flags: input.Flags,
                     AttributeSettings: input.AttributeSettings,
                     NewModifier: @new,
                     UnmanagedDataFQNs: input.UnmanagedDataFQNs,
@@ -1540,6 +1549,9 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
                 if (input.IsAutoInstantiate)
                     src.Line.Write($" | {m}Utility.TypeFlags.IsAutoInstantiate");
 
+                if (input.Flags.Has(IsExecuteAlways))
+                    src.Line.Write($" | {m}Utility.TypeFlags.IsExecuteAlways");
+
                 src.Write(";");
             }
         }
@@ -1662,16 +1674,18 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
 
     static void EmitTrackInstancesProperty(SourceWriter src, in TrackApiSurfaceInput input)
     {
+        var flags = input.Flags;
+        var typeDisplayName = input.TypeDisplayName;
+        bool manual = input.AttributeSettings.Manual;
+
         src.Doc?.Write($"/// <summary>");
-        src.Doc?.Write($"/// Allows enumeration of all enabled instances of <see cref=\"{input.TypeDisplayName}\"/>.");
+        src.Doc?.Write($"/// Allows enumeration of all enabled instances of <see cref=\"{typeDisplayName}\"/>.");
         src.Doc?.Write($"/// </summary>");
         src.Doc?.Write($"/// <remarks>");
         src.Doc?.Write($"/// <list type=\"bullet\">");
-        src.Doc?.Write($"/// <item> MonoBehaviours and ScriptableObjects marked with the <see cref=\"TrackAttribute\"/> will automatically register/unregister themselves");
-        src.Doc?.Write($"/// in the active instance list in OnEnable/OnDisable. </item>");
+        WriteRegistrationDoc();
         src.Doc?.Write($"/// <item> When there are no active instances, the returned enumerable is empty. </item>");
-        src.Doc?.Write($"/// <item> In edit mode, to provide better compatibility with editor tooling, <see cref=\"Object.FindObjectsByType(System.Type)\"/>");
-        src.Doc?.Write($"/// is used internally to find object instances (cached for one editor update). </item>");
+        WriteEditModeDoc();
         src.Doc?.Write($"/// <item> You can use <c>foreach</c> to iterate over the instances. </item>");
         src.Doc?.Write($"/// <item> If you're enabling/disabling instances while enumerating, you need to use <c>{input.TypeDisplayName}.Instances.WithCopy</c>. </item>");
         src.Doc?.Write($"/// <item> The returned struct is compatible with <a href=\"https://github.com/Cysharp/ZLinq\">ZLINQ</a>. </item>");
@@ -1683,6 +1697,63 @@ public sealed class TrackSourceGenerator : IIncrementalGenerator
             src.Line.Write($"{Alias.Inline} get => default;");
 
         src.Linebreak();
+
+        void WriteRegistrationDoc()
+        {
+            if (manual)
+            {
+                if (flags.Has(IsInterface))
+                {
+                    src.Doc?.Write($"/// <item> Tracked classes implementing <see cref=\"{typeDisplayName}\"/> update this interface's active instance list");
+                    src.Doc?.Write($"/// when their generated <c>RegisterInstance()</c>/<c>UnregisterInstance()</c> methods are called. </item>");
+                }
+                else
+                {
+                    src.Doc?.Write($"/// <item> The generated <c>RegisterInstance()</c>/<c>UnregisterInstance()</c> methods update the active instance list. </item>");
+                }
+
+                return;
+            }
+
+            if (flags.Has(IsInterface))
+            {
+                src.Doc?.Write($"/// <item> Tracked classes implementing <see cref=\"{typeDisplayName}\"/> register/unregister themselves");
+                src.Doc?.Write($"/// in this interface's active instance list in OnEnable/OnDisable. </item>");
+            }
+            else if (flags.Has(IsScriptableObject))
+            {
+                src.Doc?.Write($"/// <item> ScriptableObjects marked with the <see cref=\"TrackAttribute\"/> register/unregister themselves");
+                src.Doc?.Write($"/// in the active instance list in OnEnable/OnDisable. </item>");
+            }
+            else
+            {
+                src.Doc?.Write($"/// <item> MonoBehaviours marked with the <see cref=\"TrackAttribute\"/> register/unregister themselves");
+                src.Doc?.Write($"/// in the active instance list in OnEnable/OnDisable. </item>");
+            }
+        }
+
+        void WriteEditModeDoc()
+        {
+            if (flags.Has(IsInterface))
+            {
+                src.Doc?.Write($"/// <item> In edit mode, this tracked interface uses a cached <see cref=\"global::UnityEngine.Object.FindObjectsByType(System.Type)\"/> fallback. </item>");
+            }
+            else if (flags.Has(IsExecuteAlways))
+            {
+                if (manual)
+                    src.Doc?.Write($"/// <item> In edit mode, this [<see cref=\"global::UnityEngine.ExecuteAlways\"/>] MonoBehaviour uses the registered instance list updated by manual registration calls. </item>");
+                else
+                    src.Doc?.Write($"/// <item> In edit mode, this [<see cref=\"global::UnityEngine.ExecuteAlways\"/>] MonoBehaviour uses regular OnEnable/OnDisable tracking. </item>");
+            }
+            else if (flags.Has(IsScriptableObject))
+            {
+                src.Doc?.Write($"/// <item> In edit mode, this ScriptableObject uses a cached <see cref=\"global::UnityEngine.Resources.FindObjectsOfTypeAll(System.Type)\"/> fallback. </item>");
+            }
+            else
+            {
+                src.Doc?.Write($"/// <item> In edit mode, this MonoBehaviour uses a cached <see cref=\"global::UnityEngine.Object.FindObjectsByType(System.Type)\"/> fallback. </item>");
+            }
+        }
     }
 
     static void EmitTrackTransformAccessArray(SourceWriter src, in TrackApiSurfaceInput input)

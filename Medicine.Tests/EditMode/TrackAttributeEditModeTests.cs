@@ -1,4 +1,5 @@
 using Medicine;
+using Medicine.Internal;
 using NUnit.Framework;
 using UnityEngine;
 using static System.Reflection.BindingFlags;
@@ -11,6 +12,9 @@ public sealed partial class TrackAttributeEditModeTests
 
     [Track(cacheEnabledState: true)]
     sealed partial class MBTrackCacheEnabledState : MonoBehaviour { }
+
+    [Track, ExecuteAlways]
+    sealed partial class MBTrackExecuteAlwaysFastPath : MonoBehaviour { }
 
     [Test]
     public void Track_CacheEnabledState_EmitsEnabledProperty()
@@ -41,5 +45,28 @@ public sealed partial class TrackAttributeEditModeTests
 
         component.enabled = false;
         Assert.That(((Behaviour)component).enabled, Is.False);
+    }
+
+    [Test]
+    public void Track_ExecuteAlways_UsesRegisteredInstancesInEditMode()
+    {
+        var obj = new GameObject(nameof(MBTrackExecuteAlwaysFastPath), typeof(MBTrackExecuteAlwaysFastPath));
+        var component = obj.GetComponent<MBTrackExecuteAlwaysFastPath>();
+
+        try
+        {
+            Assert.That(Utility.TypeInfo<MBTrackExecuteAlwaysFastPath>.IsExecuteAlways, Is.True);
+            Assert.That(MBTrackExecuteAlwaysFastPath.Instances, Has.Count.EqualTo(1));
+
+            Storage.Instances<MBTrackExecuteAlwaysFastPath>.List.Clear();
+
+            Assert.That(MBTrackExecuteAlwaysFastPath.Instances, Has.Count.EqualTo(0));
+
+            Storage.Instances<MBTrackExecuteAlwaysFastPath>.Register(component);
+        }
+        finally
+        {
+            Object.DestroyImmediate(obj);
+        }
     }
 }

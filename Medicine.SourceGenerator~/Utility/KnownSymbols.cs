@@ -7,6 +7,7 @@ public readonly record struct KnownSymbols
     public INamedTypeSymbol UnityComponent { get; }
     public INamedTypeSymbol UnityMonoBehaviour { get; }
     public INamedTypeSymbol UnityScriptableObject { get; }
+    public INamedTypeSymbol UnityExecuteAlways { get; }
     public INamedTypeSymbol MedicineFind { get; }
     public INamedTypeSymbol InjectAttribute { get; }
     public INamedTypeSymbol SingletonAttribute { get; }
@@ -50,6 +51,9 @@ public readonly record struct KnownSymbols
 
         UnityScriptableObject
             = Get("UnityEngine.ScriptableObject");
+
+        UnityExecuteAlways
+            = Get(Constants.ExecuteAlwaysAttributeMetadataName);
 
         MedicineFind
             = Get("Medicine.Find");

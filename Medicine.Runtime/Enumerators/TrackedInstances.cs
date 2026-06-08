@@ -30,6 +30,20 @@ namespace Medicine
     public readonly struct TrackedInstances<T> : ILinqFallbackEnumerable<TrackedInstances<T>.Enumerator, T>
         where T : class
     {
+#if UNITY_EDITOR
+        [MethodImpl(AggressiveInlining)]
+        static void RefreshEditModeInstances()
+        {
+            if (!Utility.EditMode)
+                return;
+
+            if (Utility.TypeInfo<T>.IsExecuteAlways)
+                return;
+
+            Storage.Instances<T>.EditMode.Refresh();
+        }
+#endif
+
         /// <summary>
         /// Returns the number of instances currently being tracked.
         /// </summary>
@@ -39,8 +53,7 @@ namespace Medicine
             get
             {
 #if UNITY_EDITOR
-                if (Utility.EditMode)
-                    Storage.Instances<T>.EditMode.Refresh();
+                RefreshEditModeInstances();
 #endif
 
                 return Storage.Instances<T>.List.Count;
@@ -52,8 +65,7 @@ namespace Medicine
         public Enumerator GetEnumerator()
         {
 #if UNITY_EDITOR
-            if (Utility.EditMode)
-                Storage.Instances<T>.EditMode.Refresh();
+            RefreshEditModeInstances();
 #endif
 
             return new(Storage.Instances<T>.List);
@@ -86,8 +98,7 @@ namespace Medicine
         public ValueEnumerable<FromList<T>, T> AsValueEnumerable()
         {
 #if UNITY_EDITOR
-            if (Utility.EditMode)
-                Storage.Instances<T>.EditMode.Refresh();
+            RefreshEditModeInstances();
 #endif
             return new(new(Storage.Instances<T>.List));
         }
@@ -268,8 +279,7 @@ namespace Medicine
             public PooledListEnumerator<T> GetEnumerator()
             {
 #if UNITY_EDITOR
-                if (Utility.EditMode)
-                    Storage.Instances<T>.EditMode.Refresh();
+                RefreshEditModeInstances();
 #endif
 
                 var list = PooledList.Get<T>();

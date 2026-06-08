@@ -101,6 +101,9 @@ static class Constants
 
     public const string MedicineFindClassFQN = "global::Medicine.Find";
 
+    public const string ExecuteAlwaysAttributeMetadataName = "UnityEngine.ExecuteAlways";
+    public const string ExecuteAlwaysAttributeFQN = $"global::{ExecuteAlwaysAttributeMetadataName}";
+
     public const string InstanceIdMigrationMessage
         = "InstanceID APIs are obsolete on Unity >=6.4. Use EntityId APIs instead.";
 

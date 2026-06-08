@@ -71,8 +71,8 @@ namespace Medicine
         /// <item> MonoBehaviours and ScriptableObjects marked with the <see cref="TrackAttribute"/> will automatically register/unregister themselves
         /// in the active instance list in OnEnable/OnDisable. </item>
         /// <item> When there are no active instances, the returned enumerable is empty. </item>
-        /// <item> In edit mode, to provide better compatibility with editor tooling, <see cref="Object.FindObjectsByType(System.Type)"/>
-        /// is used internally to find object instances (cached for one editor update). </item>
+        /// <item> In edit mode, [<see cref="ExecuteAlways"/>] MonoBehaviours use regular OnEnable/OnDisable tracking;
+        /// other editor objects use a cached <see cref="Object.FindObjectsByType(System.Type)"/> fallback. </item>
         /// <item> You can use <c>foreach</c> to iterate over the instances. </item>
         /// <item> If you're enabling/disabling instances while enumerating, use <c>Find.Instances&lt;T&gt;().WithCopy</c>. </item>
         /// <item> The returned struct is compatible with <a href="https://github.com/Cysharp/ZLinq">ZLINQ</a>. </item>

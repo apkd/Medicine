@@ -52,6 +52,7 @@ DiagnosticTest[] cases =
     TrackSourceGeneratorTest.Case,
     TrackSourceGeneratorTest.CacheEnabledStateInheritanceCase,
     TrackSourceGeneratorTest.ImplicitInstanceIndexCase,
+    TrackSourceGeneratorTest.ExecuteAlwaysMetadataCase,
     TrackSourceGeneratorTest.InterfaceInstanceIndexCase,
     TrackSourceGeneratorTest.GenericInheritanceRegistrationCase,
     TrackSourceGeneratorTest.InheritedMemberHidingCase,

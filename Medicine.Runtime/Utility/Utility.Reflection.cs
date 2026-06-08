@@ -26,6 +26,7 @@ namespace Medicine.Internal
             IsMonoBehaviour = 1 << 6,
             IsScriptableObject = 1 << 7,
             IsAutoInstantiate = 1 << 8,
+            IsExecuteAlways = 1 << 9,
         }
 
         /// <summary>
@@ -55,7 +56,7 @@ namespace Medicine.Internal
 #if MEDICINE_DEBUG
                     var a = BakedTypeInfo<T>.Flags;
                     var b = GetFromReflection();
-                    const TypeFlags mask = ~TypeFlags.IsAutoInstantiate;
+                    const TypeFlags mask = ~(TypeFlags.IsAutoInstantiate | TypeFlags.IsExecuteAlways);
                     if ((a & mask) != (b & mask))
                         Debug.LogError($"Cached type info mismatch: {typeof(T).Name}\nCached: {a}\nReflection: {b}");
 #endif
@@ -86,7 +87,14 @@ namespace Medicine.Internal
                     flags |= TypeFlags.IsUnityEngineObject;
 
                     if (typeof(MonoBehaviour).IsAssignableFrom(type))
-                        return flags | TypeFlags.IsComponent | TypeFlags.IsMonoBehaviour;
+                    {
+                        flags |= TypeFlags.IsComponent | TypeFlags.IsMonoBehaviour;
+
+                        if (Attribute.IsDefined(type, typeof(ExecuteAlways), inherit: true))
+                            flags |= TypeFlags.IsExecuteAlways;
+
+                        return flags;
+                    }
 
                     if (typeof(Component).IsAssignableFrom(type))
                         return flags | TypeFlags.IsComponent;
@@ -130,6 +138,9 @@ namespace Medicine.Internal
 
             /// <summary> Returns whether the type is configured to auto-instantiate as a singleton. </summary>
             public static bool IsAutoInstantiate => (Flags & TypeFlags.IsAutoInstantiate) != 0;
+
+            /// <summary> Returns whether the type uses <see cref="ExecuteAlways"/> edit-mode callbacks. </summary>
+            public static bool IsExecuteAlways => (Flags & TypeFlags.IsExecuteAlways) != 0;
         }
 
 #if UNITY_EDITOR

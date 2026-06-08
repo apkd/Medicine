@@ -78,6 +78,9 @@ static class Stubs
 
               public class MonoBehaviour : Behaviour { }
 
+              [AttributeUsage(AttributeTargets.Class, Inherited = true)]
+              public sealed class ExecuteAlways : Attribute { }
+
               [AttributeUsage(AttributeTargets.Field)]
               public sealed class SerializeField : Attribute { }
 

@@ -42,6 +42,9 @@ static class TrackSourceGeneratorTest
     public static readonly DiagnosticTest ExplicitClassUnmanagedAlongTrackedInterfaceCase =
         new("Track generator keeps direct class unmanaged-data implementation even when tracked interface also provides same unmanaged-data type", RunExplicitClassUnmanagedAlongTrackedInterface);
 
+    public static readonly DiagnosticTest ExecuteAlwaysMetadataCase =
+        new("Track generator bakes inherited ExecuteAlways metadata", RunExecuteAlwaysMetadata);
+
     static void Run()
         => SourceGeneratorTester.AssertGeneratesMoreSourcesThanBaseline(
             baselineSource: """
@@ -170,6 +173,123 @@ static class TrackSourceGeneratorTest
         throw new InvalidOperationException(
             "Expected tracked type without IInstanceIndex to still emit InstanceIndex." + Environment.NewLine +
             $"Actual InstanceIndex count: {instanceIndexPropertyCount}."
+        );
+
+        static int CountOccurrences(string source, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while (true)
+            {
+                index = source.IndexOf(value, index, StringComparison.Ordinal);
+                if (index < 0)
+                    return count;
+
+                count++;
+                index += value.Length;
+            }
+        }
+    }
+
+    static void RunExecuteAlwaysMetadata()
+    {
+        var parseOptions = CSharpParseOptions.Default
+            .WithLanguageVersion(LanguageVersion.Preview)
+            .WithPreprocessorSymbols("MEDICINE_EXTENSIONS_LIB", "DEBUG", "UNITY_EDITOR");
+
+        var compilation = RoslynHarness.CreateCompilation(
+            parseOptions,
+            Stubs.Core,
+            """
+            using Medicine;
+            using UnityEngine;
+
+            [Track]
+            partial class PlainTrackedExecuteAlwaysMetadata : MonoBehaviour { }
+
+            [Track, ExecuteAlways]
+            partial class DirectTrackedExecuteAlwaysMetadata : MonoBehaviour { }
+
+            [ExecuteAlways]
+            abstract partial class ExecuteAlwaysMetadataBase : MonoBehaviour { }
+
+            [Track]
+            partial class InheritedTrackedExecuteAlwaysMetadata : ExecuteAlwaysMetadataBase { }
+
+            [Track, ExecuteAlways]
+            partial class ScriptableObjectTrackedExecuteAlwaysMetadata : ScriptableObject { }
+            """
+        );
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new TrackSourceGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions
+        );
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var run = driver.GetRunResult();
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.Diagnostics.ToArray(),
+            id: "MED911",
+            because: "ExecuteAlways metadata generation should not throw"
+        );
+
+        int executeAlwaysFlagCount = 0;
+        bool directTypeFlagged = false;
+        bool inheritedTypeFlagged = false;
+        bool plainTypeFlagged = false;
+        bool scriptableObjectTypeFlagged = false;
+        int monoBehaviourEditModeFallbackDocCount = 0;
+        int executeAlwaysEditModeDocCount = 0;
+        int scriptableObjectEditModeDocCount = 0;
+        foreach (var result in run.Results)
+        foreach (var generatedSource in result.GeneratedSources)
+        {
+            var text = generatedSource.SourceText.ToString();
+            executeAlwaysFlagCount += CountOccurrences(text, "Utility.TypeFlags.IsExecuteAlways");
+            monoBehaviourEditModeFallbackDocCount += CountOccurrences(
+                text,
+                "this MonoBehaviour uses a cached <see cref=\"global::UnityEngine.Object.FindObjectsByType(System.Type)\"/> fallback"
+            );
+            executeAlwaysEditModeDocCount += CountOccurrences(
+                text,
+                "this [<see cref=\"global::UnityEngine.ExecuteAlways\"/>] MonoBehaviour uses regular OnEnable/OnDisable tracking"
+            );
+            scriptableObjectEditModeDocCount += CountOccurrences(
+                text,
+                "this ScriptableObject uses a cached <see cref=\"global::UnityEngine.Resources.FindObjectsOfTypeAll(System.Type)\"/> fallback"
+            );
+
+            if (text.Contains("BakedTypeInfo<global::DirectTrackedExecuteAlwaysMetadata>", StringComparison.Ordinal))
+                directTypeFlagged = text.Contains("Utility.TypeFlags.IsExecuteAlways", StringComparison.Ordinal);
+
+            if (text.Contains("BakedTypeInfo<global::InheritedTrackedExecuteAlwaysMetadata>", StringComparison.Ordinal))
+                inheritedTypeFlagged = text.Contains("Utility.TypeFlags.IsExecuteAlways", StringComparison.Ordinal);
+
+            if (text.Contains("BakedTypeInfo<global::PlainTrackedExecuteAlwaysMetadata>", StringComparison.Ordinal))
+                plainTypeFlagged = text.Contains("Utility.TypeFlags.IsExecuteAlways", StringComparison.Ordinal);
+
+            if (text.Contains("BakedTypeInfo<global::ScriptableObjectTrackedExecuteAlwaysMetadata>", StringComparison.Ordinal))
+                scriptableObjectTypeFlagged = text.Contains("Utility.TypeFlags.IsExecuteAlways", StringComparison.Ordinal);
+        }
+
+        if (
+            executeAlwaysFlagCount is 2 &&
+            directTypeFlagged &&
+            inheritedTypeFlagged &&
+            !plainTypeFlagged &&
+            !scriptableObjectTypeFlagged &&
+            monoBehaviourEditModeFallbackDocCount is 1 &&
+            executeAlwaysEditModeDocCount is 2 &&
+            scriptableObjectEditModeDocCount is 1
+        )
+            return;
+
+        throw new InvalidOperationException(
+            "Expected ExecuteAlways metadata only for direct and inherited ExecuteAlways tracked MonoBehaviour types." + Environment.NewLine +
+            $"Actual flag count: {executeAlwaysFlagCount}, direct: {directTypeFlagged}, inherited: {inheritedTypeFlagged}, plain: {plainTypeFlagged}, scriptable object: {scriptableObjectTypeFlagged}. " +
+            $"Docs: MonoBehaviour fallback: {monoBehaviourEditModeFallbackDocCount}, ExecuteAlways: {executeAlwaysEditModeDocCount}, ScriptableObject: {scriptableObjectEditModeDocCount}."
         );
 
         static int CountOccurrences(string source, string value)
