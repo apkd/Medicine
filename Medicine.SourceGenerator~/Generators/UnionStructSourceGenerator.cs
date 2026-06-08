@@ -910,7 +910,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                     using (src.Braces)
                     {
                         foreach (var initializer in derived.ConstructorMemberInitializers.AsSpan())
-                            src.Line.Write($"{initializer} = default;");
+                            src.Line.Write($"{initializer} = default!;");
 
                         src.Line.Write($"{m}UnsafeUtility.As<{derived.FQN}, {input.BaseTypeFQN}>(ref this).{input.TypeIDFieldName} = TypeID;");
                     }
@@ -1274,7 +1274,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                                         .ToArray();
 
                                     foreach (var (call, _) in outParameters)
-                                        src.Line.Write($"{call} = default;");
+                                        src.Line.Write($"{call} = default!;");
 
                                     if (outParameters.Length > 0)
                                         emitWithAssignHelper = true;
@@ -1497,7 +1497,7 @@ public sealed class UnionStructSourceGenerator : IIncrementalGenerator
                 src.Line.Write($"static unsafe nint WithAssign<T>(this nint ptr, out T? value)");
                 using (src.Braces)
                 {
-                    src.Line.Write("value = default;");
+                    src.Line.Write("value = default!;");
                     src.Line.Write("return ptr;");
                 }
             }

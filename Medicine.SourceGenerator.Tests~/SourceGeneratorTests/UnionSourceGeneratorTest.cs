@@ -19,6 +19,9 @@ static class UnionSourceGeneratorTest
     public static readonly DiagnosticTest SignatureAwareDispatchCase =
         new("Union generator only uses direct dispatch for exact method and property signatures", RunSignatureAwareDispatch);
 
+    public static readonly DiagnosticTest NonNullableReferenceConstructorInitializerCase =
+        new("Union generator suppresses nullable warnings for generated constructor defaults", RunNonNullableReferenceConstructorInitializer);
+
     public static readonly DiagnosticTest WrapperCase =
         new("Union generator emits Wrapper for non-generic headers", RunWrapper);
 
@@ -365,6 +368,68 @@ public partial struct DispatchUnionA : DispatchUnion.Interface
         throw new InvalidOperationException(
             "Expected same-name but incompatible public members to fall back to interface dispatch helpers." + Environment.NewLine +
             $"Actual diagnostics:{Environment.NewLine}{RoslynHarness.FormatDiagnostics(signatureDispatchErrors)}"
+        );
+    }
+
+    static void RunNonNullableReferenceConstructorInitializer()
+    {
+        var compilation = RoslynHarness.CreateCompilation(
+            Stubs.Core,
+            """
+#nullable enable
+using Medicine;
+
+public sealed class Unit
+{
+}
+
+[UnionHeader]
+public partial struct State
+{
+    public interface Interface
+    {
+        int Value { get; }
+    }
+
+    public TypeIDs TypeID;
+}
+
+[Union(1)]
+public partial struct AttackState : State.Interface
+{
+    public State Header;
+    public Unit Unit;
+    public string Name;
+    public string Description { get; set; }
+
+    public int Value => Name.Length + Description.Length;
+}
+"""
+        );
+
+        var run = RoslynHarness.RunGenerators(
+            compilation,
+            [new UnionStructSourceGenerator()],
+            []
+        );
+
+        RoslynHarness.AssertDoesNotContainDiagnostic(
+            diagnostics: run.GeneratorDiagnostics,
+            id: "MED911",
+            because: "generated constructor defaults should not throw in generator"
+        );
+
+        var nullableDefaultWarnings = run.CompilationDiagnostics
+            .Where(x => x.Severity == DiagnosticSeverity.Warning)
+            .Where(x => x.Id is "CS8625")
+            .ToArray();
+
+        if (nullableDefaultWarnings.Length == 0)
+            return;
+
+        throw new InvalidOperationException(
+            "Expected generated parameterless constructors to suppress nullable default warnings." + Environment.NewLine +
+            $"Actual diagnostics:{Environment.NewLine}{RoslynHarness.FormatDiagnostics(nullableDefaultWarnings)}"
         );
     }
 
