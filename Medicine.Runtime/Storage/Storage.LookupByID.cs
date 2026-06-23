@@ -22,19 +22,6 @@ namespace Medicine.Internal
             {
                 [MethodImpl(AggressiveInlining)]
                 internal static void RunOnce() { }
-
-                static StaticInit()
-                {
-#if UNITY_EDITOR
-                    enterPlayModeCleanup += static () =>
-                    {
-                        if (Utility.TypeInfo<T>.IsScriptableObject)
-                            return;
-
-                        Map.Clear();
-                    };
-#endif
-                }
             }
 
             [MethodImpl(NoInlining)]

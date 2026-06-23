@@ -37,13 +37,7 @@ namespace Medicine.Internal
                     Array = List.AsInternalsView().Array;
                     Instances.UntypedAccess.Add(typeof(T), static () => List);
 #if UNITY_EDITOR
-                    enterPlayModeCleanup += static () =>
-                    {
-                        if (Utility.TypeInfo<T>.IsScriptableObject)
-                            return;
-
-                        List.Clear();
-                    };
+                    enterPlayModeCleanup += static () => EditMode.Clear();
 #endif
                 }
             }
@@ -63,13 +57,47 @@ namespace Medicine.Internal
             public static bool TypeIsRegistered
                 => List.Capacity > 0;
 
+            public static List<T> ActiveList
+            {
+                [MethodImpl(AggressiveInlining)]
+                get
+                {
+#if UNITY_EDITOR
+                    if (EditMode.ShouldRefresh)
+                    {
+                        EditMode.Refresh();
+                        if (!Utility.TypeInfo<T>.IsScriptableObject)
+                            return EditMode.List;
+                    }
+#endif
+                    return List;
+                }
+            }
+
+            public static T[]? ActiveArray
+            {
+                [MethodImpl(AggressiveInlining)]
+                get
+                {
+#if UNITY_EDITOR
+                    if (EditMode.ShouldRefresh)
+                    {
+                        EditMode.Refresh();
+                        if (!Utility.TypeInfo<T>.IsScriptableObject)
+                            return EditMode.Array;
+                    }
+#endif
+                    return Array;
+                }
+            }
+
             [MethodImpl(AggressiveInlining)]
             public static Span<T> AsSpan()
-                => Array.AsSpanUnsafe(0, List.Count);
+                => ActiveList.AsSpanUnsafe();
 
             [MethodImpl(AggressiveInlining)]
             public static UnsafeList<UnmanagedRef<T>> AsUnmanaged()
-                => List.AsUnsafeList<T, UnmanagedRef<T>>();
+                => ActiveList.AsUnsafeList<T, UnmanagedRef<T>>();
 
             /// <summary>
             /// Registers the object as one of the active instances of <paramref name="T"/>.
@@ -211,7 +239,16 @@ namespace Medicine.Internal
 #if UNITY_EDITOR
             public static class EditMode
             {
+                public static readonly List<T> List = new(capacity: 0);
+                public static T[]? Array = System.Array.Empty<T>();
+
                 static int editModeVersion = int.MinValue;
+
+                internal static bool ShouldRefresh
+                {
+                    [MethodImpl(AggressiveInlining)]
+                    get => Utility.EditMode && !Utility.TypeInfo<T>.IsExecuteAlways;
+                }
 
                 /// <remarks>
                 /// This method is used to hook into the object constructor to invalidate the active object list.
@@ -226,10 +263,18 @@ namespace Medicine.Internal
                 public static int Invalidate()
                     => editModeVersion = int.MinValue;
 
+                internal static void Clear()
+                {
+                    List.Clear();
+                    Array = List.AsInternalsView().Array;
+                    editModeVersion = int.MinValue;
+                }
+
                 static bool AnyInstanceBecameInvalid()
                 {
-                    var array = Array;
-                    int n = List.Count;
+                    var list = Utility.TypeInfo<T>.IsScriptableObject ? Instances<T>.List : List;
+                    var array = Utility.TypeInfo<T>.IsScriptableObject ? Instances<T>.Array : Array;
+                    int n = list.Count;
 
                     if (array is null)
                         return false;
@@ -263,22 +308,23 @@ namespace Medicine.Internal
 
                     editModeVersion = frameCount;
 
-                    // gathered instances
                     {
-                        List.Clear();
-
                         if (Utility.TypeInfo<T>.IsScriptableObject)
                         {
-                            List.AddRange(Find.ObjectsByTypeAll<T>());
+                            Instances<T>.List.Clear();
+                            Instances<T>.List.AddRange(Find.ObjectsByTypeAll<T>());
+                            Instances<T>.Array = Instances<T>.List.AsInternalsView().Array;
                         }
                         else
                         {
+                            List.Clear();
+
                             foreach (var instance in Find.ObjectsByType<T>())
                                 if (instance is Behaviour { enabled: true })
                                     List.Add(instance);
-                        }
 
-                        Array = List.AsInternalsView().Array;
+                            Array = List.AsInternalsView().Array;
+                        }
                     }
                 }
             }

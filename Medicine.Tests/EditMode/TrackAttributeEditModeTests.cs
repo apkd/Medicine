@@ -3,6 +3,7 @@ using Medicine.Internal;
 using NUnit.Framework;
 using UnityEngine;
 using static System.Reflection.BindingFlags;
+using Object = UnityEngine.Object;
 
 public sealed partial class TrackAttributeEditModeTests
 {
@@ -15,6 +16,15 @@ public sealed partial class TrackAttributeEditModeTests
 
     [Track, ExecuteAlways]
     sealed partial class MBTrackExecuteAlwaysFastPath : MonoBehaviour { }
+
+    [Track]
+    partial interface ITrackMixedExecuteAlwaysInterface { }
+
+    [Track, ExecuteAlways]
+    sealed partial class MBTrackMixedExecuteAlwaysInterface : MonoBehaviour, ITrackMixedExecuteAlwaysInterface { }
+
+    [Track]
+    sealed partial class MBTrackMixedRegularInterface : MonoBehaviour, ITrackMixedExecuteAlwaysInterface { }
 
     [Test]
     public void Track_CacheEnabledState_EmitsEnabledProperty()
@@ -69,4 +79,53 @@ public sealed partial class TrackAttributeEditModeTests
             Object.DestroyImmediate(obj);
         }
     }
+
+    [Test]
+    public void Track_EditModeFallback_DoesNotPopulateCallbackStorage()
+    {
+        var obj = new GameObject(nameof(MBTrackCacheEnabledState), typeof(MBTrackCacheEnabledState));
+
+        try
+        {
+            Assert.That(MBTrackCacheEnabledState.Instances, Has.Count.EqualTo(1));
+            Assert.That(MBTrackCacheEnabledState.Instances.Unsafe.AsList(), Has.Count.EqualTo(1));
+            Assert.That(Storage.Instances<MBTrackCacheEnabledState>.List, Has.Count.EqualTo(0));
+        }
+        finally
+        {
+            Object.DestroyImmediate(obj);
+        }
+    }
+
+    [Test]
+    public void Track_MixedExecuteAlwaysInterface_SplitsEditModeFallbackAndCallbackStorage()
+    {
+        var executeAlwaysObj = new GameObject(
+            nameof(MBTrackMixedExecuteAlwaysInterface),
+            typeof(MBTrackMixedExecuteAlwaysInterface)
+        );
+
+        var regularObj = new GameObject(
+            nameof(MBTrackMixedRegularInterface),
+            typeof(MBTrackMixedRegularInterface)
+        );
+
+        var executeAlways = executeAlwaysObj.GetComponent<MBTrackMixedExecuteAlwaysInterface>();
+
+        try
+        {
+            var instances = Find.Instances<ITrackMixedExecuteAlwaysInterface>();
+
+            Assert.That(instances.Count, Is.EqualTo(2));
+            Assert.That(instances.Unsafe.AsList(), Has.Count.EqualTo(2));
+            Assert.That(Storage.Instances<ITrackMixedExecuteAlwaysInterface>.List, Has.Count.EqualTo(1));
+            Assert.That(Storage.Instances<ITrackMixedExecuteAlwaysInterface>.List[0], Is.EqualTo(executeAlways));
+        }
+        finally
+        {
+            Object.DestroyImmediate(executeAlwaysObj);
+            Object.DestroyImmediate(regularObj);
+        }
+    }
+
 }

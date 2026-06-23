@@ -30,46 +30,19 @@ namespace Medicine
     public readonly struct TrackedInstances<T> : ILinqFallbackEnumerable<TrackedInstances<T>.Enumerator, T>
         where T : class
     {
-#if UNITY_EDITOR
-        [MethodImpl(AggressiveInlining)]
-        static void RefreshEditModeInstances()
-        {
-            if (!Utility.EditMode)
-                return;
-
-            if (Utility.TypeInfo<T>.IsExecuteAlways)
-                return;
-
-            Storage.Instances<T>.EditMode.Refresh();
-        }
-#endif
-
         /// <summary>
         /// Returns the number of instances currently being tracked.
         /// </summary>
         public int Count
         {
             [MethodImpl(AggressiveInlining)]
-            get
-            {
-#if UNITY_EDITOR
-                RefreshEditModeInstances();
-#endif
-
-                return Storage.Instances<T>.List.Count;
-            }
+            get => Storage.Instances<T>.ActiveList.Count;
         }
 
         [EditorBrowsable(Never)]
         [MethodImpl(AggressiveInlining)]
         public Enumerator GetEnumerator()
-        {
-#if UNITY_EDITOR
-            RefreshEditModeInstances();
-#endif
-
-            return new(Storage.Instances<T>.List);
-        }
+            => new(Storage.Instances<T>.ActiveList);
 
         /// <summary>
         /// Gives random access to the tracked instances (by storage index).
@@ -83,9 +56,9 @@ namespace Medicine
             get
             {
 #if DEBUG
-                return Storage.Instances<T>.List[index];
+                return Storage.Instances<T>.ActiveList[index];
 #else
-                return Storage.Instances<T>.Array[index];
+                return Storage.Instances<T>.ActiveArray[index];
 #endif
             }
         }
@@ -96,12 +69,7 @@ namespace Medicine
         /// </summary>
         [MethodImpl(AggressiveInlining)]
         public ValueEnumerable<FromList<T>, T> AsValueEnumerable()
-        {
-#if UNITY_EDITOR
-            RefreshEditModeInstances();
-#endif
-            return new(new(Storage.Instances<T>.List));
-        }
+            => new(new(Storage.Instances<T>.ActiveList));
 #endif
 
         /// <summary>
@@ -114,7 +82,7 @@ namespace Medicine
         public PooledList<T> ToPooledList(out List<T> list)
         {
             var handle = PooledList.Get(out list);
-            list.AddRange(Storage.Instances<T>.List);
+            list.AddRange(Storage.Instances<T>.ActiveList);
             return handle;
         }
 
@@ -138,7 +106,7 @@ namespace Medicine
             destinationListView.Count = count;
             var destinationArray = destinationListView.Array!;
 
-            Storage.Instances<T>.List.CopyTo(
+            Storage.Instances<T>.ActiveList.CopyTo(
                 array: destinationArray,
                 arrayIndex: 0
             );
@@ -177,7 +145,7 @@ namespace Medicine
             /// <remarks><inheritdoc cref="UnsafeAPI"/></remarks>
             [MethodImpl(AggressiveInlining)]
             public List<T> AsList()
-                => Storage.Instances<T>.List;
+                => Storage.Instances<T>.ActiveList;
 
             /// <summary>
             /// Returns a span view over the tracked instance list.
@@ -194,7 +162,7 @@ namespace Medicine
             /// <remarks><inheritdoc cref="UnsafeAPI"/></remarks>
             [MethodImpl(AggressiveInlining)]
             public T[] AsArray()
-                => Storage.Instances<T>.Array;
+                => Storage.Instances<T>.ActiveArray;
 
             /// <summary>
             /// Returns an UnsafeList view over the tracked instance list.
@@ -278,12 +246,8 @@ namespace Medicine
             [MethodImpl(AggressiveInlining)]
             public PooledListEnumerator<T> GetEnumerator()
             {
-#if UNITY_EDITOR
-                RefreshEditModeInstances();
-#endif
-
                 var list = PooledList.Get<T>();
-                list.List.AddRange(Storage.Instances<T>.List);
+                list.List.AddRange(Storage.Instances<T>.ActiveList);
                 return new(list);
             }
 
@@ -326,7 +290,7 @@ namespace Medicine
 
             [MethodImpl(AggressiveInlining)]
             public StrideEnumerator GetEnumerator()
-                => new(Storage.Instances<T>.List, stride);
+                => new(Storage.Instances<T>.ActiveList, stride);
 
 #if MODULE_ZLINQ
             /// <summary>
