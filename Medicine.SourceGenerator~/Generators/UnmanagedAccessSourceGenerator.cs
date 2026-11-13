@@ -382,10 +382,11 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
             if (attribute.ConstructorArguments is [{ Value: ITypeSymbol aliasSymbol }, ..])
             {
+                if (aliasSymbol is not IErrorTypeSymbol)
+                    return new(aliasSymbol.FQN, aliasSymbol, IsUnresolved: false);
+
                 var aliasSyntax = GetAliasTypeSyntax(attribute);
-                return aliasSymbol is IErrorTypeSymbol
-                    ? new(aliasSyntax ?? aliasSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), null, IsUnresolved: true)
-                    : new(aliasSymbol.FQN, aliasSymbol, IsUnresolved: false);
+                return new(aliasSyntax ?? aliasSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), null, IsUnresolved: true);
             }
 
             if (GetAliasTypeSyntax(attribute) is { Length: > 0 } aliasTypeSyntax)
@@ -406,7 +407,9 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
                 if (argument.Expression is TypeOfExpressionSyntax typeOfExpression)
                 {
                     var typeSyntax = typeOfExpression.Type;
-                    return context.SemanticModel.GetSymbolInfo(typeSyntax, ct).Symbol is ITypeSymbol aliasSymbol and not IErrorTypeSymbol
+                    // aliases can be declared in a different file from the consuming type.
+                    var semanticModel = context.SemanticModel.Compilation.GetSemanticModel(typeSyntax.SyntaxTree);
+                    return semanticModel.GetSymbolInfo(typeSyntax, ct).Symbol is ITypeSymbol aliasSymbol and not IErrorTypeSymbol
                         ? aliasSymbol.FQN
                         : typeSyntax.ToString();
                 }
