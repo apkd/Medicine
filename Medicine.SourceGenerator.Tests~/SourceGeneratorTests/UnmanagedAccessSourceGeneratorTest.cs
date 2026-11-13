@@ -779,6 +779,10 @@ public struct AliasPayload
     public nint Target;
     public int Count;
 }
+""",
+            """
+using System.Collections.Generic;
+using Medicine;
 
 [UnmanagedAccess]
 partial class UnmanagedAliasOuter
