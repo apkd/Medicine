@@ -162,6 +162,20 @@ namespace Medicine.Internal
         public static int GetArrayLength<T>(UnmanagedRef<T[]> arrayRef)
             => arrayRef.Ptr is 0 ? 0 : (int)arrayRef.Read<nint>(ManagedLayout.ArrayLengthOffset);
 
+        /// <summary> Returns an UnsafeList view of an array prefix. </summary>
+        /// <remarks>
+        /// Element layouts must match. Do not resize or dispose the borrowed view.
+        /// The caller must retain the array and keep length within its bounds.
+        /// </remarks>
+        [MethodImpl(AggressiveInlining)]
+        public static unsafe UnsafeList<TTo> AsUnsafeList<TFrom, TTo>(
+            this UnmanagedRef<TFrom[]> arrayRef,
+            int length
+        ) where TTo : unmanaged
+            => arrayRef.Ptr is not 0 && length > 0
+                ? new((TTo*)(arrayRef.Ptr + ManagedLayout.ArrayDataOffset), length)
+                : default;
+
         [MethodImpl(AggressiveInlining)]
         public static unsafe NativeArray<TTo> AsNativeArray<TFrom, TTo>(
             this UnmanagedRef<TFrom[]> arrayRef,

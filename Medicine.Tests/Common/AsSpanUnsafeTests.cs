@@ -152,6 +152,41 @@ public class AsSpanUnsafeTests
     sealed class Dummy { }
 
     [Test]
+    public void ArrayRef_AsUnsafeList_PrefixSharesStorage()
+    {
+        var array = new[] { 10, 20, 30 };
+        var view = Utility.AsUnsafeList<int, int>(new UnmanagedRef<int[]>(array), array.Length - 1);
+
+        Assert.That(view.Length, Is.EqualTo(array.Length - 1));
+        view[1] = 42;
+        Assert.That(array[1], Is.EqualTo(42));
+        array[0] = 99;
+        Assert.That(view[0], Is.EqualTo(99));
+        GC.KeepAlive(array);
+    }
+
+    [Test]
+    public void ArrayRef_AsUnsafeList_ReferencesShareStorage()
+    {
+        var array = new[] { new Dummy(), new Dummy() };
+        var view = Utility.AsUnsafeList<Dummy, UnmanagedRef<Dummy>>(new UnmanagedRef<Dummy[]>(array), array.Length);
+
+        Assert.That(view[1].Ptr, Is.EqualTo(new UnmanagedRef<Dummy>(array[1]).Ptr));
+        array[0] = array[1];
+        Assert.That(view[0].Ptr, Is.EqualTo(view[1].Ptr));
+        GC.KeepAlive(array);
+    }
+
+    [Test]
+    public void ArrayRef_AsUnsafeList_EmptyViews()
+    {
+        var array = new[] { 1 };
+        Assert.That(Utility.AsUnsafeList<int, int>(default, 0).Length, Is.Zero);
+        Assert.That(Utility.AsUnsafeList<int, int>(new UnmanagedRef<int[]>(array), 0).Length, Is.Zero);
+        GC.KeepAlive(array);
+    }
+
+    [Test]
     public unsafe void List_AsUnsafeList_SameType_UsesBackingArray()
     {
         var list = new List<int> { 10, 20, 30 };
