@@ -47,11 +47,10 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         public string GenericLayoutStorageTypeName;
         public GeneratorEnvironment GeneratorEnvironment;
         public AttributeSettings AttributeSettings;
-        public Defer<bool>? HasCachedEnableBuilderDeferred;
-        public Defer<bool>? HasIInstanceIndexBuilderDeferred;
+        public bool HasCachedEnable;
         public EquatableArray<FieldInfo> Fields;
         public EquatableArray<string> BaseTypeFQNs;
-        public Defer<string[]>? AccessROForwardingMembersForAccessRWDeferred;
+        public EquatableArray<string> AccessROForwardingMembersForAccessRW;
     }
 
     record struct CastExtensionsInput : ISourceGeneratorPassData
@@ -172,11 +171,14 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataNameEx(
                 fullyQualifiedMetadataName: UnmanagedAccessAttributeMetadataName,
                 predicate: static (node, _) => node is ClassDeclarationSyntax,
-                transform: TransformForCache
+                transform: TransformSyntaxContext
             )
             .Combine(generatorEnvironment)
-            .SelectEx((x, ct) => TransformSyntaxContext(x.Left.Context.Value, x.Right, ct)
-        );
+            .SelectEx(static (x, _) => x.Left with
+            {
+                GeneratorEnvironment = x.Right,
+                UsesEntityId = x.Right.IsUnity64OrNewer,
+            });
 
         context.RegisterSourceOutputEx(
             source: inputProvider,
@@ -193,16 +195,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         );
     }
 
-    static ContextWithCacheGeneratorInput TransformForCache(GeneratorAttributeSyntaxContext context, CancellationToken ct)
-        => new()
-        {
-            Context = context,
-            SourceGeneratorOutputFilename = GetOutputFilename(context),
-            SourceGeneratorLocation = context.TargetNode.GetLocation(),
-            Checksum64ForCache = GetInputChecksum(context, ct),
-        };
-
-    static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, GeneratorEnvironment generatorEnvironment, CancellationToken ct)
+    static GeneratorInput TransformSyntaxContext(GeneratorAttributeSyntaxContext context, CancellationToken ct)
     {
         if (context.TargetNode is not TypeDeclarationSyntax typeDecl)
             return default;
@@ -229,14 +222,12 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         {
             SourceGeneratorOutputFilename = GetOutputFilename(context),
             AttributeSettings = settings,
-            GeneratorEnvironment = generatorEnvironment,
             ContainingTypeDeclaration = Utility.DeconstructTypeDeclaration(typeDecl),
             ClassName = typeSymbol.Name,
             ClassFQN = typeSymbol.FQN,
             IsGenericType = IsGenericOrNestedInGenericType(typeSymbol),
             HasPack1SequentialLayout = HasPack1SequentialLayout(typeSymbol),
             IsUnityObject = typeSymbol.InheritsFrom(knownSymbols.UnityObject),
-            UsesEntityId = generatorEnvironment.IsUnity64OrNewer,
             IsTracked = trackAttribute is not null,
             GenericOpenTypeFQN = GetOpenGenericTypeFQN(typeSymbol),
             GenericRepresentativeByteTypeFQN = GetRepresentativeByteTypeFQN(typeSymbol),
@@ -244,27 +235,13 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             GenericLayoutStorageTypeName = GetGenericLayoutStorageTypeName(typeSymbol),
             SourceGeneratorLocation = new(typeDecl.Identifier.GetLocation()),
             BaseTypeFQNs = typeSymbol.GetBaseTypes().Select(static x => x.FQN).ToArray(),
-            AccessROForwardingMembersForAccessRWDeferred = new(() => CollectAccessROForwardingMembersForAccessRW(context.SemanticModel.Compilation, typeSymbol, ct)),
-            HasCachedEnableBuilderDeferred = new(() =>
-                {
-                    if (trackAttribute is null)
-                        return false;
-
-                    bool hasBaseCachedEnable = typeSymbol
-                        .GetBaseTypes()
-                        .Select(x => x.GetAttribute(knownSymbols.TrackAttribute))
-                        .OfType<AttributeData>()
-                        .Any(x => x.GetAttributeConstructorArguments().Get("cacheEnabledState", false));
-
-                    return trackAttribute
-                               .GetAttributeConstructorArguments()
-                               .Get("cacheEnabledState", false)
-                           && !hasBaseCachedEnable;
-                }
-            ),
-            HasIInstanceIndexBuilderDeferred = new(() =>
-                trackAttribute is not null
-            ),
+            AccessROForwardingMembersForAccessRW = CollectAccessROForwardingMembersForAccessRW(context.SemanticModel.Compilation, typeSymbol, ct),
+            HasCachedEnable = trackAttribute is not null
+                             && trackAttribute.GetAttributeConstructorArguments().Get("cacheEnabledState", false)
+                             && !typeSymbol.GetBaseTypes()
+                                 .Select(x => x.GetAttribute(knownSymbols.TrackAttribute))
+                                 .OfType<AttributeData>()
+                                 .Any(x => x.GetAttributeConstructorArguments().Get("cacheEnabledState", false)),
         };
 
         using (Scratch.RentA<List<FieldInfo>>(out var fields))
@@ -574,28 +551,6 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
             .Select(static x => new CastDiagnostic(x, null))
             .ToArray();
         return result;
-    }
-
-    static ulong GetInputChecksum(GeneratorAttributeSyntaxContext context, CancellationToken ct)
-    {
-        const ulong offsetBasis = 14695981039346656037UL;
-        const ulong prime = 1099511628211UL;
-
-        ulong hash = offsetBasis;
-        bool hasSyntaxReference = false;
-
-        foreach (var syntaxReference in context.TargetSymbol.DeclaringSyntaxReferences
-                     .OrderBy(x => x.SyntaxTree.FilePath, StringComparer.Ordinal)
-                     .ThenBy(x => x.Span.Start))
-        {
-            hasSyntaxReference = true;
-            hash = unchecked((hash ^ syntaxReference.SyntaxTree.GetText(ct).CalculateChecksum64()) * prime);
-            hash = unchecked((hash ^ (ulong)syntaxReference.Span.Start) * prime);
-        }
-
-        return hasSyntaxReference
-            ? hash
-            : (context.TargetNode.Parent ?? context.TargetNode).GetNodeChecksum(ct);
     }
 
     static string[] CollectAccessROForwardingMembersForAccessRW(Compilation compilation, ITypeSymbol typeSymbol, CancellationToken ct)
@@ -1003,8 +958,8 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
         var symbols = input.GeneratorEnvironment.PreprocessorSymbols;
         var fields = input.Fields.AsArray();
 
-        bool hasCachedEnable = input.HasCachedEnableBuilderDeferred?.Value ?? false;
-        bool hasIInstanceIndex = input.HasIInstanceIndexBuilderDeferred?.Value ?? false;
+        bool hasCachedEnable = input.HasCachedEnable;
+        bool hasIInstanceIndex = input.IsTracked;
 
         if ((hasCachedEnable ? 1 : 0) + (hasIInstanceIndex ? 1 : 0) is > 0 and var generatedFieldCount)
         {
@@ -2028,7 +1983,7 @@ public sealed class UnmanagedAccessSourceGenerator : IIncrementalGenerator
 
                     if (!isReadOnly)
                     {
-                        foreach (var member in input.AccessROForwardingMembersForAccessRWDeferred?.Value ?? [])
+                        foreach (var member in input.AccessROForwardingMembersForAccessRW.AsArray())
                         {
                             src.Linebreak();
 
